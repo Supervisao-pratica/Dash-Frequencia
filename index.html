@@ -1706,10 +1706,21 @@
                 "auth/weak-password": "A senha precisa ter pelo menos 6 caracteres.",
                 "auth/invalid-email": "Informe um e-mail válido.",
                 "auth/too-many-requests": "Muitas tentativas. Aguarde alguns minutos.",
-                "auth/network-request-failed": "Não foi possível conectar ao Firebase."
+                "auth/network-request-failed": "Não foi possível conectar ao Firebase.",
+                "auth/operation-not-allowed": "O login por e-mail ainda não foi ativado no Firebase.",
+                "auth/quota-exceeded": "O limite de envio de e-mails foi atingido. Aguarde e tente novamente mais tarde.",
+                "auth/invalid-sender": "O remetente do e-mail não está configurado no Firebase.",
+                "auth/invalid-message-payload": "O modelo do e-mail está inválido no Firebase.",
+                "auth/unauthorized-continue-uri": "O endereço do site não está autorizado no Firebase."
             };
-            return messages[error && error.code] || "Não foi possível concluir o acesso. Verifique os dados e tente novamente.";
+            if (error && error.code) console.error("Firebase Auth:", error.code, error.message || error);
+            return messages[error && error.code] || `Não foi possível concluir o acesso (${error && error.code ? error.code : "erro desconhecido"}).`;
         };
+
+        const getFirebaseEmailActionSettings = () => ({
+            url: "https://supervisao-pratica.github.io/Dash-Frequencia/",
+            handleCodeInApp: false
+        });
 
         const AuthGate = () => {
             const auth = getFirebaseAuth();
@@ -1743,7 +1754,8 @@
                         if (!name.trim()) throw new Error("NAME_REQUIRED");
                         const result = await auth.createUserWithEmailAndPassword(email.trim(), password);
                         await result.user.updateProfile({ displayName: name.trim() });
-                        await result.user.sendEmailVerification();
+                        auth.languageCode = "pt-BR";
+                        await result.user.sendEmailVerification(getFirebaseEmailActionSettings());
                         await firebase.firestore().collection("instructor_profiles").doc(result.user.uid).set({
                             uid: result.user.uid,
                             name: name.trim(),
@@ -1764,7 +1776,7 @@
             const recoverPassword = async () => {
                 setError(""); setMessage("");
                 if (!email.trim()) { setError("Informe seu e-mail para recuperar a senha."); return; }
-                try { await auth.sendPasswordResetEmail(email.trim()); setMessage("Enviamos as instruções para o seu e-mail."); }
+                try { auth.languageCode = "pt-BR"; await auth.sendPasswordResetEmail(email.trim(), getFirebaseEmailActionSettings()); setMessage("Enviamos as instruções para o seu e-mail."); }
                 catch (err) { setError(getAuthMessage(err)); }
             };
 
@@ -1782,7 +1794,7 @@
             };
             const sendVerification = async () => {
                 setError(""); setMessage(""); setBusy(true);
-                try { await user.sendEmailVerification(); setMessage("Enviamos um novo link de verificação para seu e-mail Senac."); }
+                try { auth.languageCode = "pt-BR"; await user.sendEmailVerification(getFirebaseEmailActionSettings()); setMessage("Enviamos um novo link de verificação para seu e-mail Senac."); }
                 catch (err) { setError(getAuthMessage(err)); }
                 finally { setBusy(false); }
             };
