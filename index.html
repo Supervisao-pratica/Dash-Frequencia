@@ -42,7 +42,6 @@
             storageBucket: "dashfrequencia.firebasestorage.app",
             messagingSenderId: "173616886559",
             appId: "1:173616886559:web:544cdc6075421f57f1b62a",
-            registrationInviteCode: "SENAC-ADM-2026",
             allowedEmailDomain: "@pr.senac.br"
         };
     </script>
@@ -1720,7 +1719,6 @@
             const [name, setName] = useState("");
             const [email, setEmail] = useState("");
             const [password, setPassword] = useState("");
-            const [inviteCode, setInviteCode] = useState("");
             const [error, setError] = useState("");
             const [message, setMessage] = useState("");
             const [busy, setBusy] = useState(false);
@@ -1741,9 +1739,7 @@
                 setError(""); setMessage(""); setBusy(true);
                 try {
                     if (mode === "register") {
-                        const expectedCode = String((window.SENAC_FIREBASE_CONFIG || {}).registrationInviteCode || "").trim().toUpperCase();
                         if (!String(email || "").trim().toLowerCase().endsWith(String((window.SENAC_FIREBASE_CONFIG || {}).allowedEmailDomain || "@pr.senac.br").toLowerCase())) throw new Error("EMAIL_DOMAIN_INVALID");
-                        if (!expectedCode || inviteCode.trim().toUpperCase() !== expectedCode) throw new Error("INVITE_INVALID");
                         if (!name.trim()) throw new Error("NAME_REQUIRED");
                         const result = await auth.createUserWithEmailAndPassword(email.trim(), password);
                         await result.user.updateProfile({ displayName: name.trim() });
@@ -1760,7 +1756,6 @@
                     }
                 } catch (err) {
                     if (err.message === "EMAIL_DOMAIN_INVALID") setError("Use um e-mail institucional terminado em @pr.senac.br.");
-                    else if (err.message === "INVITE_INVALID") setError("Código de convite inválido.");
                     else if (err.message === "NAME_REQUIRED") setError("Informe seu nome.");
                     else setError(getAuthMessage(err));
                 } finally { setBusy(false); }
@@ -1819,7 +1814,6 @@
                         {mode === "register" && <div><label className="block text-xs font-bold text-slate-600 mb-1">Nome completo</label><input value={name} onChange={e => setName(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2.5" required /></div>}
                         <div><label className="block text-xs font-bold text-slate-600 mb-1">E-mail</label><input type="email" value={email} onChange={e => setEmail(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2.5" required /></div>
                         <div><label className="block text-xs font-bold text-slate-600 mb-1">Senha</label><input type="password" value={password} onChange={e => setPassword(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2.5" minLength="6" required /></div>
-                        {mode === "register" && <div><label className="block text-xs font-bold text-slate-600 mb-1">Código de convite</label><input value={inviteCode} onChange={e => setInviteCode(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2.5 uppercase" placeholder="Informe o código recebido" required /></div>}
                         {error && <div className="bg-red-50 text-red-700 border border-red-200 rounded-lg p-3 text-sm">{error}</div>}
                         {message && <div className="bg-green-50 text-green-700 border border-green-200 rounded-lg p-3 text-sm">{message}</div>}
                         <button disabled={busy} className="w-full bg-senac-orange hover:bg-orange-600 disabled:opacity-60 text-white font-bold rounded-lg py-3">{busy ? "Processando..." : mode === "login" ? "Entrar" : "Criar meu acesso"}</button>
