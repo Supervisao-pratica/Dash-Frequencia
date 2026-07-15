@@ -42,7 +42,7 @@
             storageBucket: "dashfrequencia.firebasestorage.app",
             messagingSenderId: "173616886559",
             appId: "1:173616886559:web:544cdc6075421f57f1b62a",
-            allowedEmailDomain: "@pr.senac.br"
+            allowedEmailDomains: ["@pr.senac.br", "@docente.pr.senac.br"]
         };
     </script>
 
@@ -496,8 +496,9 @@
                 if (!config || !config.projectId || !window.firebase || !firebase.firestore) return null;
                 if (!firebase.apps.length) firebase.initializeApp(config);
                 const currentUser = firebase.auth ? firebase.auth().currentUser : null;
-                const allowedDomain = String(config.allowedEmailDomain || "@pr.senac.br").toLowerCase();
-                if (!currentUser || !String(currentUser.email || "").toLowerCase().endsWith(allowedDomain)) return null;
+                const allowedDomains = Array.isArray(config.allowedEmailDomains) ? config.allowedEmailDomains : [config.allowedEmailDomain || "@pr.senac.br"];
+                const email = String(currentUser && currentUser.email || "").toLowerCase();
+                if (!currentUser || !allowedDomains.some(domain => email.endsWith(String(domain).toLowerCase()))) return null;
                 return firebase.firestore();
             } catch (error) {
                 console.error("Firebase indisponível; usando armazenamento local", error);
@@ -1717,6 +1718,13 @@
             return messages[error && error.code] || `Não foi possível concluir o acesso (${error && error.code ? error.code : "erro desconhecido"}).`;
         };
 
+        const isAllowedSenacEmail = (value) => {
+            const config = window.SENAC_FIREBASE_CONFIG || {};
+            const domains = Array.isArray(config.allowedEmailDomains) ? config.allowedEmailDomains : [config.allowedEmailDomain || "@pr.senac.br"];
+            const email = String(value || "").trim().toLowerCase();
+            return domains.some(domain => email.endsWith(String(domain).toLowerCase()));
+        };
+
         const AuthGate = () => {
             const auth = getFirebaseAuth();
             const [user, setUser] = useState(null);
@@ -1742,20 +1750,19 @@
                 event.preventDefault();
                 setError(""); setMessage(""); setBusy(true);
                 try {
-                    if (!String(email || "").trim().toLowerCase().endsWith(String((window.SENAC_FIREBASE_CONFIG || {}).allowedEmailDomain || "@pr.senac.br").toLowerCase())) throw new Error("EMAIL_DOMAIN_INVALID");
+                    if (!isAllowedSenacEmail(email)) throw new Error("EMAIL_DOMAIN_INVALID");
                     await auth.signInWithEmailAndPassword(email.trim(), password);
                 } catch (err) {
-                    if (err.message === "EMAIL_DOMAIN_INVALID") setError("Use um e-mail institucional terminado em @pr.senac.br.");
+                    if (err.message === "EMAIL_DOMAIN_INVALID") setError("Use um e-mail terminado em @pr.senac.br ou @docente.pr.senac.br.");
                     else setError(getAuthMessage(err));
                 } finally { setBusy(false); }
             };
 
-            const isSenacEmail = (value) => String(value || "").trim().toLowerCase().endsWith(String((window.SENAC_FIREBASE_CONFIG || {}).allowedEmailDomain || "@pr.senac.br").toLowerCase());
             const logout = async () => { await auth.signOut(); setUser(null); window.SENAC_CURRENT_USER = null; };
 
-            if (user && isSenacEmail(user.email)) return <App />;
+            if (user && isAllowedSenacEmail(user.email)) return <App />;
 
-            if (user && !isSenacEmail(user.email)) return <div className="min-h-screen flex items-center justify-center bg-slate-100 p-4"><div className="bg-white rounded-xl shadow p-8 max-w-md text-center"><h1 className="text-xl font-bold text-red-700">E-mail não autorizado</h1><p className="text-sm text-slate-600 mt-3">Use um e-mail institucional terminado em @pr.senac.br.</p><button onClick={logout} className="mt-5 text-sm text-senac-blue hover:underline">Sair</button></div></div>;
+            if (user && !isAllowedSenacEmail(user.email)) return <div className="min-h-screen flex items-center justify-center bg-slate-100 p-4"><div className="bg-white rounded-xl shadow p-8 max-w-md text-center"><h1 className="text-xl font-bold text-red-700">E-mail não autorizado</h1><p className="text-sm text-slate-600 mt-3">Use um e-mail institucional terminado em @pr.senac.br ou @docente.pr.senac.br.</p><button onClick={logout} className="mt-5 text-sm text-senac-blue hover:underline">Sair</button></div></div>;
 
             return <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4">
                 <div className="w-full max-w-md bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden">
@@ -1766,7 +1773,7 @@
                         <p className="text-sm text-blue-100 mt-1">Acesso do instrutor</p>
                     </div>
                     <form onSubmit={submit} className="p-8 space-y-4">
-                        <div><label className="block text-xs font-bold text-slate-600 mb-1">E-mail institucional</label><input type="email" value={email} onChange={e => setEmail(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2.5" placeholder="nome@pr.senac.br" required /></div>
+                        <div><label className="block text-xs font-bold text-slate-600 mb-1">E-mail institucional</label><input type="email" value={email} onChange={e => setEmail(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2.5" placeholder="nome@pr.senac.br ou nome@docente.pr.senac.br" required /></div>
                         <div><label className="block text-xs font-bold text-slate-600 mb-1">Senha</label><input type="password" value={password} onChange={e => setPassword(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2.5" minLength="6" required /></div>
                         {error && <div className="bg-red-50 text-red-700 border border-red-200 rounded-lg p-3 text-sm">{error}</div>}
                         {message && <div className="bg-green-50 text-green-700 border border-green-200 rounded-lg p-3 text-sm">{message}</div>}
