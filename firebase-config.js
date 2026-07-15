@@ -7,5 +7,5 @@ window.SENAC_FIREBASE_CONFIG = {
     storageBucket: "dashfrequencia.firebasestorage.app",
     messagingSenderId: "173616886559",
     appId: "1:173616886559:web:544cdc6075421f57f1b62a",
-    allowedEmailDomain: "@pr.senac.br"
+    allowedEmailDomains: ["@pr.senac.br", "@docente.pr.senac.br"]
 };
