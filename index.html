@@ -485,7 +485,9 @@
                 const config = window.SENAC_FIREBASE_CONFIG;
                 if (!config || !config.projectId || !window.firebase || !firebase.firestore) return null;
                 if (!firebase.apps.length) firebase.initializeApp(config);
-                if (firebase.auth && !firebase.auth().currentUser) return null;
+                const currentUser = firebase.auth ? firebase.auth().currentUser : null;
+                const allowedDomain = String(config.allowedEmailDomain || "@pr.senac.br").toLowerCase();
+                if (!currentUser || !currentUser.emailVerified || !String(currentUser.email || "").toLowerCase().endsWith(allowedDomain)) return null;
                 return firebase.firestore();
             } catch (error) {
                 console.error("Firebase indisponível; usando armazenamento local", error);
@@ -1723,18 +1725,18 @@
 
             if (!auth) return <App />;
             if (!ready) return <div className="min-h-screen flex items-center justify-center bg-slate-100 text-slate-600">Carregando acesso...</div>;
-            if (user) return <App />;
-
             const submit = async (event) => {
                 event.preventDefault();
                 setError(""); setMessage(""); setBusy(true);
                 try {
                     if (mode === "register") {
                         const expectedCode = String((window.SENAC_FIREBASE_CONFIG || {}).registrationInviteCode || "").trim().toUpperCase();
+                        if (!String(email || "").trim().toLowerCase().endsWith(String((window.SENAC_FIREBASE_CONFIG || {}).allowedEmailDomain || "@pr.senac.br").toLowerCase())) throw new Error("EMAIL_DOMAIN_INVALID");
                         if (!expectedCode || inviteCode.trim().toUpperCase() !== expectedCode) throw new Error("INVITE_INVALID");
                         if (!name.trim()) throw new Error("NAME_REQUIRED");
                         const result = await auth.createUserWithEmailAndPassword(email.trim(), password);
                         await result.user.updateProfile({ displayName: name.trim() });
+                        await result.user.sendEmailVerification();
                         await firebase.firestore().collection("instructor_profiles").doc(result.user.uid).set({
                             uid: result.user.uid,
                             name: name.trim(),
@@ -1746,7 +1748,8 @@
                         await auth.signInWithEmailAndPassword(email.trim(), password);
                     }
                 } catch (err) {
-                    if (err.message === "INVITE_INVALID") setError("Código de convite inválido.");
+                    if (err.message === "EMAIL_DOMAIN_INVALID") setError("Use um e-mail institucional terminado em @pr.senac.br.");
+                    else if (err.message === "INVITE_INVALID") setError("Código de convite inválido.");
                     else if (err.message === "NAME_REQUIRED") setError("Informe seu nome.");
                     else setError(getAuthMessage(err));
                 } finally { setBusy(false); }
@@ -1758,6 +1761,36 @@
                 try { await auth.sendPasswordResetEmail(email.trim()); setMessage("Enviamos as instruções para o seu e-mail."); }
                 catch (err) { setError(getAuthMessage(err)); }
             };
+
+            const isSenacEmail = (value) => String(value || "").trim().toLowerCase().endsWith(String((window.SENAC_FIREBASE_CONFIG || {}).allowedEmailDomain || "@pr.senac.br").toLowerCase());
+            const logout = async () => { await auth.signOut(); setUser(null); window.SENAC_CURRENT_USER = null; };
+            const refreshVerification = async () => {
+                setError(""); setMessage(""); setBusy(true);
+                try {
+                    await auth.currentUser.reload();
+                    const refreshedUser = auth.currentUser;
+                    setUser(refreshedUser); window.SENAC_CURRENT_USER = refreshedUser;
+                    if (!refreshedUser.emailVerified) setMessage("O e-mail ainda não foi confirmado. Abra o link recebido e tente novamente.");
+                } catch (err) { setError(getAuthMessage(err)); }
+                finally { setBusy(false); }
+            };
+            const sendVerification = async () => {
+                setError(""); setMessage(""); setBusy(true);
+                try { await user.sendEmailVerification(); setMessage("Enviamos um novo link de verificação para seu e-mail Senac."); }
+                catch (err) { setError(getAuthMessage(err)); }
+                finally { setBusy(false); }
+            };
+
+            if (user && user.emailVerified && isSenacEmail(user.email)) return <App />;
+
+            if (user && !user.emailVerified) return <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4">
+                <div className="w-full max-w-md bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden">
+                    <div className="bg-senac-blue px-8 py-7 text-white"><img src="https://upload.wikimedia.org/wikipedia/commons/thumb/8/86/Senac_logo.svg/500px-Senac_logo.svg.png" alt="Senac Paraná" className="h-10 w-auto object-contain object-left mb-4 brightness-0 invert" /><h1 className="text-2xl font-bold">Confirme seu e-mail</h1><p className="text-sm text-blue-100 mt-1">Enviamos um link para {user.email}</p></div>
+                    <div className="p-8 space-y-4"><p className="text-sm text-slate-600">Abra o link recebido no seu e-mail institucional para liberar o acesso ao Dashboard.</p>{error && <div className="bg-red-50 text-red-700 border border-red-200 rounded-lg p-3 text-sm">{error}</div>}{message && <div className="bg-green-50 text-green-700 border border-green-200 rounded-lg p-3 text-sm">{message}</div>}<button onClick={refreshVerification} disabled={busy} className="w-full bg-senac-orange hover:bg-orange-600 disabled:opacity-60 text-white font-bold rounded-lg py-3">{busy ? "Verificando..." : "Já confirmei meu e-mail"}</button><button onClick={sendVerification} disabled={busy} className="w-full text-sm text-senac-blue hover:underline">Reenviar link de confirmação</button><button onClick={logout} disabled={busy} className="w-full text-sm text-slate-500 hover:underline">Sair</button></div>
+                </div>
+            </div>;
+
+            if (user && !isSenacEmail(user.email)) return <div className="min-h-screen flex items-center justify-center bg-slate-100 p-4"><div className="bg-white rounded-xl shadow p-8 max-w-md text-center"><h1 className="text-xl font-bold text-red-700">E-mail não autorizado</h1><p className="text-sm text-slate-600 mt-3">Use um e-mail institucional terminado em @pr.senac.br.</p><button onClick={logout} className="mt-5 text-sm text-senac-blue hover:underline">Sair</button></div></div>;
 
             return <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4">
                 <div className="w-full max-w-md bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden">
