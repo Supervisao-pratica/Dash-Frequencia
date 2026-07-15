@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
@@ -485,10 +485,7 @@
                 const config = window.SENAC_FIREBASE_CONFIG;
                 if (!config || !config.projectId || !window.firebase || !firebase.firestore) return null;
                 if (!firebase.apps.length) firebase.initializeApp(config);
-                if (firebase.auth) {
-                    const auth = firebase.auth();
-                    if (!auth.currentUser) await auth.signInAnonymously();
-                }
+                if (firebase.auth && !firebase.auth().currentUser) return null;
                 return firebase.firestore();
             } catch (error) {
                 console.error("Firebase indisponível; usando armazenamento local", error);
@@ -1683,6 +1680,110 @@
             printWindow.document.write(htmlContent); printWindow.document.close();
         };
 
+        const getFirebaseAuth = () => {
+            const config = window.SENAC_FIREBASE_CONFIG;
+            if (!config || !config.projectId || !window.firebase || !firebase.auth) return null;
+            if (!firebase.apps.length) firebase.initializeApp(config);
+            return firebase.auth();
+        };
+
+        const getAuthMessage = (error) => {
+            const messages = {
+                "auth/invalid-credential": "E-mail ou senha incorretos.",
+                "auth/email-already-in-use": "Este e-mail já possui cadastro.",
+                "auth/weak-password": "A senha precisa ter pelo menos 6 caracteres.",
+                "auth/invalid-email": "Informe um e-mail válido.",
+                "auth/too-many-requests": "Muitas tentativas. Aguarde alguns minutos.",
+                "auth/network-request-failed": "Não foi possível conectar ao Firebase."
+            };
+            return messages[error && error.code] || "Não foi possível concluir o acesso. Verifique os dados e tente novamente.";
+        };
+
+        const AuthGate = () => {
+            const auth = getFirebaseAuth();
+            const [user, setUser] = useState(null);
+            const [ready, setReady] = useState(!auth);
+            const [mode, setMode] = useState("login");
+            const [name, setName] = useState("");
+            const [email, setEmail] = useState("");
+            const [password, setPassword] = useState("");
+            const [inviteCode, setInviteCode] = useState("");
+            const [error, setError] = useState("");
+            const [message, setMessage] = useState("");
+            const [busy, setBusy] = useState(false);
+
+            useEffect(() => {
+                if (!auth) return undefined;
+                return auth.onAuthStateChanged(currentUser => {
+                    setUser(currentUser);
+                    window.SENAC_CURRENT_USER = currentUser || null;
+                    setReady(true);
+                });
+            }, [auth]);
+
+            if (!auth) return <App />;
+            if (!ready) return <div className="min-h-screen flex items-center justify-center bg-slate-100 text-slate-600">Carregando acesso...</div>;
+            if (user) return <App />;
+
+            const submit = async (event) => {
+                event.preventDefault();
+                setError(""); setMessage(""); setBusy(true);
+                try {
+                    if (mode === "register") {
+                        const expectedCode = String((window.SENAC_FIREBASE_CONFIG || {}).registrationInviteCode || "").trim().toUpperCase();
+                        if (!expectedCode || inviteCode.trim().toUpperCase() !== expectedCode) throw new Error("INVITE_INVALID");
+                        if (!name.trim()) throw new Error("NAME_REQUIRED");
+                        const result = await auth.createUserWithEmailAndPassword(email.trim(), password);
+                        await result.user.updateProfile({ displayName: name.trim() });
+                        await firebase.firestore().collection("instructor_profiles").doc(result.user.uid).set({
+                            uid: result.user.uid,
+                            name: name.trim(),
+                            email: email.trim().toLowerCase(),
+                            role: "instructor",
+                            createdAt: new Date().toISOString()
+                        });
+                    } else {
+                        await auth.signInWithEmailAndPassword(email.trim(), password);
+                    }
+                } catch (err) {
+                    if (err.message === "INVITE_INVALID") setError("Código de convite inválido.");
+                    else if (err.message === "NAME_REQUIRED") setError("Informe seu nome.");
+                    else setError(getAuthMessage(err));
+                } finally { setBusy(false); }
+            };
+
+            const recoverPassword = async () => {
+                setError(""); setMessage("");
+                if (!email.trim()) { setError("Informe seu e-mail para recuperar a senha."); return; }
+                try { await auth.sendPasswordResetEmail(email.trim()); setMessage("Enviamos as instruções para o seu e-mail."); }
+                catch (err) { setError(getAuthMessage(err)); }
+            };
+
+            return <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4">
+                <div className="w-full max-w-md bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden">
+                    <div className="bg-senac-blue px-8 py-7 text-white">
+                        <div className="text-xs uppercase tracking-widest font-bold text-blue-200">Senac Paraná</div>
+                        <h1 className="text-2xl font-bold mt-2">Gestão de Frequência</h1>
+                        <p className="text-sm text-blue-100 mt-1">Acesso do instrutor</p>
+                    </div>
+                    <form onSubmit={submit} className="p-8 space-y-4">
+                        <div className="flex gap-2 border-b border-slate-200 mb-5">
+                            <button type="button" onClick={() => { setMode("login"); setError(""); }} className={`pb-3 text-sm font-bold flex-1 ${mode === "login" ? "text-senac-blue border-b-2 border-senac-blue" : "text-slate-400"}`}>Entrar</button>
+                            <button type="button" onClick={() => { setMode("register"); setError(""); }} className={`pb-3 text-sm font-bold flex-1 ${mode === "register" ? "text-senac-blue border-b-2 border-senac-blue" : "text-slate-400"}`}>Criar acesso</button>
+                        </div>
+                        {mode === "register" && <div><label className="block text-xs font-bold text-slate-600 mb-1">Nome completo</label><input value={name} onChange={e => setName(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2.5" required /></div>}
+                        <div><label className="block text-xs font-bold text-slate-600 mb-1">E-mail</label><input type="email" value={email} onChange={e => setEmail(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2.5" required /></div>
+                        <div><label className="block text-xs font-bold text-slate-600 mb-1">Senha</label><input type="password" value={password} onChange={e => setPassword(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2.5" minLength="6" required /></div>
+                        {mode === "register" && <div><label className="block text-xs font-bold text-slate-600 mb-1">Código de convite</label><input value={inviteCode} onChange={e => setInviteCode(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2.5 uppercase" placeholder="Informe o código recebido" required /></div>}
+                        {error && <div className="bg-red-50 text-red-700 border border-red-200 rounded-lg p-3 text-sm">{error}</div>}
+                        {message && <div className="bg-green-50 text-green-700 border border-green-200 rounded-lg p-3 text-sm">{message}</div>}
+                        <button disabled={busy} className="w-full bg-senac-orange hover:bg-orange-600 disabled:opacity-60 text-white font-bold rounded-lg py-3">{busy ? "Processando..." : mode === "login" ? "Entrar" : "Criar meu acesso"}</button>
+                        {mode === "login" && <button type="button" onClick={recoverPassword} className="w-full text-sm text-senac-blue hover:underline">Esqueci minha senha</button>}
+                    </form>
+                </div>
+            </div>;
+        };
+
         function App() {
             // --- ESTADOS DO SISTEMA ---
             const [data, setData] = useState(null);
@@ -2101,7 +2202,7 @@
         }
 
         const root = ReactDOM.createRoot(document.getElementById('root'));
-        root.render(<App />);
+        root.render(<AuthGate />);
     </script>
 </body>
 </html>
