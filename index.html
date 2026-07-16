@@ -1646,11 +1646,11 @@
                     const headerRow = rawData[sheetHeaderRow];
                     const nextRow1 = rawData[sheetHeaderRow + 1] || [];
                     const criticalCols = [];
+                    const ignoredSheetColumns = new Set();
                     const isUCSheet = sheetName.toUpperCase().includes("UC") || sheetName.toUpperCase().includes("MOD") || sheetName.toUpperCase().includes("MÓD");
                     const isPedagogicalSheet = sheetName === pedSheetName; 
 
                     if(headerRow) {
-                        const ignoredSheetColumns = new Set();
                         const maxCols = Math.max(headerRow.length, nextRow1.length, 150);
                         for(let idx = 0; idx < maxCols; idx++) {
                             const fullHeader = (String(headerRow[idx] || "") + " " + String(nextRow1[idx] || "")).toUpperCase(); 
