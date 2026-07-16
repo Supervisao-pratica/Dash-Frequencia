@@ -1084,6 +1084,44 @@
             return normalized.length > 0 && normalized !== "-" && normalized !== "0";
         };
 
+        const isRedColorValue = (color) => {
+            let clean = String(color || "").replace(/^#/, "").toUpperCase();
+            if (clean.length === 8) clean = clean.substring(2);
+            if (clean.length !== 6) return false;
+            const red = parseInt(clean.substring(0, 2), 16) / 255;
+            const green = parseInt(clean.substring(2, 4), 16) / 255;
+            const blue = parseInt(clean.substring(4, 6), 16) / 255;
+            const max = Math.max(red, green, blue);
+            const min = Math.min(red, green, blue);
+            const delta = max - min;
+            if (delta === 0 || max < 0.35 || delta / max < 0.35) return false;
+            let hue = 0;
+            if (max === red) hue = 60 * (((green - blue) / delta) % 6);
+            else if (max === green) hue = 60 * ((blue - red) / delta + 2);
+            else hue = 60 * ((red - green) / delta + 4);
+            if (hue < 0) hue += 360;
+            return hue <= 15 || hue >= 345;
+        };
+
+        const isRedAttendanceCell = (cell, conditionalRanges = [], cellAddress = "") => {
+            const colors = [
+                cell && cell.s && cell.s.fgColor && cell.s.fgColor.rgb,
+                cell && cell.s && cell.s.bgColor && cell.s.bgColor.rgb,
+                cell && cell.s && cell.s.font && cell.s.font.color && cell.s.font.color.rgb
+            ].filter(Boolean);
+            if (colors.some(isRedColorValue)) return true;
+            if (!cellAddress || !conditionalRanges || conditionalRanges.length === 0 || !window.XLSX) return false;
+            try {
+                const cellPosition = XLSX.utils.decode_cell(cellAddress);
+                return conditionalRanges.some(range => {
+                    const decodedRange = XLSX.utils.decode_range(range.replace(/\$/g, ""));
+                    return cellPosition.r >= decodedRange.s.r && cellPosition.r <= decodedRange.e.r && cellPosition.c >= decodedRange.s.c && cellPosition.c <= decodedRange.e.c;
+                });
+            } catch (error) {
+                return false;
+            }
+        };
+
         const isNonDataAttendanceHeader = (value) => {
             const text = normalizeText(value).replace(/[º°]/g, "").trim();
             return text === "N" || text === "NO" || text === "NUMERO" || text.includes("ORION") || text.includes("COLUNA PARA ORDENAR") || text.includes("HORARIO CURSO");
@@ -1309,7 +1347,7 @@
                     const total = studentRows.length;
                     const fillRate = total > 0 ? filled / total : 0;
 
-                    if (filled === 0 || fillRate < 0.85) {
+                    if (filled < total) {
                         warnings.push({
                             sheet: sheetName,
                             date,
@@ -1327,6 +1365,45 @@
         const formatNAKeyDate = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
         const makeNAKey = (studentName, sheet, date) => `${normalizeName(studentName)}|${sheet}|${formatNAKeyDate(date)}`;
 
+        const getWorkbookFileText = (workbook, path) => {
+            const file = workbook && workbook.files && workbook.files[path];
+            if (!file || !file.content) return "";
+            if (typeof file.content === "string") return file.content;
+            try { return new TextDecoder("utf-8").decode(file.content); } catch (error) { return ""; }
+        };
+
+        const getRedNAConditionalRanges = (workbook) => {
+            const stylesXml = getWorkbookFileText(workbook, "xl/styles.xml");
+            const dxfBlocks = stylesXml.match(/<dxf\b[\s\S]*?<\/dxf>/g) || [];
+            const redDxfIds = new Set();
+            dxfBlocks.forEach((dxf, index) => {
+                const rgbColors = [...dxf.matchAll(/(?:fgColor|bgColor|color)[^>]*\brgb="([^"]+)"/gi)].map(match => match[1]);
+                if (rgbColors.some(isRedColorValue)) redDxfIds.add(String(index));
+            });
+
+            const rangesBySheet = {};
+            (workbook && workbook.SheetNames || []).forEach((sheetName, sheetIndex) => {
+                const worksheetXml = getWorkbookFileText(workbook, `xl/worksheets/sheet${sheetIndex + 1}.xml`);
+                if (!worksheetXml) return;
+                const redRanges = [];
+                const conditionalBlocks = worksheetXml.match(/<conditionalFormatting\b[\s\S]*?<\/conditionalFormatting>/g) || [];
+                conditionalBlocks.forEach(block => {
+                    const sqrefMatch = block.match(/\bsqref="([^"]+)"/i);
+                    if (!sqrefMatch) return;
+                    const rules = block.match(/<cfRule\b[\s\S]*?<\/cfRule>/g) || [];
+                    rules.forEach(rule => {
+                        const dxfMatch = rule.match(/\bdxfId="(\d+)"/i);
+                        const formulaMatch = rule.match(/<formula>\s*([\s\S]*?)\s*<\/formula>/i);
+                        const formula = formulaMatch ? formulaMatch[1].replace(/&quot;/g, '"').replace(/["']/g, "").trim().toUpperCase() : "";
+                        if (!dxfMatch || formula !== "NA" || !redDxfIds.has(dxfMatch[1])) return;
+                        sqrefMatch[1].split(/\s+/).filter(Boolean).forEach(range => redRanges.push(range));
+                    });
+                });
+                rangesBySheet[sheetName] = redRanges;
+            });
+            return rangesBySheet;
+        };
+
         const analyzeNAWarnings = (workbook, students) => {
             const today = new Date();
             today.setHours(0, 0, 0, 0);
@@ -1334,6 +1411,7 @@
             const namesForValidation = activeStudents.length > 0 ? activeStudents : (students || []);
             const knownStudents = new Map(namesForValidation.map(student => [normalizeName(student.name), student.name]));
             const studentEntries = {};
+            const redNAConditionalRanges = getRedNAConditionalRanges(workbook);
             let totalNA = 0;
 
             workbook.SheetNames.forEach(sheetName => {
@@ -1353,6 +1431,8 @@
                     header.dateCols.forEach(({ idx, date }) => {
                         if (date > today || date.getDay() === 0 || date.getDay() === 6) return;
                         if (normalizeText(row[idx]) !== "NA") return;
+                        const cellAddress = XLSX.utils.encode_cell({ r: rowIdx, c: idx });
+                        if (!isRedAttendanceCell(sheet[cellAddress], redNAConditionalRanges[sheetName], cellAddress)) return;
                         const key = makeNAKey(displayName, sheetName, date);
                         if (!studentEntries[normalizedName]) studentEntries[normalizedName] = { name: displayName, entries: [] };
                         studentEntries[normalizedName].entries.push({ key, sheet: sheetName, uc, date: formatShortDate(date), dateValue: formatNAKeyDate(date) });
@@ -1383,7 +1463,7 @@
                 const XLSX = window.XLSX;
                 if (!XLSX) throw new Error("A biblioteca de Excel ainda não carregou.");
                 
-                const workbook = XLSX.read(arrayBuffer, { type: 'array', cellComments: true, sheetStubs: true, cellDates: true, cellNF: true, cellText: true, cellStyles: true });
+                const workbook = XLSX.read(arrayBuffer, { type: 'array', cellComments: true, sheetStubs: true, cellDates: true, cellNF: true, cellText: true, cellStyles: true, bookFiles: true });
                 
                 let tutor1 = "Não Identificado"; let tutor2 = "Não Identificado"; let course = "Curso não identificado"; let turma = "Turma não identificada";
                 const sheetNames = workbook.SheetNames;
@@ -2060,6 +2140,7 @@
             const [dragActive, setDragActive] = useState(false);
             const activityUploadSequence = useRef(0);
             const [naJustifications, setNaJustifications] = useState({});
+            const [naJustificationDrafts, setNaJustificationDrafts] = useState({});
             
             // --- MODAIS ---
             const [showAtaModal, setShowAtaModal] = useState(false);
@@ -2102,13 +2183,21 @@
             useEffect(() => {
                 if (!data || !data.turma) {
                     setNaJustifications({});
+                    setNaJustificationDrafts({});
                     return;
                 }
                 try {
                     const saved = localStorage.getItem(getNAJustificationStorageKey(data.turma));
-                    setNaJustifications(saved ? JSON.parse(saved) : {});
+                    const parsed = saved ? JSON.parse(saved) : {};
+                    const drafts = {};
+                    Object.entries(parsed).forEach(([key, value]) => {
+                        if (value && typeof value.reason === "string") drafts[key] = value.reason;
+                    });
+                    setNaJustifications(parsed);
+                    setNaJustificationDrafts(drafts);
                 } catch (error) {
                     setNaJustifications({});
+                    setNaJustificationDrafts({});
                 }
             }, [data ? data.turma : ""]);
 
@@ -2187,7 +2276,28 @@
                 setNaJustifications(previous => {
                     const next = { ...previous };
                     if (next[entry.key]) delete next[entry.key];
-                    else next[entry.key] = { justifiedAt: new Date().toISOString(), sheet: entry.sheet, date: entry.date };
+                    else next[entry.key] = {
+                        justifiedAt: new Date().toISOString(),
+                        sheet: entry.sheet,
+                        date: entry.date,
+                        reason: String(naJustificationDrafts[entry.key] || "").trim()
+                    };
+                    try { localStorage.setItem(getNAJustificationStorageKey(data.turma), JSON.stringify(next)); } catch (error) {}
+                    return next;
+                });
+            };
+            const saveNAJustificationReason = (entry) => {
+                if (!data || !data.turma || !entry || !entry.key || !naJustifications[entry.key]) return;
+                setNaJustifications(previous => {
+                    if (!previous[entry.key]) return previous;
+                    const next = {
+                        ...previous,
+                        [entry.key]: {
+                            ...previous[entry.key],
+                            reason: String(naJustificationDrafts[entry.key] || "").trim(),
+                            updatedAt: new Date().toISOString()
+                        }
+                    };
                     try { localStorage.setItem(getNAJustificationStorageKey(data.turma), JSON.stringify(next)); } catch (error) {}
                     return next;
                 });
@@ -2432,10 +2542,29 @@
                                                 <p className="text-xs text-gray-600 mb-3">Se o instrutor justificar o registro, ele deixa de contar no alerta. Se a planilha for corrigida, o registro desaparece automaticamente no próximo upload.</p>
                                                 {selectedNAStudentRaw.entries.map(entry => {
                                                     const justified = Boolean(naJustifications[entry.key]);
+                                                    const savedReason = naJustifications[entry.key] && naJustifications[entry.key].reason ? naJustifications[entry.key].reason : "";
+                                                    const reasonValue = naJustificationDrafts[entry.key] !== undefined ? naJustificationDrafts[entry.key] : savedReason;
                                                     return (
-                                                        <div key={entry.key} className={`bg-white border rounded-md px-3 py-2 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 ${justified ? 'border-green-200' : 'border-red-100'}`}>
-                                                            <div className="text-xs"><div className="font-bold text-gray-700">{entry.uc} · {entry.date}</div><div className="text-gray-500">Aba {entry.sheet}</div></div>
-                                                            <button onClick={() => toggleNAJustification(entry)} className={`px-3 py-1.5 rounded-md text-[11px] font-bold border ${justified ? 'bg-green-50 text-green-700 border-green-200' : 'bg-red-50 text-red-700 border-red-200 hover:bg-red-100'}`}>{justified ? 'Reabrir NA' : 'Marcar como justificado'}</button>
+                                                        <div key={entry.key} className={`bg-white border rounded-md px-3 py-2 flex flex-col gap-2 ${justified ? 'border-green-200' : 'border-red-100'}`}>
+                                                            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
+                                                                <div className="text-xs"><div className="font-bold text-gray-700">{entry.uc} · {entry.date}</div><div className="text-gray-500">Aba {entry.sheet}</div></div>
+                                                                {justified && <span className="text-[10px] font-bold uppercase text-green-700">Justificado</span>}
+                                                            </div>
+                                                            <input
+                                                                type="text"
+                                                                maxLength="300"
+                                                                value={reasonValue}
+                                                                onChange={event => setNaJustificationDrafts(previous => ({ ...previous, [entry.key]: event.target.value }))}
+                                                                placeholder="Motivo da justificativa (opcional)"
+                                                                className="w-full rounded-md border border-gray-200 px-2.5 py-1.5 text-xs text-gray-700 outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-200"
+                                                            />
+                                                            <div className="flex flex-wrap items-center justify-between gap-2">
+                                                                <span className="text-[10px] text-gray-500">O motivo não é obrigatório.</span>
+                                                                <div className="flex items-center gap-2">
+                                                                    {justified && <button onClick={() => saveNAJustificationReason(entry)} className="px-2.5 py-1.5 rounded-md text-[11px] font-bold border bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100">Salvar motivo</button>}
+                                                                    <button onClick={() => toggleNAJustification(entry)} className={`px-3 py-1.5 rounded-md text-[11px] font-bold border ${justified ? 'bg-green-50 text-green-700 border-green-200' : 'bg-red-50 text-red-700 border-red-200 hover:bg-red-100'}`}>{justified ? 'Reabrir NA' : 'Marcar como justificado'}</button>
+                                                                </div>
+                                                            </div>
                                                         </div>
                                                     );
                                                 })}
