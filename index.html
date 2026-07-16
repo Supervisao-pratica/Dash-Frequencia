@@ -1128,6 +1128,142 @@
             return `Foram encontradas possíveis pendências de chamada:\n\n${visible.join("\n")}${hidden > 0 ? `\n... e mais ${hidden} aba(s).` : ""}`;
         };
 
+        const getActivityCellStatus = (value) => {
+            const text = normalizeText(value);
+            if (!text) return "blank";
+            if (text === "C" || text === "CONCLUIU" || text.startsWith("C -") || text.startsWith("C (") || text.includes("CONCLUIU A ATIVIDADE")) return "completed";
+            if (text === "NC" || text.includes("NAO CONCLUIU")) return "not_completed";
+            if (text.includes("REQUER") && text.includes("AVALI")) return "requires_evaluation";
+            return null;
+        };
+
+        const formatActivityHeaderValue = (value) => {
+            if (value instanceof Date && !isNaN(value.getTime())) return value.toLocaleDateString("pt-BR");
+            if (typeof value === "number" && value > 20000 && value < 60000 && window.XLSX && XLSX.SSF && XLSX.SSF.parse_date_code) {
+                const parsed = XLSX.SSF.parse_date_code(value);
+                if (parsed && parsed.d && parsed.m && parsed.y) return `${String(parsed.d).padStart(2, "0")}/${String(parsed.m).padStart(2, "0")}/${parsed.y}`;
+            }
+            return String(value || "").trim();
+        };
+
+        const simplifyActivityHeaderLabel = (label) => String(label || "")
+            .replace(/\s*\|\s*\d+\s*$/, "")
+            .replace(/\s*\[\s*TOTAL DE PONTOS:[^\]]*\]/gi, "")
+            .replace(/\s+/g, " ")
+            .trim();
+
+        const findActivityHeader = (rows) => {
+            for (let rowIdx = 0; rowIdx < Math.min(rows.length, 80); rowIdx++) {
+                const row = rows[rowIdx] || [];
+                const nameCols = [];
+                let surnameCol = -1;
+                row.forEach((cell, colIdx) => {
+                    const text = normalizeText(cell);
+                    if (text === "SOBRENOME" || text === "ULTIMO SOBRENOME") surnameCol = colIdx;
+                    if (text === "NOME" || text === "ALUNO" || text === "APRENDIZ" || text.includes("NOME COMPLETO") || text.includes("NOME DO ALUNO") || text.includes("NOME DO APRENDIZ")) nameCols.push(colIdx);
+                });
+                if (nameCols.length > 0) {
+                    const allNameCols = [...new Set([nameCols[0], surnameCol].filter(colIdx => colIdx >= 0))];
+                    return { rowIdx, nameCol: nameCols[0], nameCols: allNameCols, surnameCol };
+                }
+            }
+            return null;
+        };
+
+        const buildActivityHeaderLabel = (rows, header, colIdx) => {
+            const values = [];
+            const start = Math.max(0, header.rowIdx - 4);
+            for (let rowIdx = start; rowIdx <= header.rowIdx; rowIdx++) {
+                const value = formatActivityHeaderValue((rows[rowIdx] || [])[colIdx]);
+                if (value && !values.includes(value)) values.push(value);
+            }
+            return values.join(" | ") || `Atividade ${colIdx + 1}`;
+        };
+
+        const isActivityHeaderLabel = (label) => {
+            const text = normalizeText(label);
+            if (!text || ["NOME", "ALUNO", "APRENDIZ", "MATRICULA", "TURMA", "STATUS", "SITUACAO", "RESULTADO", "OBS", "TOTAL", "MEDIA"].includes(text)) return false;
+            if (/^UC\s*\d+$/.test(text)) return false;
+            if (/^UC\s*\d+\s*(?:-\s*|\s+)?(?:IND\b|TOTAL\b|MEDIA\b|RESULTADO\b|INDICADOR\b)/.test(text)) return false;
+            if (/\[\s*S\d+(?:D\d+)?(?:\s+(?:PORTFOLIO|POSTAGEM))?\s*\]/.test(text)) return true;
+            if (/\b\d{1,2}[\/.-]\d{1,2}(?:[\/.-]\d{2,4})?\b/.test(text)) return true;
+            return ["DATA", "DIA", "SEMANA", "ATIV", "TAREFA", "ENCONTRO", "AULA", "POSTAGEM", "PORTFOLIO", "UC"].some(keyword => text.includes(keyword));
+        };
+
+        const processActivityWorkbook = (arrayBuffer, students, sourceName = "") => {
+            const XLSX = window.XLSX;
+            if (!XLSX) throw new Error("A biblioteca de Excel ainda não carregou.");
+            const workbook = XLSX.read(arrayBuffer, { type: "array", cellDates: true, sheetStubs: true, raw: true });
+            const knownStudents = new Map((students || []).map(student => [normalizeName(student.name), student.name]));
+            const activityStudents = {};
+            const sheets = [];
+            const totals = { completed: 0, not_completed: 0, blank: 0, requires_evaluation: 0, activities: 0 };
+
+            const getStudentSummary = (normalizedName, displayName) => {
+                if (!activityStudents[normalizedName]) activityStudents[normalizedName] = {
+                    name: displayName,
+                    total: 0,
+                    completed: 0,
+                    not_completed: 0,
+                    blank: 0,
+                    requires_evaluation: 0,
+                    entries: []
+                };
+                return activityStudents[normalizedName];
+            };
+
+            workbook.SheetNames.forEach(sheetName => {
+                const rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1, defval: "", raw: true });
+                const header = findActivityHeader(rows);
+                if (!header) return;
+
+                const maxCols = rows.reduce((max, row) => Math.max(max, (row || []).length), 0);
+                const activityColumns = [];
+                const nameColumns = new Set(header.nameCols || [header.nameCol]);
+                for (let colIdx = 0; colIdx < maxCols; colIdx++) {
+                    if (nameColumns.has(colIdx)) continue;
+                    const label = simplifyActivityHeaderLabel(buildActivityHeaderLabel(rows, header, colIdx));
+                    let hasRecognizedStatus = false;
+                    for (let rowIdx = header.rowIdx + 1; rowIdx < rows.length; rowIdx++) {
+                        const cellStatus = getActivityCellStatus((rows[rowIdx] || [])[colIdx]);
+                        if (cellStatus && cellStatus !== "blank") { hasRecognizedStatus = true; break; }
+                    }
+                    if (hasRecognizedStatus && isActivityHeaderLabel(label)) activityColumns.push({ colIdx, label });
+                }
+                if (activityColumns.length === 0) return;
+
+                const sheetStudents = new Set();
+                for (let rowIdx = header.rowIdx + 1; rowIdx < rows.length; rowIdx++) {
+                    const row = rows[rowIdx] || [];
+                    const rawName = (header.nameCols || [header.nameCol]).map(colIdx => String(row[colIdx] || "").trim()).filter(Boolean).join(" ");
+                    const normalizedName = normalizeName(rawName);
+                    if (!normalizedName || normalizedName.includes("TOTAL") || normalizedName.includes("MEDIA") || normalizedName.includes("APRENDIZES")) continue;
+                    const displayName = knownStudents.get(normalizedName);
+                    if (!displayName) continue;
+                    const studentSummary = getStudentSummary(normalizedName, displayName);
+                    sheetStudents.add(normalizedName);
+                    activityColumns.forEach(({ colIdx, label }) => {
+                        const status = getActivityCellStatus(row[colIdx]);
+                        if (!status) return;
+                        const entry = { status, label, sheet: sheetName, uc: (sheetName.match(/UC\s*\d+/i) || [sheetName])[0].replace(/\s+/g, "").toUpperCase() };
+                        studentSummary.total++;
+                        studentSummary[status]++;
+                        studentSummary.entries.push(entry);
+                        totals[status]++;
+                        totals.activities++;
+                    });
+                }
+                sheets.push({ name: sheetName, uc: (sheetName.match(/UC\s*\d+/i) || [sheetName])[0].replace(/\s+/g, "").toUpperCase(), activities: activityColumns.length, students: sheetStudents.size });
+            });
+
+            const attentionStudents = Object.values(activityStudents).filter(student => student.not_completed + student.blank + student.requires_evaluation > 0).length;
+            return { sourceName, sheets, students: activityStudents, totals, attentionStudents };
+        };
+
+        const getActivityStudentSummary = (tracking, studentName) => tracking && tracking.students ? tracking.students[normalizeName(studentName)] || null : null;
+
+        const formatActivityStatusLabel = (status) => ({ completed: "Concluiu", not_completed: "Não concluiu", blank: "Não fez", requires_evaluation: "Requer avaliação" }[status] || status);
+
         const analyzeAttendanceWarnings = (workbook, students) => {
             const XLSX = window.XLSX;
             const today = new Date();
@@ -1643,7 +1779,7 @@
              document.head.removeChild(style);
         };
 
-        const generateReport = (selectedStudentIds, students, turma, course, tutor1, tutor2) => {
+        const generateReport = (selectedStudentIds, students, turma, course, tutor1, tutor2, activityTracking) => {
             const selected = students.filter(s => selectedStudentIds.includes(s.id));
             if (selected.length === 0) { alert("Selecione pelo menos um aluno."); return; }
             const printWindow = window.open('', '_blank');
@@ -1653,6 +1789,7 @@
                 <style>
                     body { font-family: 'Arial', sans-serif; padding: 20px; color: #333; background: #fff; margin: 0; }
                     .report-menu { background-color: #004587; padding: 10px 20px; display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; left: 0; right: 0; z-index: 1000; box-shadow: 0 2px 5px rgba(0,0,0,0.2); }
+                    .menu-actions { display: flex; gap: 8px; }
                     .menu-title { color: white; font-weight: bold; font-size: 14px; }
                     .btn { border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 12px; color: white; background-color: #F5821F; }
                     @media print { .report-menu { display: none !important; } }
@@ -1665,7 +1802,8 @@
                     .source-tag { font-weight: bold; color: #F5821F; margin-right: 5px; }
                     .obs-text { white-space: pre-wrap; word-break: break-word; }
                 </style></head><body>
-                    <div class="report-menu"><div class="menu-title">Relatório</div><button onclick="window.print()" class="btn">Imprimir</button></div>
+                    <div class="report-menu"><div class="menu-title">Relatório</div><div class="menu-actions"><button onclick="copyReportVisual()" id="copy-report" class="btn">Copiar para e-mail</button><button onclick="window.print()" class="btn">Imprimir</button></div></div>
+                    <div id="report-content">
                     <div style="text-align:center; margin-top: 10px;"><img src="https://upload.wikimedia.org/wikipedia/commons/thumb/8/86/Senac_logo.svg/500px-Senac_logo.svg.png" width="80" /></div>
                     <h1 style="text-align:center; font-size:18px;">Relatório de Desempenho</h1>
                     <h2 style="text-align:center; font-size:14px; color:#666;">${course}</h2>
@@ -1676,19 +1814,64 @@
                     ${selected.map(s => {
                         let statusColor = "color:#16a34a";
                         if(s.is_dropout) statusColor = "color:#f97316"; else if(s.is_process_dropout) statusColor = "color:#9333ea"; else if(s.needs_recuperacao) statusColor = "color:#dc2626"; else if(s.needs_conselho) statusColor = "color:#ca8a04";
-                        const obsHtml = s.all_observations && s.all_observations.length > 0 
-                            ? `<div class="section-title">Relatos e Observações de Todas as Abas:</div>${s.all_observations.map(o => `<div class="comment-box"><span class="source-tag">[${o.source}]</span><span class="obs-text">${o.text}</span></div>`).join('')}` 
+                        const obsHtml = s.all_observations && s.all_observations.length > 0
+                            ? '<div class="section-title">Relatos e Observações de Todas as Abas:</div>' + s.all_observations.map(o => '<div class="comment-box"><span class="source-tag">[' + o.source + ']</span><span class="obs-text">' + o.text + '</span></div>').join('')
                             : '<div class="comment-box" style="font-style:italic;">Nenhuma observação extra encontrada.</div>';
-                        const mainObsHtml = s.conselho_text ? `<div class="section-title">Obs. Conselho (Principal):</div><div style="font-size:12px;">"${s.conselho_text}"</div>` : '';
-                        return `<div class="student-card">
-                            <div class="header-row"><span class="student-name">${s.name}</span><span style="${statusColor}; font-weight:bold;">${s.status}</span></div>
-                            <div class="info-grid"><div><strong>Frequência Global:</strong> ${s.averageFreq}%</div><div><strong>Contra Turno:</strong> ${s.contra_turno_desc}</div></div>
-                            ${s.low_freq_ucs.length > 0 ? `<div style="font-size:12px; color:#ca8a04;">⚠️ Baixa Frequência: ${s.low_freq_ucs.join(", ")}</div>` : ''}
-                            ${s.failed_perf_ucs.length > 0 ? `<div style="font-size:12px; color:#dc2626;">❌ Desempenho: ${s.failed_perf_ucs.join(", ")}</div>` : ''}
-                            ${mainObsHtml}
-                            ${obsHtml}
-                        </div>`;
+                        const mainObsHtml = s.conselho_text ? '<div class="section-title">Obs. Conselho (Principal):</div><div style="font-size:12px;">"' + s.conselho_text + '"</div>' : '';
+                        const activitySummary = getActivityStudentSummary(activityTracking, s.name);
+                        const activityAttention = activitySummary ? activitySummary.entries.filter(entry => entry.status !== "completed") : [];
+                        const activityItemsHtml = activityAttention.slice(0, 18).map(entry => '<span class="source-tag">' + formatActivityStatusLabel(entry.status) + ':</span>' + entry.label + ' (' + entry.sheet + ')').join("<br>");
+                        const activityHtml = activitySummary && activitySummary.total > 0
+                            ? '<div class="section-title">Acompanhamento de atividades:</div><div class="comment-box"><strong>Resumo:</strong> ' + activitySummary.completed + ' concluídas de ' + activitySummary.total + '; ' + activitySummary.not_completed + ' não concluídas; ' + activitySummary.blank + ' em branco; ' + activitySummary.requires_evaluation + ' requerem avaliação.</div>' + (activityAttention.length > 0 ? '<div class="comment-box">' + activityItemsHtml + (activityAttention.length > 18 ? '<br><em>... e mais ' + (activityAttention.length - 18) + ' pendência(s).</em>' : '') + '</div>' : '')
+                            : '';
+                        return '<div class="student-card">' +
+                            '<div class="header-row"><span class="student-name">' + s.name + '</span><span style="' + statusColor + '; font-weight:bold;">' + s.status + '</span></div>' +
+                            '<div class="info-grid"><div><strong>Frequência Global:</strong> ' + s.averageFreq + '%</div><div><strong>Contra Turno:</strong> ' + s.contra_turno_desc + '</div></div>' +
+                            (s.low_freq_ucs.length > 0 ? '<div style="font-size:12px; color:#ca8a04;">⚠️ Baixa Frequência: ' + s.low_freq_ucs.join(", ") + '</div>' : '') +
+                            (s.failed_perf_ucs.length > 0 ? '<div style="font-size:12px; color:#dc2626;">❌ Desempenho: ' + s.failed_perf_ucs.join(", ") + '</div>' : '') +
+                            mainObsHtml + activityHtml + obsHtml + '</div>';
                     }).join('')}
+                    </div>
+                    <script>
+                        function copyReportVisual() {
+                            const content = document.getElementById('report-content');
+                            const button = document.getElementById('copy-report');
+                            if (!content) return;
+                            const done = () => {
+                                if (!button) return;
+                                button.textContent = 'Copiado';
+                                setTimeout(() => { button.textContent = 'Copiar para e-mail'; }, 1800);
+                            };
+                            const fallback = () => {
+                                const range = document.createRange();
+                                range.selectNodeContents(content);
+                                const selection = window.getSelection();
+                                selection.removeAllRanges();
+                                selection.addRange(range);
+                                try { document.execCommand('copy'); done(); } finally { selection.removeAllRanges(); }
+                            };
+                            if (navigator.clipboard && window.ClipboardItem) {
+                                const copyContent = content.cloneNode(true);
+                                copyContent.style.cssText = 'font-family:Arial,sans-serif;color:#333;background:#fff;margin:0;padding:20px;';
+                                const inlineStyles = {
+                                    '.student-card': 'border:1px solid #ddd;padding:15px;margin-bottom:15px;border-radius:8px;',
+                                    '.header-row': 'display:flex;justify-content:space-between;border-bottom:2px solid #F5821F;padding-bottom:5px;margin-bottom:10px;',
+                                    '.student-name': 'font-size:16px;font-weight:bold;',
+                                    '.info-grid': 'display:grid;grid-template-columns:1fr 1fr;gap:10px;font-size:12px;margin-bottom:10px;',
+                                    '.section-title': 'font-weight:bold;margin-top:10px;font-size:12px;color:#004587;',
+                                    '.comment-box': 'background-color:#f9fafb;padding:8px;border-left:3px solid #F5821F;font-size:11px;margin-top:5px;color:#555;',
+                                    '.source-tag': 'font-weight:bold;color:#F5821F;margin-right:5px;'
+                                };
+                                Object.entries(inlineStyles).forEach(([selector, style]) => copyContent.querySelectorAll(selector).forEach(element => { element.style.cssText = style; }));
+                                const html = copyContent.outerHTML;
+                                const item = new ClipboardItem({
+                                    'text/html': new Blob([html], { type: 'text/html' }),
+                                    'text/plain': new Blob([copyContent.innerText], { type: 'text/plain' })
+                                });
+                                navigator.clipboard.write([item]).then(done).catch(fallback);
+                            } else fallback();
+                        }
+                    <\/script>
                 </body></html>`;
             printWindow.document.write(htmlContent); printWindow.document.close();
         };
@@ -1786,6 +1969,7 @@
         function App() {
             // --- ESTADOS DO SISTEMA ---
             const [data, setData] = useState(null);
+            const [activityTracking, setActivityTracking] = useState(null);
             const [dragActive, setDragActive] = useState(false);
             
             // --- MODAIS ---
@@ -1870,6 +2054,7 @@
                     const processed = processExcelFile(buffer);
                     if (processed) { 
                         setData(processed); 
+                        setActivityTracking(null);
                         setReportSelection([]); 
                         setSelectedUC('all');
                         if (processed.attendanceWarnings && processed.attendanceWarnings.length > 0) {
@@ -1877,6 +2062,20 @@
                         }
                     }
                 } catch (e) { alert("Erro: " + e.message); }
+            };
+            const handleActivityFile = async (file) => {
+                if (!file || !data) return;
+                try {
+                    const buffer = await file.arrayBuffer();
+                    const tracking = processActivityWorkbook(buffer, data.students, file.name);
+                    const hasMatchedStudents = tracking && Object.keys(tracking.students || {}).length > 0;
+                    if (!tracking || tracking.sheets.length === 0 || !hasMatchedStudents) {
+                        setActivityTracking(null);
+                        alert("Não foi encontrada uma estrutura de atividades com nomes de alunos e colunas de acompanhamento.");
+                        return;
+                    }
+                    setActivityTracking(tracking);
+                } catch (e) { alert("Erro ao ler o acompanhamento de atividades: " + e.message); }
             };
             const handleLogoUpload = (e) => { const file = e.target.files[0]; if(file) { const r = new FileReader(); r.onloadend=()=>{setCustomLogo(r.result)}; r.readAsDataURL(file); } };
             const handleDrop = (e) => { e.preventDefault(); setDragActive(false); if(e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]); };
@@ -1956,6 +2155,8 @@
 
             const toggleStudentSelection = (id) => setReportSelection(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
             const toggleSelectAll = () => setReportSelection(reportSelection.length === filteredStudents.length ? [] : filteredStudents.map(s => s.id));
+            const activityAttentionStudents = activityTracking ? Object.values(activityTracking.students).filter(student => student.not_completed + student.blank + student.requires_evaluation > 0).sort((a, b) => (b.not_completed + b.blank + b.requires_evaluation) - (a.not_completed + a.blank + a.requires_evaluation)) : [];
+            const selectedActivitySummary = selectedStudentForModal ? getActivityStudentSummary(activityTracking, selectedStudentForModal.name) : null;
 
             if (!data) {
                 return (
@@ -1973,7 +2174,7 @@
                                     <IconUploadCloud className={`w-16 h-16 mx-auto mb-4 ${dragActive ? 'text-senac-orange' : 'text-gray-400'}`} /><p className="text-gray-700 font-semibold text-lg">Clique ou arraste o arquivo aqui</p>
                                     <input id="fileUpload" type="file" className="hidden" accept=".xlsx, .xlsm" onChange={(e) => handleFile(e.target.files[0])} />
                                 </div >
-                                <div className="mt-8 pt-6 border-t border-gray-100"><button onClick={() => { setData(DEMO_DATA); setSelectedUC('all'); }} className="text-sm text-gray-400 hover:text-senac-orange">Testar com versão Demo</button></div>
+                                <div className="mt-8 pt-6 border-t border-gray-100"><button onClick={() => { setData(DEMO_DATA); setActivityTracking(null); setSelectedUC('all'); }} className="text-sm text-gray-400 hover:text-senac-orange">Testar com versão Demo</button></div>
                             </div>
                         </div>
                         <div className="absolute bottom-2 right-4 text-xs text-gray-400 font-mono">v7.6 - Caderno Atualizado</div>
@@ -2076,6 +2277,32 @@
                                         </div>
                                     )}
 
+                                    {selectedActivitySummary && selectedActivitySummary.total > 0 && (
+                                        <div className="mb-6 bg-red-50 rounded-xl border border-red-200 overflow-hidden">
+                                            <div className="bg-red-100 px-4 py-2 border-b border-red-200 flex justify-between items-center">
+                                                <h3 className="text-sm font-bold text-red-800 flex items-center gap-2"><IconAlertTriangle className="w-4 h-4"/> Acompanhamento de atividades</h3>
+                                                <span className="text-[10px] font-bold text-red-700 uppercase">{selectedActivitySummary.completed}/{selectedActivitySummary.total} concluídas</span>
+                                            </div>
+                                            <div className="p-4">
+                                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs mb-3">
+                                                    <div className="bg-white rounded-md border border-green-100 px-2 py-2 text-center"><div className="font-bold text-green-700">Concluiu</div><div className="text-base font-bold text-green-800">{selectedActivitySummary.completed}</div></div>
+                                                    <div className="bg-white rounded-md border border-red-100 px-2 py-2 text-center"><div className="font-bold text-red-700">NC</div><div className="text-base font-bold text-red-800">{selectedActivitySummary.not_completed}</div></div>
+                                                    <div className="bg-white rounded-md border border-gray-200 px-2 py-2 text-center"><div className="font-bold text-gray-600">Em branco</div><div className="text-base font-bold text-gray-800">{selectedActivitySummary.blank}</div></div>
+                                                    <div className="bg-white rounded-md border border-yellow-100 px-2 py-2 text-center"><div className="font-bold text-yellow-700">Avaliar</div><div className="text-base font-bold text-yellow-800">{selectedActivitySummary.requires_evaluation}</div></div>
+                                                </div>
+                                                <div className="space-y-1.5 max-h-56 overflow-y-auto custom-scrollbar">
+                                                    {selectedActivitySummary.entries.filter(entry => entry.status !== "completed").slice(0, 30).map((entry, index) => (
+                                                        <div key={`${entry.sheet}-${entry.label}-${index}`} className="bg-white border border-red-100 rounded-md px-3 py-2 text-xs flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
+                                                            <span className="font-medium text-gray-700">{entry.label}</span>
+                                                            <span className={`font-bold ${entry.status === 'not_completed' ? 'text-red-700' : entry.status === 'blank' ? 'text-gray-600' : 'text-yellow-700'}`}>{formatActivityStatusLabel(entry.status)} <span className="font-normal text-gray-400">({entry.sheet})</span></span>
+                                                        </div>
+                                                    ))}
+                                                    {selectedActivitySummary.entries.filter(entry => entry.status !== "completed").length > 30 && <div className="text-[11px] text-gray-500 italic pt-1">E mais {selectedActivitySummary.entries.filter(entry => entry.status !== "completed").length - 30} pendência(s) nesta planilha.</div>}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+
                                     <div className="mb-6"><h3 className="text-sm font-bold text-gray-700 mb-3 flex items-center gap-2"><IconBarChart2 className="w-4 h-4"/> Detalhamento por UC</h3><div className="grid grid-cols-2 sm:grid-cols-4 gap-2">{Object.entries(selectedStudentForModal.uc_scores || {}).map(([ucName, data]) => ( <div key={ucName} className={`p-2 rounded border text-center ${data.score < 0.75 ? 'bg-red-50 border-red-200' : 'bg-gray-50 border-gray-100'}`}><div className="text-xs font-bold text-gray-500">{ucName}</div><div className={`font-bold ${data.score < 0.75 ? 'text-red-700' : 'text-gray-800'}`}>{(data.score*100).toFixed(0)}%</div></div> ))}{Object.keys(selectedStudentForModal.uc_scores || {}).length === 0 && <span className="text-xs text-gray-400 italic col-span-4">Sem dados detalhados.</span>}</div></div>
                                     <div className="mb-6"><h3 className="text-sm font-bold text-gray-700 mb-3 flex items-center gap-2"><IconMessageSquare className="w-4 h-4"/> Diário Geral (Planilhas e Observações)</h3><div className="space-y-2 max-h-60 overflow-y-auto pr-2 custom-scrollbar">{selectedStudentForModal.all_observations && selectedStudentForModal.all_observations.length > 0 ? ( selectedStudentForModal.all_observations.map((obs, idx) => ( <div key={idx} className="bg-gray-50 border border-gray-200 p-3 rounded-lg text-sm relative hover:bg-gray-100 transition-colors"><span className={`absolute top-2 right-2 text-[10px] font-bold uppercase tracking-wider px-1 rounded ${obs.source.includes('Órion') || obs.source.includes('UC') ? 'bg-orange-100 text-orange-700' : 'bg-white text-gray-400 border border-gray-200'}`}>{obs.source}</span><p className="text-gray-700 pr-12 obs-text">{obs.text}</p></div> )) ) : ( <div className="text-center p-6 border-2 border-dashed border-gray-200 rounded-lg bg-gray-50"><p className="text-gray-400 text-sm italic">Nenhuma observação ou comentário encontrado em nenhuma aba.</p></div> )}</div></div>
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6"><div className="bg-slate-50 p-4 rounded-xl border border-slate-100"><h3 className="text-sm font-bold text-gray-700 mb-2">Pendências Acadêmicas</h3><ul className="space-y-2 text-sm">{selectedStudentForModal.low_freq_ucs.length > 0 && (<li className="flex items-start gap-2 text-yellow-700"><IconAlertTriangle className="w-4 h-4 mt-0.5 shrink-0"/> <span>Baixa Frequência: <strong>{selectedStudentForModal.low_freq_ucs.join(", ")}</strong></span></li>)}{selectedStudentForModal.failed_perf_ucs.length > 0 && (<li className="flex items-start gap-2 text-red-700"><IconXCircle className="w-4 h-4 mt-0.5 shrink-0"/> <span>Dificuldade Desempenho: <strong>{selectedStudentForModal.failed_perf_ucs.join(", ")}</strong></span></li>)}{selectedStudentForModal.low_freq_ucs.length === 0 && selectedStudentForModal.failed_perf_ucs.length === 0 && (<li className="text-gray-400 italic">Nenhuma pendência registrada.</li>)}</ul></div><div className="bg-blue-50 p-4 rounded-xl border border-blue-100"><h3 className="text-sm font-bold text-blue-800 mb-2 flex items-center gap-2"><IconMessageSquare className="w-4 h-4"/> Observação Pedagógica (Principal)</h3><p className="text-sm text-blue-900 italic">{selectedStudentForModal.conselho_text || "Sem observações do conselho."}</p></div></div>
@@ -2087,9 +2314,10 @@
                     
                     <header className="bg-white border-b-4 border-senac-orange shadow-sm sticky top-0 z-20">
                         <div className="max-w-7xl mx-auto px-4 py-3 flex flex-col md:flex-row justify-between items-center gap-4">
-                            <div className="flex items-center gap-4"><img src="https://upload.wikimedia.org/wikipedia/commons/thumb/8/86/Senac_logo.svg/500px-Senac_logo.svg.png" className="h-12 w-auto object-contain" /><div><h1 className="text-lg font-bold text-senac-blue leading-tight">Gestão de Frequência - Relatório e ATA</h1><div className="text-xs font-bold text-senac-orange uppercase mb-1 leading-tight max-w-lg">{data.course}</div><div className="flex items-center gap-2 text-xs"><span className="font-medium text-gray-500">Turma: {data.turma}</span><button onClick={() => setData(null)} className="text-senac-blue hover:underline bg-blue-50 px-2 py-0.5 rounded-full flex items-center gap-1 transition-colors"><IconRefreshCw className="w-3 h-3" /> Trocar</button><span className="text-gray-300">|</span><span className="text-gray-400">Usuário: Acesso Livre</span><button onClick={() => {if(confirm('Reiniciar sistema?')) window.location.reload()}} className="text-red-400 hover:underline flex items-center gap-1 ml-2"><IconLogOut className="w-3 h-3"/> Sair</button></div></div></div>
+                            <div className="flex items-center gap-4"><img src="https://upload.wikimedia.org/wikipedia/commons/thumb/8/86/Senac_logo.svg/500px-Senac_logo.svg.png" className="h-12 w-auto object-contain" /><div><h1 className="text-lg font-bold text-senac-blue leading-tight">Gestão de Frequência - Relatório e ATA</h1><div className="text-xs font-bold text-senac-orange uppercase mb-1 leading-tight max-w-lg">{data.course}</div><div className="flex items-center gap-2 text-xs"><span className="font-medium text-gray-500">Turma: {data.turma}</span><button onClick={() => { setData(null); setActivityTracking(null); }} className="text-senac-blue hover:underline bg-blue-50 px-2 py-0.5 rounded-full flex items-center gap-1 transition-colors"><IconRefreshCw className="w-3 h-3" /> Trocar</button><span className="text-gray-300">|</span><span className="text-gray-400">Usuário: Acesso Livre</span><button onClick={() => {if(confirm('Reiniciar sistema?')) window.location.reload()}} className="text-red-400 hover:underline flex items-center gap-1 ml-2"><IconLogOut className="w-3 h-3"/> Sair</button></div></div></div>
                             <div className="flex items-center gap-3">
-                                <button onClick={() => generateReport(reportSelection, data.students, data.turma, data.course, tutor1Name, tutor2Name)} className="bg-white border border-senac-blue text-senac-blue hover:bg-blue-50 px-4 py-2 rounded-lg flex items-center gap-2 shadow transition-all active:scale-95 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed" disabled={reportSelection.length === 0}><IconPrinter className="w-4 h-4" /> Gerar Relatório {reportSelection.length > 0 && `(${reportSelection.length})`}</button>
+                                <label className="cursor-pointer bg-white border border-senac-orange text-senac-orange hover:bg-orange-50 px-4 py-2 rounded-lg flex items-center gap-2 shadow transition-all active:scale-95 text-sm font-medium" title="Ler planilha de atividades"><IconUploadCloud className="w-4 h-4" /> Ler atividades <input type="file" className="hidden" accept=".xlsx,.xlsm,.xls" onChange={(e) => { handleActivityFile(e.target.files[0]); e.target.value = ''; }} /></label>
+                                <button onClick={() => generateReport(reportSelection, data.students, data.turma, data.course, tutor1Name, tutor2Name, activityTracking)} className="bg-white border border-senac-blue text-senac-blue hover:bg-blue-50 px-4 py-2 rounded-lg flex items-center gap-2 shadow transition-all active:scale-95 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed" disabled={reportSelection.length === 0}><IconPrinter className="w-4 h-4" /> Gerar Relatório {reportSelection.length > 0 && `(${reportSelection.length})`}</button>
                                 <button onClick={() => setShowAtaModal(!showAtaModal)} className="bg-senac-blue hover:bg-blue-800 text-white px-4 py-2 rounded-lg flex items-center gap-2 shadow transition-all active:scale-95 text-sm font-medium"><IconFileText className="w-4 h-4" /> Gerar ATA</button>
                             </div>
                         </div>
@@ -2134,6 +2362,17 @@
                                 </div>
                             </div>
                         )}
+                        {activityTracking && activityAttentionStudents.length > 0 && (
+                            <div className="mb-6 bg-red-50 border border-red-200 border-l-4 border-l-red-500 rounded-lg p-4 text-sm text-red-900 shadow-sm">
+                                <div className="font-bold flex items-center gap-2 mb-2"><IconAlertTriangle className="w-4 h-4"/> Pendências de atividades</div>
+                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-3">
+                                    <div className="bg-white/80 border border-red-100 rounded-md px-3 py-2"><div className="font-bold text-xs text-red-800">Não concluiu</div><div className="text-lg font-bold">{activityTracking.totals.not_completed}</div></div>
+                                    <div className="bg-white/80 border border-red-100 rounded-md px-3 py-2"><div className="font-bold text-xs text-red-800">Em branco</div><div className="text-lg font-bold">{activityTracking.totals.blank}</div></div>
+                                    <div className="bg-white/80 border border-red-100 rounded-md px-3 py-2"><div className="font-bold text-xs text-red-800">Requer avaliação</div><div className="text-lg font-bold">{activityTracking.totals.requires_evaluation}</div></div>
+                                </div>
+                                <div className="text-xs"><strong>Alunos com pontos de atenção:</strong> {activityAttentionStudents.slice(0, 12).map(student => `${student.name} (${student.not_completed + student.blank + student.requires_evaluation})`).join("; ")}{activityAttentionStudents.length > 12 ? `; e mais ${activityAttentionStudents.length - 12}` : ""}</div>
+                            </div>
+                        )}
                         <div className="bg-white p-2 rounded-xl shadow-sm border border-gray-100 mb-6 flex flex-col md:flex-row justify-between items-center gap-4 sticky top-28 z-10">
                             <div className="flex gap-1 overflow-x-auto w-full md:w-auto px-1 items-center">
                                 <button onClick={toggleSelectAll} className="mr-2 text-gray-400 hover:text-senac-blue">{reportSelection.length > 0 && reportSelection.length === filteredStudents.length ? <IconCheckSquare className="w-5 h-5" /> : <IconSquare className="w-5 h-5" />}</button>
@@ -2165,6 +2404,7 @@
                             {filteredStudents.length === 0 ? (<div className="col-span-full py-16 text-center"><div className="inline-block p-4 rounded-full bg-gray-100 mb-4"><IconSearch className="w-8 h-8 text-gray-400"/></div><p className="text-gray-500 font-medium">Nenhum aluno encontrado.</p></div>) : (filteredStudents.map((student) => {
                                 const isDropout = student.is_dropout;
                                 const isProcess = student.is_process_dropout;
+                                const activitySummary = getActivityStudentSummary(activityTracking, student.name);
                                 
                                 let displayFreq = student.averageFreq;
                                 let ucStatus = null;
@@ -2203,6 +2443,15 @@
                                             <div className="flex justify-between items-start mb-3 gap-2"><h3 className="font-bold text-gray-800 text-sm leading-snug">{student.name}</h3><div className="flex items-center gap-2">{(student.conselho_text || (student.comments || []).length > 0 || (student.all_observations || []).length > 0) && (<div className="text-senac-blue" title="Obs"><IconMessageSquare className="w-4 h-4" /></div>)}<div className="flex-shrink-0">{statusBadge}</div></div></div>
                                             <div className="flex justify-between items-end mb-1"><span className="text-xs text-gray-400 font-medium uppercase tracking-wider">{selectedUC === 'all' ? 'Frequência Global' : `Frequência ${selectedUC}`}</span><span className={`text-lg font-bold ${displayFreq !== "N/A" && parseFloat(displayFreq) < 75 ? 'text-yellow-600' : 'text-gray-700'}`}>{displayFreq}%</span></div>
                                             <ProgressBar value={displayFreq === "N/A" ? 0 : displayFreq} />
+                                            {activitySummary && activitySummary.total > 0 && (
+                                                <div className={`mt-3 pt-2 border-t flex flex-wrap gap-1.5 text-[10px] font-bold ${activitySummary.not_completed + activitySummary.blank + activitySummary.requires_evaluation > 0 ? 'border-red-100' : 'border-green-100'}`}>
+                                                    <span className="bg-green-100 text-green-700 px-2 py-1 rounded">Atividades {activitySummary.completed}/{activitySummary.total}</span>
+                                                    {activitySummary.not_completed > 0 && <span className="bg-red-100 text-red-700 px-2 py-1 rounded">NC {activitySummary.not_completed}</span>}
+                                                    {activitySummary.blank > 0 && <span className="bg-gray-100 text-gray-700 px-2 py-1 rounded">Em branco {activitySummary.blank}</span>}
+                                                    {activitySummary.requires_evaluation > 0 && <span className="bg-yellow-100 text-yellow-700 px-2 py-1 rounded">Avaliar {activitySummary.requires_evaluation}</span>}
+                                                    {activitySummary.not_completed + activitySummary.blank + activitySummary.requires_evaluation === 0 && <span className="bg-green-50 text-green-700 px-2 py-1 rounded">Tudo avaliado</span>}
+                                                </div>
+                                            )}
                                             <div className="flex items-center gap-2 text-[11px] text-gray-500 mt-3 pt-2 border-t border-gray-50"><IconCalendar className="w-3 h-3 text-gray-400" /><span>Contra Turno: <span className={`font-semibold ${student.contra_turno_desc !== "Sem Contra Turno" ? 'text-senac-blue' : 'text-gray-400'}`}>{student.contra_turno_desc}</span></span></div>
                                         </div>
                                     </div>
