@@ -115,6 +115,59 @@
             return true;
         };
 
+        const isOrangeColorValue = (color) => {
+            let cleanHex = String(color || "").replace(/^#/, "").toUpperCase();
+            if (cleanHex.length === 8) cleanHex = cleanHex.substring(2);
+            if (cleanHex.length !== 6) return false;
+            const red = parseInt(cleanHex.substring(0, 2), 16) / 255;
+            const green = parseInt(cleanHex.substring(2, 4), 16) / 255;
+            const blue = parseInt(cleanHex.substring(4, 6), 16) / 255;
+            const max = Math.max(red, green, blue);
+            const min = Math.min(red, green, blue);
+            const delta = max - min;
+            const normalizedHex = cleanHex;
+            const knownOrangeFills = ["ED7D31", "F4B084", "C65911", "833C0C", "FFC000", "FFA500", "FF9900", "FF6600", "E26B0A", "F8CBAD"];
+            if (knownOrangeFills.includes(normalizedHex)) return true;
+            if (delta === 0 || max < 0.35 || delta / max < 0.35) return false;
+            let hue = 0;
+            if (max === red) hue = 60 * (((green - blue) / delta) % 6);
+            else if (max === green) hue = 60 * ((blue - red) / delta + 2);
+            else hue = 60 * ((red - green) / delta + 4);
+            if (hue < 0) hue += 360;
+            return hue >= 15 && hue <= 55;
+        };
+
+        const isOrangeFillCell = (cell) => {
+            const colors = [
+                cell && cell.s && cell.s.fgColor && cell.s.fgColor.rgb,
+                cell && cell.s && cell.s.bgColor && cell.s.bgColor.rgb
+            ].filter(Boolean);
+            return colors.some(isOrangeColorValue);
+        };
+
+        const isOrangeRowFill = (sheet, rowIndex, nameColIdx) => {
+            if (!sheet || !sheet['!ref']) return false;
+            try {
+                const range = XLSX.utils.decode_range(sheet['!ref']);
+                const maxCols = Math.min(range.e.c + 1, 180);
+                const keyColumns = [...new Set([0, 1, 2, 3, 4, nameColIdx].filter(col => col >= 0 && col < maxCols))];
+                const keyOrangeCount = keyColumns.filter(col => isOrangeFillCell(sheet[XLSX.utils.encode_cell({ r: rowIndex, c: col })])).length;
+                if (nameColIdx >= 0 && isOrangeFillCell(sheet[XLSX.utils.encode_cell({ r: rowIndex, c: nameColIdx })])) return true;
+                if (keyOrangeCount >= 2) return true;
+
+                let orangeCount = 0;
+                let nonBlankCount = 0;
+                for (let col = 0; col < maxCols; col++) {
+                    const cell = sheet[XLSX.utils.encode_cell({ r: rowIndex, c: col })];
+                    if (isOrangeFillCell(cell)) orangeCount++;
+                    if (cell && cell.v !== undefined && cell.v !== null && String(cell.v).trim() !== "") nonBlankCount++;
+                }
+                return orangeCount >= 8 && orangeCount >= Math.max(8, Math.ceil(nonBlankCount * 0.5));
+            } catch (error) {
+                return false;
+            }
+        };
+
         // --- ÍCONES (Lucide React) ---
         const IconUsers = (props) => <svg {...props} xmlns="http://www.w3.org/TR/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>;
         const IconAlertTriangle = (props) => <svg {...props} xmlns="http://www.w3.org/TR/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>;
@@ -1618,11 +1671,16 @@
                          studentRec.dropout_reason = situation.reason;
                     }
 
-                    if (!studentRec.is_dropout && !studentRec.is_process_dropout) {
+                    if (!studentRec.is_dropout) {
                         try {
                             const cellAddress = XLSX.utils.encode_cell({r: i, c: nameColIdx});
                             const cell = pedSheet[cellAddress];
-                            if (cell && cell.s && cell.s.font && cell.s.font.color && cell.s.font.color.rgb) {
+                            if (isOrangeRowFill(pedSheet, i, nameColIdx)) {
+                                studentRec.is_dropout = true;
+                                studentRec.is_process_dropout = false;
+                                studentRec.status = "Evadido/Desligado";
+                                studentRec.dropout_reason = "Linha identificada em laranja na planilha";
+                            } else if (!studentRec.is_process_dropout && cell && cell.s && cell.s.font && cell.s.font.color && cell.s.font.color.rgb) {
                                 const color = cell.s.font.color.rgb;
                                 if (isOrangeFont(color)) {
                                     studentRec.is_process_dropout = true;
@@ -1757,11 +1815,16 @@
                         const normalized = normalizeName(nameInSheet);
                         const student = students.find(s => normalizeName(s.name) === normalized);
                         if(student) {
-                            if (!student.is_dropout && !student.is_process_dropout) {
+                            if (!student.is_dropout) {
                                 try {
                                     const cellAddress = XLSX.utils.encode_cell({r: r, c: nameColIdx});
                                     const cell = sheet[cellAddress];
-                                    if (cell && cell.s && cell.s.font && cell.s.font.color && cell.s.font.color.rgb) {
+                                    if (isOrangeRowFill(sheet, r, nameColIdx)) {
+                                        student.is_dropout = true;
+                                        student.is_process_dropout = false;
+                                        student.status = "Evadido/Desligado";
+                                        student.dropout_reason = "Linha identificada em laranja na aba " + sheetName;
+                                    } else if (!student.is_process_dropout && cell && cell.s && cell.s.font && cell.s.font.color && cell.s.font.color.rgb) {
                                         const color = cell.s.font.color.rgb;
                                         if (isOrangeFont(color)) {
                                             student.is_process_dropout = true;
