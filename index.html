@@ -1084,20 +1084,27 @@
             return normalized.length > 0 && normalized !== "-" && normalized !== "0";
         };
 
+        const isNonDataAttendanceHeader = (value) => {
+            const text = normalizeText(value).replace(/[º°]/g, "").trim();
+            return text === "N" || text === "NO" || text === "NUMERO" || text.includes("ORION") || text.includes("COLUNA PARA ORDENAR") || text.includes("HORARIO CURSO");
+        };
+
         const findAttendanceHeader = (rows) => {
             for (let r = 0; r < Math.min(rows.length, 25); r++) {
                 const row = rows[r] || [];
                 let nameCol = -1;
                 const dateCols = [];
+                const ignoredCols = new Set();
 
                 row.forEach((cell, c) => {
                     const label = stripAccents(cell).toUpperCase();
+                    if (isNonDataAttendanceHeader(cell)) ignoredCols.add(c);
                     if (nameCol === -1 && (label.includes("APREND") || label.includes("ALUNO") || label.includes("NOME"))) nameCol = c;
                     const date = parseAttendanceDate(cell);
-                    if (date) dateCols.push({ idx: c, date });
+                    if (date && !ignoredCols.has(c)) dateCols.push({ idx: c, date });
                 });
 
-                if (nameCol !== -1 && dateCols.length > 0) return { rowIdx: r, nameCol, dateCols };
+                if (nameCol !== -1 && dateCols.length > 0) return { rowIdx: r, nameCol, dateCols, ignoredCols };
             }
             return null;
         };
@@ -1317,6 +1324,60 @@
             return warnings.sort((a, b) => a.date - b.date || a.sheet.localeCompare(b.sheet, 'pt-BR', { numeric: true }));
         };
 
+        const formatNAKeyDate = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+        const makeNAKey = (studentName, sheet, date) => `${normalizeName(studentName)}|${sheet}|${formatNAKeyDate(date)}`;
+
+        const analyzeNAWarnings = (workbook, students) => {
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            const activeStudents = (students || []).filter(student => !student.is_dropout && !student.is_process_dropout);
+            const namesForValidation = activeStudents.length > 0 ? activeStudents : (students || []);
+            const knownStudents = new Map(namesForValidation.map(student => [normalizeName(student.name), student.name]));
+            const studentEntries = {};
+            let totalNA = 0;
+
+            workbook.SheetNames.forEach(sheetName => {
+                if (!isAttendanceSheetName(sheetName)) return;
+                const sheet = workbook.Sheets[sheetName];
+                const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "", raw: true });
+                const header = findAttendanceHeader(rows);
+                if (!header) return;
+                const uc = (sheetName.match(/UC\s*\d+/i) || [sheetName])[0].replace(/\s+/g, "").toUpperCase();
+
+                for (let rowIdx = header.rowIdx + 1; rowIdx < rows.length; rowIdx++) {
+                    const row = rows[rowIdx] || [];
+                    const normalizedName = normalizeName(row[header.nameCol]);
+                    const displayName = knownStudents.get(normalizedName);
+                    if (!displayName || normalizedName.includes("TOTAL") || normalizedName.includes("MEDIA") || normalizedName.includes("APRENDIZES")) continue;
+
+                    header.dateCols.forEach(({ idx, date }) => {
+                        if (date > today || date.getDay() === 0 || date.getDay() === 6) return;
+                        if (normalizeText(row[idx]) !== "NA") return;
+                        const key = makeNAKey(displayName, sheetName, date);
+                        if (!studentEntries[normalizedName]) studentEntries[normalizedName] = { name: displayName, entries: [] };
+                        studentEntries[normalizedName].entries.push({ key, sheet: sheetName, uc, date: formatShortDate(date), dateValue: formatNAKeyDate(date) });
+                        totalNA++;
+                    });
+                }
+            });
+
+            const studentsWithNA = Object.values(studentEntries).map(student => ({ ...student, count: student.entries.length }));
+            return {
+                students: studentEntries,
+                totals: { na: totalNA },
+                attentionStudents: studentsWithNA.filter(student => student.count >= 2).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, "pt-BR"))
+            };
+        };
+
+        const getNAStudentSummary = (data, studentName, justifications = {}) => {
+            const raw = data && data.naAlerts && data.naAlerts.students ? data.naAlerts.students[normalizeName(studentName)] : null;
+            if (!raw) return null;
+            const entries = raw.entries.filter(entry => !justifications[entry.key]);
+            return { ...raw, entries, count: entries.length };
+        };
+
+        const getNAJustificationStorageKey = (turma) => `na_justifications_v1_${String(turma || "TURMA").replace(/[^a-zA-Z0-9]/g, "")}`;
+
         const processExcelFile = (arrayBuffer) => {
             try {
                 const XLSX = window.XLSX;
@@ -1492,14 +1553,33 @@
                     }
 
                     const freqScores = []; 
-                    let ucCount = 1;
-                    
-                    for (let col = 4; col < 60; col += 2) {
-                        if (col > 24 && (!row[col] && !row[col+1])) if (!row[col+2]) break;
-                        let ucName = `UC${ucCount}`; 
-                        if (col === 26) ucName = "Prática Profissional"; 
-                        
-                        let scoreVal = row[col]; 
+                    const detectedFrequencyPairs = [];
+                    const frequencyHeaderWidth = Math.max(headerRow.length, nextRow1.length, nextRow2.length);
+                    for (let col = 0; col < frequencyHeaderWidth; col++) {
+                        const frequencyHeader = normalizeText([headerRow[col], nextRow1[col], nextRow2[col]].filter(Boolean).join(" "));
+                        if (!frequencyHeader.includes("APROVEITAMENTO") || !frequencyHeader.includes("FREQUENCIA")) continue;
+                        const ucMatch = frequencyHeader.match(/\bUC\s*(\d+)\b/);
+                        detectedFrequencyPairs.push({
+                            scoreCol: col,
+                            statusCol: col + 1,
+                            ucName: ucMatch ? `UC${ucMatch[1]}` : frequencyHeader.includes("PRATICA") ? "Prática Profissional" : `UC${detectedFrequencyPairs.length + 1}`
+                        });
+                    }
+
+                    const frequencyPairs = detectedFrequencyPairs.length > 0 ? detectedFrequencyPairs : (() => {
+                        const legacyPairs = [];
+                        let legacyUC = 1;
+                        for (let col = 4; col < 60; col += 2) {
+                            if (col > 24 && (!row[col] && !row[col + 1]) && !row[col + 2]) break;
+                            legacyPairs.push({ scoreCol: col, statusCol: col + 1, ucName: col === 26 ? "Prática Profissional" : `UC${legacyUC}` });
+                            legacyUC++;
+                            if (legacyUC > 20) break;
+                        }
+                        return legacyPairs;
+                    })();
+
+                    frequencyPairs.forEach(({ scoreCol, statusCol, ucName }) => {
+                        let scoreVal = row[scoreCol];
                         if (typeof scoreVal === 'string' && scoreVal.includes('%')) {
                             scoreVal = parseFloat(scoreVal.replace('%','').replace(',','.')) / 100;
                         } else {
@@ -1507,7 +1587,7 @@
                         }
                         if (!isNaN(scoreVal) && scoreVal > 1 && scoreVal <= 100) scoreVal = scoreVal / 100;
 
-                        const statusVal = String(row[col+1] || "");
+                        const statusVal = String(row[statusCol] || "");
                         
                         if (!isNaN(scoreVal)) {
                             freqScores.push(scoreVal);
@@ -1527,8 +1607,7 @@
                                 studentRec.status = "Não Desenvolveu"; 
                             } 
                         }
-                        ucCount++; if (ucCount > 20) break;
-                    }
+                    });
                     if (freqScores.length > 0) studentRec.averageFreq = (freqScores.reduce((a, b) => a + b, 0) / freqScores.length * 100).toFixed(1);
                     
                     if (studentRec.is_dropout) studentRec.status = "Evadido/Desligado";
@@ -1571,9 +1650,11 @@
                     const isPedagogicalSheet = sheetName === pedSheetName; 
 
                     if(headerRow) {
+                        const ignoredSheetColumns = new Set();
                         const maxCols = Math.max(headerRow.length, nextRow1.length, 150);
                         for(let idx = 0; idx < maxCols; idx++) {
                             const fullHeader = (String(headerRow[idx] || "") + " " + String(nextRow1[idx] || "")).toUpperCase(); 
+                            if (isNonDataAttendanceHeader(fullHeader)) ignoredSheetColumns.add(idx);
 
                             if (isPedagogicalSheet && ((fullHeader.includes("TEXTO") || fullHeader.includes("PARECER")) && (fullHeader.includes("CONSELHO") || fullHeader.includes("CLASSE")))) { criticalCols.push({ idx, name: "Conselho de Classe", type: 'force_conselho' }); }
                             else if (fullHeader.includes("MOTIVO") || fullHeader.includes("DESLIGAMENTO") || fullHeader.includes("RECUPERA") || fullHeader.includes("ORION") || fullHeader.includes("ÓRION")) {
@@ -1614,6 +1695,7 @@
                             }
                             
                             row.forEach((cellVal, idx) => {
+                                if (ignoredSheetColumns.has(idx)) return;
                                 const valStr = String(cellVal || "").trim();
                                 if(valStr.length < 2 || valStr === "0" || valStr === "-") return;
                                 if (/^[\d.,\s%-]+$/.test(valStr)) return;
@@ -1642,7 +1724,8 @@
                 });
 
                 const attendanceWarnings = analyzeAttendanceWarnings(workbook, students);
-                return { course, turma, tutor1, tutor2, students, ucs: Array.from(allFoundUCs).sort(), courseDates: rawDates, attendanceWarnings };
+                const naAlerts = analyzeNAWarnings(workbook, students);
+                return { course, turma, tutor1, tutor2, students, ucs: Array.from(allFoundUCs).sort(), courseDates: rawDates, attendanceWarnings, naAlerts };
             } catch (error) {
                 console.error(error);
                 alert("Erro ao ler o arquivo: " + error.message);
@@ -1779,7 +1862,7 @@
              document.head.removeChild(style);
         };
 
-        const generateReport = (selectedStudentIds, students, turma, course, tutor1, tutor2, activityTracking) => {
+        const generateReport = (selectedStudentIds, students, turma, course, tutor1, tutor2, activityTracking, reportData, naJustifications) => {
             const selected = students.filter(s => selectedStudentIds.includes(s.id));
             if (selected.length === 0) { alert("Selecione pelo menos um aluno."); return; }
             const printWindow = window.open('', '_blank');
@@ -1820,16 +1903,20 @@
                         const mainObsHtml = s.conselho_text ? '<div class="section-title">Obs. Conselho (Principal):</div><div style="font-size:12px;">"' + s.conselho_text + '"</div>' : '';
                         const activitySummary = getActivityStudentSummary(activityTracking, s.name);
                         const activityAttention = activitySummary ? activitySummary.entries.filter(entry => entry.status !== "completed") : [];
-                        const activityItemsHtml = activityAttention.slice(0, 18).map(entry => '<span class="source-tag">' + formatActivityStatusLabel(entry.status) + ':</span>' + entry.label + ' (' + entry.sheet + ')').join("<br>");
+                        const activityItemsHtml = activityAttention.slice(0, 18).map(entry => '<span class="source-tag">' + formatActivityStatusLabel(entry.status) + ':</span>' + entry.label).join("<br>");
                         const activityHtml = activitySummary && activitySummary.total > 0
                             ? '<div class="section-title">Acompanhamento de atividades:</div><div class="comment-box"><strong>Resumo:</strong> ' + activitySummary.completed + ' concluídas de ' + activitySummary.total + '; ' + activitySummary.not_completed + ' não concluídas; ' + activitySummary.blank + ' em branco; ' + activitySummary.requires_evaluation + ' requerem avaliação.</div>' + (activityAttention.length > 0 ? '<div class="comment-box">' + activityItemsHtml + (activityAttention.length > 18 ? '<br><em>... e mais ' + (activityAttention.length - 18) + ' pendência(s).</em>' : '') + '</div>' : '')
+                            : '';
+                        const naSummary = getNAStudentSummary(reportData, s.name, naJustifications || {});
+                        const naHtml = naSummary && naSummary.count >= 2
+                            ? '<div class="section-title">NA na chamada:</div><div class="comment-box"><strong>' + naSummary.count + ' registro(s) pendente(s).</strong> ' + naSummary.entries.slice(0, 12).map(entry => entry.uc + ' - ' + entry.date).join('; ') + (naSummary.entries.length > 12 ? '; e mais ' + (naSummary.entries.length - 12) : '') + '</div>'
                             : '';
                         return '<div class="student-card">' +
                             '<div class="header-row"><span class="student-name">' + s.name + '</span><span style="' + statusColor + '; font-weight:bold;">' + s.status + '</span></div>' +
                             '<div class="info-grid"><div><strong>Frequência Global:</strong> ' + s.averageFreq + '%</div><div><strong>Contra Turno:</strong> ' + s.contra_turno_desc + '</div></div>' +
                             (s.low_freq_ucs.length > 0 ? '<div style="font-size:12px; color:#ca8a04;">⚠️ Baixa Frequência: ' + s.low_freq_ucs.join(", ") + '</div>' : '') +
                             (s.failed_perf_ucs.length > 0 ? '<div style="font-size:12px; color:#dc2626;">❌ Desempenho: ' + s.failed_perf_ucs.join(", ") + '</div>' : '') +
-                            mainObsHtml + activityHtml + obsHtml + '</div>';
+                            mainObsHtml + naHtml + activityHtml + obsHtml + '</div>';
                     }).join('')}
                     </div>
                     <script>
@@ -1971,6 +2058,8 @@
             const [data, setData] = useState(null);
             const [activityTracking, setActivityTracking] = useState(null);
             const [dragActive, setDragActive] = useState(false);
+            const activityUploadSequence = useRef(0);
+            const [naJustifications, setNaJustifications] = useState({});
             
             // --- MODAIS ---
             const [showAtaModal, setShowAtaModal] = useState(false);
@@ -2009,6 +2098,19 @@
                     if(data.tutor2) setTutor2Name(data.tutor2);
                 }
             }, [data]);
+
+            useEffect(() => {
+                if (!data || !data.turma) {
+                    setNaJustifications({});
+                    return;
+                }
+                try {
+                    const saved = localStorage.getItem(getNAJustificationStorageKey(data.turma));
+                    setNaJustifications(saved ? JSON.parse(saved) : {});
+                } catch (error) {
+                    setNaJustifications({});
+                }
+            }, [data ? data.turma : ""]);
 
             // Carrega notas locais ou do Firestore e inclui também registros feitos para a turma inteira.
             useEffect(() => {
@@ -2065,9 +2167,12 @@
             };
             const handleActivityFile = async (file) => {
                 if (!file || !data) return;
+                const uploadSequence = ++activityUploadSequence.current;
+                setActivityTracking(null);
                 try {
                     const buffer = await file.arrayBuffer();
                     const tracking = processActivityWorkbook(buffer, data.students, file.name);
+                    if (uploadSequence !== activityUploadSequence.current) return;
                     const hasMatchedStudents = tracking && Object.keys(tracking.students || {}).length > 0;
                     if (!tracking || tracking.sheets.length === 0 || !hasMatchedStudents) {
                         setActivityTracking(null);
@@ -2076,6 +2181,16 @@
                     }
                     setActivityTracking(tracking);
                 } catch (e) { alert("Erro ao ler o acompanhamento de atividades: " + e.message); }
+            };
+            const toggleNAJustification = (entry) => {
+                if (!data || !data.turma || !entry || !entry.key) return;
+                setNaJustifications(previous => {
+                    const next = { ...previous };
+                    if (next[entry.key]) delete next[entry.key];
+                    else next[entry.key] = { justifiedAt: new Date().toISOString(), sheet: entry.sheet, date: entry.date };
+                    try { localStorage.setItem(getNAJustificationStorageKey(data.turma), JSON.stringify(next)); } catch (error) {}
+                    return next;
+                });
             };
             const handleLogoUpload = (e) => { const file = e.target.files[0]; if(file) { const r = new FileReader(); r.onloadend=()=>{setCustomLogo(r.result)}; r.readAsDataURL(file); } };
             const handleDrop = (e) => { e.preventDefault(); setDragActive(false); if(e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]); };
@@ -2157,6 +2272,10 @@
             const toggleSelectAll = () => setReportSelection(reportSelection.length === filteredStudents.length ? [] : filteredStudents.map(s => s.id));
             const activityAttentionStudents = activityTracking ? Object.values(activityTracking.students).filter(student => student.not_completed + student.blank + student.requires_evaluation > 0).sort((a, b) => (b.not_completed + b.blank + b.requires_evaluation) - (a.not_completed + a.blank + a.requires_evaluation)) : [];
             const selectedActivitySummary = selectedStudentForModal ? getActivityStudentSummary(activityTracking, selectedStudentForModal.name) : null;
+            const naAttentionStudents = data && data.naAlerts ? Object.values(data.naAlerts.students).map(student => getNAStudentSummary(data, student.name, naJustifications)).filter(student => student && student.count >= 2).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, "pt-BR")) : [];
+            const selectedNAStudentSummary = selectedStudentForModal ? getNAStudentSummary(data, selectedStudentForModal.name, naJustifications) : null;
+            const selectedNAStudentRaw = selectedStudentForModal && data && data.naAlerts && data.naAlerts.students ? data.naAlerts.students[normalizeName(selectedStudentForModal.name)] : null;
+            const naAttentionTotal = naAttentionStudents.reduce((total, student) => total + student.count, 0);
 
             if (!data) {
                 return (
@@ -2294,11 +2413,32 @@
                                                     {selectedActivitySummary.entries.filter(entry => entry.status !== "completed").slice(0, 30).map((entry, index) => (
                                                         <div key={`${entry.sheet}-${entry.label}-${index}`} className="bg-white border border-red-100 rounded-md px-3 py-2 text-xs flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
                                                             <span className="font-medium text-gray-700">{entry.label}</span>
-                                                            <span className={`font-bold ${entry.status === 'not_completed' ? 'text-red-700' : entry.status === 'blank' ? 'text-gray-600' : 'text-yellow-700'}`}>{formatActivityStatusLabel(entry.status)} <span className="font-normal text-gray-400">({entry.sheet})</span></span>
+                                                            <span className={`font-bold ${entry.status === 'not_completed' ? 'text-red-700' : entry.status === 'blank' ? 'text-gray-600' : 'text-yellow-700'}`}>{formatActivityStatusLabel(entry.status)}</span>
                                                         </div>
                                                     ))}
                                                     {selectedActivitySummary.entries.filter(entry => entry.status !== "completed").length > 30 && <div className="text-[11px] text-gray-500 italic pt-1">E mais {selectedActivitySummary.entries.filter(entry => entry.status !== "completed").length - 30} pendência(s) nesta planilha.</div>}
                                                 </div>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {selectedNAStudentRaw && selectedNAStudentRaw.entries.length > 0 && (
+                                        <div className="mb-6 bg-red-50 rounded-xl border border-red-200 overflow-hidden">
+                                            <div className="bg-red-100 px-4 py-2 border-b border-red-200 flex justify-between items-center">
+                                                <h3 className="text-sm font-bold text-red-800 flex items-center gap-2"><IconAlertTriangle className="w-4 h-4"/> Registros NA da chamada</h3>
+                                                <span className="text-[10px] font-bold text-red-700 uppercase">{selectedNAStudentSummary ? selectedNAStudentSummary.count : 0} pendente(s)</span>
+                                            </div>
+                                            <div className="p-4 space-y-2 max-h-72 overflow-y-auto custom-scrollbar">
+                                                <p className="text-xs text-gray-600 mb-3">Se o instrutor justificar o registro, ele deixa de contar no alerta. Se a planilha for corrigida, o registro desaparece automaticamente no próximo upload.</p>
+                                                {selectedNAStudentRaw.entries.map(entry => {
+                                                    const justified = Boolean(naJustifications[entry.key]);
+                                                    return (
+                                                        <div key={entry.key} className={`bg-white border rounded-md px-3 py-2 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 ${justified ? 'border-green-200' : 'border-red-100'}`}>
+                                                            <div className="text-xs"><div className="font-bold text-gray-700">{entry.uc} · {entry.date}</div><div className="text-gray-500">Aba {entry.sheet}</div></div>
+                                                            <button onClick={() => toggleNAJustification(entry)} className={`px-3 py-1.5 rounded-md text-[11px] font-bold border ${justified ? 'bg-green-50 text-green-700 border-green-200' : 'bg-red-50 text-red-700 border-red-200 hover:bg-red-100'}`}>{justified ? 'Reabrir NA' : 'Marcar como justificado'}</button>
+                                                        </div>
+                                                    );
+                                                })}
                                             </div>
                                         </div>
                                     )}
@@ -2317,7 +2457,7 @@
                             <div className="flex items-center gap-4"><img src="https://upload.wikimedia.org/wikipedia/commons/thumb/8/86/Senac_logo.svg/500px-Senac_logo.svg.png" className="h-12 w-auto object-contain" /><div><h1 className="text-lg font-bold text-senac-blue leading-tight">Gestão de Frequência - Relatório e ATA</h1><div className="text-xs font-bold text-senac-orange uppercase mb-1 leading-tight max-w-lg">{data.course}</div><div className="flex items-center gap-2 text-xs"><span className="font-medium text-gray-500">Turma: {data.turma}</span><button onClick={() => { setData(null); setActivityTracking(null); }} className="text-senac-blue hover:underline bg-blue-50 px-2 py-0.5 rounded-full flex items-center gap-1 transition-colors"><IconRefreshCw className="w-3 h-3" /> Trocar</button><span className="text-gray-300">|</span><span className="text-gray-400">Usuário: Acesso Livre</span><button onClick={() => {if(confirm('Reiniciar sistema?')) window.location.reload()}} className="text-red-400 hover:underline flex items-center gap-1 ml-2"><IconLogOut className="w-3 h-3"/> Sair</button></div></div></div>
                             <div className="flex items-center gap-3">
                                 <label className="cursor-pointer bg-white border border-senac-orange text-senac-orange hover:bg-orange-50 px-4 py-2 rounded-lg flex items-center gap-2 shadow transition-all active:scale-95 text-sm font-medium" title="Ler planilha de atividades"><IconUploadCloud className="w-4 h-4" /> Ler atividades <input type="file" className="hidden" accept=".xlsx,.xlsm,.xls" onChange={(e) => { handleActivityFile(e.target.files[0]); e.target.value = ''; }} /></label>
-                                <button onClick={() => generateReport(reportSelection, data.students, data.turma, data.course, tutor1Name, tutor2Name, activityTracking)} className="bg-white border border-senac-blue text-senac-blue hover:bg-blue-50 px-4 py-2 rounded-lg flex items-center gap-2 shadow transition-all active:scale-95 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed" disabled={reportSelection.length === 0}><IconPrinter className="w-4 h-4" /> Gerar Relatório {reportSelection.length > 0 && `(${reportSelection.length})`}</button>
+                                <button onClick={() => generateReport(reportSelection, data.students, data.turma, data.course, tutor1Name, tutor2Name, activityTracking, data, naJustifications)} className="bg-white border border-senac-blue text-senac-blue hover:bg-blue-50 px-4 py-2 rounded-lg flex items-center gap-2 shadow transition-all active:scale-95 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed" disabled={reportSelection.length === 0}><IconPrinter className="w-4 h-4" /> Gerar Relatório {reportSelection.length > 0 && `(${reportSelection.length})`}</button>
                                 <button onClick={() => setShowAtaModal(!showAtaModal)} className="bg-senac-blue hover:bg-blue-800 text-white px-4 py-2 rounded-lg flex items-center gap-2 shadow transition-all active:scale-95 text-sm font-medium"><IconFileText className="w-4 h-4" /> Gerar ATA</button>
                             </div>
                         </div>
@@ -2360,6 +2500,17 @@
                                         </div>
                                     ))}
                                 </div>
+                            </div>
+                        )}
+                        {naAttentionStudents.length > 0 && (
+                            <div className="mb-6 bg-red-50 border border-red-200 border-l-4 border-l-red-600 rounded-lg p-4 text-sm text-red-900 shadow-sm">
+                                <div className="font-bold flex items-center gap-2 mb-2"><IconAlertTriangle className="w-4 h-4"/> Atenção: alunos com 2 ou mais registros NA</div>
+                                <div className="flex flex-wrap gap-2 mb-3">
+                                    <div className="bg-white/80 border border-red-100 rounded-md px-3 py-2"><div className="font-bold text-xs text-red-800">Alunos</div><div className="text-lg font-bold">{naAttentionStudents.length}</div></div>
+                                    <div className="bg-white/80 border border-red-100 rounded-md px-3 py-2"><div className="font-bold text-xs text-red-800">NA pendentes</div><div className="text-lg font-bold">{naAttentionTotal}</div></div>
+                                </div>
+                                <div className="text-xs"><strong>Alunos:</strong> {naAttentionStudents.slice(0, 16).map(student => `${student.name} (${student.count} NA)`).join("; ")}{naAttentionStudents.length > 16 ? `; e mais ${naAttentionStudents.length - 16}` : ""}</div>
+                                <div className="text-[11px] text-red-700 mt-2">O instrutor pode justificar cada registro no quadro individual do aluno.</div>
                             </div>
                         )}
                         {activityTracking && activityAttentionStudents.length > 0 && (
@@ -2405,6 +2556,7 @@
                                 const isDropout = student.is_dropout;
                                 const isProcess = student.is_process_dropout;
                                 const activitySummary = getActivityStudentSummary(activityTracking, student.name);
+                                const naSummary = getNAStudentSummary(data, student.name, naJustifications);
                                 
                                 let displayFreq = student.averageFreq;
                                 let ucStatus = null;
@@ -2450,6 +2602,12 @@
                                                     {activitySummary.blank > 0 && <span className="bg-gray-100 text-gray-700 px-2 py-1 rounded">Em branco {activitySummary.blank}</span>}
                                                     {activitySummary.requires_evaluation > 0 && <span className="bg-yellow-100 text-yellow-700 px-2 py-1 rounded">Avaliar {activitySummary.requires_evaluation}</span>}
                                                     {activitySummary.not_completed + activitySummary.blank + activitySummary.requires_evaluation === 0 && <span className="bg-green-50 text-green-700 px-2 py-1 rounded">Tudo avaliado</span>}
+                                                </div>
+                                            )}
+                                            {naSummary && naSummary.count >= 2 && (
+                                                <div className="mt-2 pt-2 border-t border-red-100 flex items-center justify-between gap-2 text-[10px] font-bold">
+                                                    <span className="bg-red-100 text-red-700 px-2 py-1 rounded">NA em atenção: {naSummary.count}</span>
+                                                    <span className="text-red-600">Abrir para justificar</span>
                                                 </div>
                                             )}
                                             <div className="flex items-center gap-2 text-[11px] text-gray-500 mt-3 pt-2 border-t border-gray-50"><IconCalendar className="w-3 h-3 text-gray-400" /><span>Contra Turno: <span className={`font-semibold ${student.contra_turno_desc !== "Sem Contra Turno" ? 'text-senac-blue' : 'text-gray-400'}`}>{student.contra_turno_desc}</span></span></div>
