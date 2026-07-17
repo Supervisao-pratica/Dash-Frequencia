@@ -559,6 +559,87 @@
             }
         };
 
+        const STUDENT_CONTACT_STORAGE_PREFIX = "student_contacts_v1_";
+
+        const makeStudentContactStorageKey = (turma) => `${STUDENT_CONTACT_STORAGE_PREFIX}${cleanNotebookKey(turma, "TURMA_DESCONHECIDA")}`;
+        const makeStudentContactDocId = (turma, studentKey) => `contact_${cleanNotebookKey(turma, "TURMA_DESCONHECIDA")}_${cleanNotebookKey(studentKey, "ALUNO")}`;
+
+        const normalizeStudentContactRecord = (contact, turma, studentKey, fallbackName = "") => ({
+            turmaKey: cleanNotebookKey(turma, "TURMA_DESCONHECIDA"),
+            studentKey: String(studentKey || normalizeName(fallbackName) || "").trim(),
+            ...normalizeStudentContact(contact, fallbackName),
+            updatedAt: String(contact && contact.updatedAt || new Date().toISOString()),
+            updatedBy: String(contact && contact.updatedBy || "")
+        });
+
+        const readStudentContactsLocal = (turma) => {
+            try {
+                const value = localStorage.getItem(makeStudentContactStorageKey(turma));
+                const parsed = value ? JSON.parse(value) : {};
+                return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+            } catch (error) {
+                console.error("Erro ao carregar contatos locais", error);
+                return {};
+            }
+        };
+
+        const writeStudentContactsLocal = (turma, contacts) => {
+            try { localStorage.setItem(makeStudentContactStorageKey(turma), JSON.stringify(contacts)); }
+            catch (error) { console.error("Erro ao salvar contatos locais", error); }
+        };
+
+        const loadStudentContacts = async (turma) => {
+            const localContacts = readStudentContactsLocal(turma);
+            const db = await getNotebookFirestore();
+            if (!db) return { contacts: localContacts, source: "local" };
+            try {
+                const turmaKey = cleanNotebookKey(turma, "TURMA_DESCONHECIDA");
+                const snapshot = await db.collection("student_contacts").where("turmaKey", "==", turmaKey).get();
+                const contacts = { ...localContacts };
+                snapshot.docs.forEach(doc => {
+                    const record = normalizeStudentContactRecord({ id: doc.id, ...doc.data() }, turma, doc.data().studentKey);
+                    if (record.studentKey) contacts[record.studentKey] = record;
+                });
+                writeStudentContactsLocal(turma, contacts);
+                return { contacts, source: "cloud" };
+            } catch (error) {
+                console.error("Erro ao carregar contatos do Firebase; usando dados locais", error);
+                return { contacts: localContacts, source: "local" };
+            }
+        };
+
+        const persistStudentContact = async (turma, contact) => {
+            const studentKey = String(contact && contact.studentKey || normalizeName(contact && contact.studentContactName));
+            if (!studentKey) return { source: "local" };
+            const record = normalizeStudentContactRecord(contact, turma, studentKey, contact && contact.studentContactName);
+            const contacts = readStudentContactsLocal(turma);
+            contacts[studentKey] = record;
+            writeStudentContactsLocal(turma, contacts);
+            const db = await getNotebookFirestore();
+            if (!db) return { source: "local" };
+            try {
+                const payload = { ...record };
+                delete payload.id;
+                await db.collection("student_contacts").doc(makeStudentContactDocId(turma, studentKey)).set(payload, { merge: true });
+                return { source: "cloud" };
+            } catch (error) {
+                console.error("Erro ao salvar contato no Firebase; dados mantidos localmente", error);
+                return { source: "local" };
+            }
+        };
+
+        const seedImportedStudentContacts = async (turma, students) => {
+            const loaded = await loadStudentContacts(turma);
+            const imported = (students || []).map(student => ({
+                ...normalizeStudentContact(student, student.name),
+                studentKey: normalizeName(student.name)
+            })).filter(contact => contact.studentKey && [contact.studentPhone, contact.studentEmail, contact.supervisorName, contact.supervisorPhone, contact.supervisorEmail].some(Boolean));
+            const missing = imported.filter(contact => !loaded.contacts[contact.studentKey]);
+            let source = loaded.source;
+            for (const contact of missing) source = (await persistStudentContact(turma, contact)).source;
+            return source;
+        };
+
         const loadNotebookNotes = async (turma, instructorName) => {
             const storageKey = makeNotebookStorageKey(turma, instructorName);
             const legacyKey = `instructor_notes_v2_${cleanNotebookKey(turma, "TURMA_DESCONHECIDA")}_${cleanNotebookKey(instructorName, "INSTRUTOR")}`;
@@ -1511,6 +1592,64 @@
 
         const getNAJustificationStorageKey = (turma) => `na_justifications_v1_${String(turma || "TURMA").replace(/[^a-zA-Z0-9]/g, "")}`;
 
+        const compactGeneralHeader = (value) => normalizeText(value).replace(/[^A-Z0-9]/g, "");
+
+        const cleanContactValue = (value) => {
+            if (value === null || value === undefined) return "";
+            return String(value).trim();
+        };
+
+        const normalizeStudentContact = (contact = {}, fallbackName = "") => ({
+            studentContactName: cleanContactValue(contact.studentContactName || contact.studentName || fallbackName),
+            studentPhone: cleanContactValue(contact.studentPhone),
+            studentEmail: cleanContactValue(contact.studentEmail),
+            supervisorName: cleanContactValue(contact.supervisorName),
+            supervisorPhone: cleanContactValue(contact.supervisorPhone),
+            supervisorEmail: cleanContactValue(contact.supervisorEmail)
+        });
+
+        const parseGeneralDataContacts = (workbook) => {
+            const sheetName = (workbook.SheetNames || []).find(name => compactGeneralHeader(name) === "DADOSGERAIS");
+            if (!sheetName) return {};
+            const rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1, defval: "", raw: true });
+            const headerRowIdx = rows.findIndex(row => {
+                const headers = (row || []).map(compactGeneralHeader);
+                return headers.some(header => header === "NOMEDOAPRENDIZ" || header === "NOMEDOALUNO") && headers.some(header => header.includes("SUPERVISOR"));
+            });
+            if (headerRowIdx === -1) return {};
+
+            const headers = (rows[headerRowIdx] || []).map(compactGeneralHeader);
+            const findColumn = (predicates, startAt = 0) => headers.findIndex((header, index) => index >= startAt && predicates.some(predicate => predicate(header)));
+            const studentNameCol = findColumn([header => header === "NOMEDOAPRENDIZ", header => header === "NOMEDOALUNO", header => header === "APRENDIZ"]);
+            const supervisorNameCol = findColumn([header => header === "SUPERVISOR", header => header === "NOMEDOSUPERVISOR"]);
+            const studentPhoneCol = findColumn([header => header.includes("CONTATODOAPRENDIZ"), header => header.includes("TELEFONEDOAPRENDIZ"), header => header.includes("CELULARDOAPRENDIZ"), header => header === "CONTATO"]);
+            const studentEmailCol = findColumn([header => header.includes("EMAILDOAPRENDIZ"), header => header.includes("EMAILDOALUNO")]);
+            const supervisorEmailCol = findColumn([header => header.includes("EMAILDOSUPERVISOR")]);
+            const supervisorPhoneCols = headers.reduce((columns, header, index) => {
+                const isPhone = header === "TELEFONE" || header === "CELULAR" || header.includes("TELEFONEDOSUPERVISOR") || header.includes("CELULARDOSUPERVISOR");
+                if (isPhone && (studentPhoneCol === -1 || index < studentPhoneCol)) columns.push(index);
+                return columns;
+            }, []);
+            if (studentNameCol === -1) return {};
+
+            const contacts = {};
+            rows.slice(headerRowIdx + 1).forEach(row => {
+                const studentName = cleanContactValue(row[studentNameCol]);
+                const studentKey = normalizeName(studentName);
+                if (!studentKey || studentKey.includes("TOTAL") || studentKey.includes("APRENDIZES")) return;
+                const supervisorPhones = supervisorPhoneCols.map(index => cleanContactValue(row[index])).filter(Boolean);
+                contacts[studentKey] = normalizeStudentContact({
+                    studentContactName: studentName,
+                    studentPhone: studentPhoneCol === -1 ? "" : row[studentPhoneCol],
+                    studentEmail: studentEmailCol === -1 ? "" : row[studentEmailCol],
+                    supervisorName: supervisorNameCol === -1 ? "" : row[supervisorNameCol],
+                    supervisorPhone: [...new Set(supervisorPhones)].join(" / "),
+                    supervisorEmail: supervisorEmailCol === -1 ? "" : row[supervisorEmailCol]
+                }, studentName);
+            });
+            return contacts;
+        };
+
         const processExcelFile = (arrayBuffer) => {
             try {
                 const XLSX = window.XLSX;
@@ -1520,6 +1659,7 @@
                 
                 let tutor1 = "Não Identificado"; let tutor2 = "Não Identificado"; let course = "Curso não identificado"; let turma = "Turma não identificada";
                 const sheetNames = workbook.SheetNames;
+                const generalDataContacts = parseGeneralDataContacts(workbook);
                 
                 const uc1SheetName = sheetNames.find(n => n.toUpperCase().replace(/\s/g, '').includes("UC1"));
                 const uc7SheetName = sheetNames.find(n => n.toUpperCase().replace(/\s/g, '').includes("UC7"));
@@ -1651,6 +1791,7 @@
                         is_dropout: false, is_process_dropout: false, dropout_reason: "", 
                         conselho_text: conselhoColIdx !== -1 ? String(row[conselhoColIdx] || "").trim() : "",
                         contra_turno_desc: normalizeContraTurno(contraTurnoVal), 
+                        ...normalizeStudentContact(generalDataContacts[normalizeName(name)], name),
                         all_observations: [], comments: [],
                         uc_scores: {} 
                     };
@@ -2010,6 +2151,9 @@
             if (selected.length === 0) { alert("Selecione pelo menos um aluno."); return; }
             const printWindow = window.open('', '_blank');
             const dateStr = new Date().toLocaleDateString('pt-BR');
+            const studentRecipients = selected.map(s => ({ name: s.studentContactName || s.name, email: s.studentEmail || "" }));
+            const supervisorRecipients = selected.map(s => ({ name: s.supervisorName || "Supervisor", email: s.supervisorEmail || "" }));
+            const recipientLabel = selected.length === 1 ? "" : "s selecionados";
             const htmlContent = `
                 <html lang="pt-BR"><head><meta charset="UTF-8"><title>Relatório</title>
                 <style>
@@ -2018,6 +2162,8 @@
                     .menu-actions { display: flex; gap: 8px; }
                     .menu-title { color: white; font-weight: bold; font-size: 14px; }
                     .btn { border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 12px; color: white; background-color: #F5821F; }
+                    .recipient-select { border: 0; border-radius: 4px; padding: 8px 10px; font-size: 12px; color: #123; font-weight: bold; }
+                    @media (max-width: 760px) { .report-menu { align-items: flex-start; gap: 8px; flex-direction: column; } .menu-actions { flex-wrap: wrap; } }
                     @media print { .report-menu { display: none !important; } }
                     .student-card { border: 1px solid #ddd; padding: 15px; margin-bottom: 15px; border-radius: 8px; }
                     .header-row { display: flex; justify-content: space-between; border-bottom: 2px solid #F5821F; padding-bottom: 5px; margin-bottom: 10px; }
@@ -2028,7 +2174,7 @@
                     .source-tag { font-weight: bold; color: #F5821F; margin-right: 5px; }
                     .obs-text { white-space: pre-wrap; word-break: break-word; }
                 </style></head><body>
-                    <div class="report-menu"><div class="menu-title">Relatório</div><div class="menu-actions"><button onclick="copyReportVisual()" id="copy-report" class="btn">Copiar para e-mail</button><button onclick="window.print()" class="btn">Imprimir</button></div></div>
+                    <div class="report-menu"><div class="menu-title">Relatório</div><div class="menu-actions"><select id="report-recipient" class="recipient-select"><option value="student">Enviar para estudante${recipientLabel}</option><option value="supervisor">Enviar para supervisor${recipientLabel}</option></select><button onclick="sendReportEmail()" class="btn">Enviar por Outlook</button><button onclick="copyReportVisual()" id="copy-report" class="btn">Copiar para e-mail</button><button onclick="window.print()" class="btn">Imprimir</button></div></div>
                     <div id="report-content">
                     <div style="text-align:center; margin-top: 10px;"><img src="https://upload.wikimedia.org/wikipedia/commons/thumb/8/86/Senac_logo.svg/500px-Senac_logo.svg.png" width="80" /></div>
                     <h1 style="text-align:center; font-size:18px;">Relatório de Desempenho</h1>
@@ -2056,13 +2202,27 @@
                             : '';
                         return '<div class="student-card">' +
                             '<div class="header-row"><span class="student-name">' + s.name + '</span><span style="' + statusColor + '; font-weight:bold;">' + s.status + '</span></div>' +
-                            '<div class="info-grid"><div><strong>Frequência Global:</strong> ' + s.averageFreq + '%</div><div><strong>Contra Turno:</strong> ' + s.contra_turno_desc + '</div></div>' +
+                            '<div class="info-grid"><div><strong>Frequência Global:</strong> ' + s.averageFreq + '%</div><div><strong>Contra Turno:</strong> ' + s.contra_turno_desc + '</div><div><strong>Aluno:</strong> ' + (s.studentContactName || s.name) + '<br><strong>E-mail:</strong> ' + (s.studentEmail || 'Não informado') + '<br><strong>Telefone:</strong> ' + (s.studentPhone || 'Não informado') + '</div><div><strong>Supervisor:</strong> ' + (s.supervisorName || 'Não informado') + '<br><strong>E-mail:</strong> ' + (s.supervisorEmail || 'Não informado') + '<br><strong>Telefone:</strong> ' + (s.supervisorPhone || 'Não informado') + '</div></div>' +
                             (s.low_freq_ucs.length > 0 ? '<div style="font-size:12px; color:#ca8a04;">⚠️ Baixa Frequência: ' + s.low_freq_ucs.join(", ") + '</div>' : '') +
                             (s.failed_perf_ucs.length > 0 ? '<div style="font-size:12px; color:#dc2626;">❌ Desempenho: ' + s.failed_perf_ucs.join(", ") + '</div>' : '') +
                             mainObsHtml + naHtml + activityHtml + obsHtml + '</div>';
                     }).join('')}
                     </div>
                     <script>
+                        const studentRecipients = ${JSON.stringify(studentRecipients)};
+                        const supervisorRecipients = ${JSON.stringify(supervisorRecipients)};
+                        function sendReportEmail() {
+                            const recipientType = document.getElementById('report-recipient')?.value === 'supervisor' ? 'supervisor' : 'student';
+                            const recipients = recipientType === 'supervisor' ? supervisorRecipients : studentRecipients;
+                            const emails = [...new Set(recipients.map(item => String(item.email || '').trim()).filter(Boolean))];
+                            if (emails.length === 0) {
+                                alert(recipientType === 'supervisor' ? 'Nenhum e-mail de supervisor foi informado.' : 'Nenhum e-mail de estudante foi informado.');
+                                return;
+                            }
+                            const subject = 'Relatório de Desempenho - Turma ${turma}';
+                            const body = document.getElementById('report-content')?.innerText || 'Relatório de Desempenho';
+                            window.location.href = 'mailto:' + emails.join(';') + '?subject=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(body);
+                        }
                         function copyReportVisual() {
                             const content = document.getElementById('report-content');
                             const button = document.getElementById('copy-report');
@@ -2209,6 +2369,10 @@
             const [showAtaModal, setShowAtaModal] = useState(false);
             const [selectedStudentForModal, setSelectedStudentForModal] = useState(null);
             const [instructorNotesForStudent, setInstructorNotesForStudent] = useState([]); // Notas do instrutor para o aluno selecionado
+            const [contactDraft, setContactDraft] = useState(normalizeStudentContact());
+            const [contactSaving, setContactSaving] = useState(false);
+            const [contactStorageSource, setContactStorageSource] = useState("local");
+            const [contactMessage, setContactMessage] = useState("");
 
             // Novo Estado V72 - Instrutor Selecionado para Notas
             const [selectedInstructorForNotes, setSelectedInstructorForNotes] = useState(null);
@@ -2264,6 +2428,36 @@
                 }
             }, [data ? data.turma : ""]);
 
+            useEffect(() => {
+                if (!data || !data.turma) return undefined;
+                let isCurrent = true;
+                loadStudentContacts(data.turma).then(loaded => {
+                    if (!isCurrent) return;
+                    setContactStorageSource(loaded.source);
+                    if (Object.keys(loaded.contacts).length === 0) return;
+                    setData(previous => {
+                        if (!previous || previous.turma !== data.turma) return previous;
+                        const students = previous.students.map(student => {
+                            const saved = loaded.contacts[normalizeName(student.name)];
+                            return saved ? { ...student, ...normalizeStudentContact(saved, student.name) } : student;
+                        });
+                        return { ...previous, students };
+                    });
+                }).catch(error => console.error("Erro ao carregar contatos da turma", error));
+                return () => { isCurrent = false; };
+            }, [data ? data.turma : ""]);
+
+            useEffect(() => {
+                if (!selectedStudentForModal || !data) {
+                    setContactDraft(normalizeStudentContact());
+                    setContactMessage("");
+                    return;
+                }
+                const current = data.students.find(student => student.id === selectedStudentForModal.id) || selectedStudentForModal;
+                setContactDraft(normalizeStudentContact(current, current.name));
+                setContactMessage("");
+            }, [selectedStudentForModal ? selectedStudentForModal.id : null, data]);
+
             // Carrega notas locais ou do Firestore e inclui também registros feitos para a turma inteira.
             useEffect(() => {
                 if (selectedStudentForModal && data) {
@@ -2305,17 +2499,75 @@
                 if (!file) return;
                 try {
                     const buffer = await file.arrayBuffer();
+                    const workbook = window.XLSX.read(buffer, { type: 'array', bookSheets: true });
+                    if ((workbook.SheetNames || []).some(name => compactGeneralHeader(name) === "DADOSGERAIS")) {
+                        if (!data) throw new Error("Este é um arquivo de Informações Gerais. Carregue primeiro a planilha de frequência da turma.");
+                        await handleGeneralDataFile(file, buffer);
+                        return;
+                    }
                     const processed = processExcelFile(buffer);
                     if (processed) { 
                         setData(processed); 
                         setActivityTracking(null);
                         setReportSelection([]); 
                         setSelectedUC('all');
+                        seedImportedStudentContacts(processed.turma, processed.students).catch(error => console.error("Erro ao sincronizar contatos importados", error));
                         if (processed.attendanceWarnings && processed.attendanceWarnings.length > 0) {
                             setTimeout(() => alert(summarizeAttendanceWarnings(processed.attendanceWarnings)), 100);
                         }
                     }
                 } catch (e) { alert("Erro: " + e.message); }
+            };
+
+            const handleGeneralDataFile = async (file, providedBuffer = null) => {
+                if (!file || !data) return;
+                try {
+                    const buffer = providedBuffer || await file.arrayBuffer();
+                    const workbook = window.XLSX.read(buffer, { type: 'array', cellDates: true, cellStyles: true });
+                    const importedContacts = parseGeneralDataContacts(workbook);
+                    const importedKeys = Object.keys(importedContacts);
+                    if (importedKeys.length === 0) throw new Error("A aba DADOS GERAIS não foi encontrada ou não possui alunos reconhecíveis.");
+                    const loaded = await loadStudentContacts(data.turma);
+                    let matched = 0;
+                    const students = data.students.map(student => {
+                        const key = normalizeName(student.name);
+                        const imported = importedContacts[key];
+                        if (!imported) return student;
+                        matched += 1;
+                        const saved = loaded.contacts[key];
+                        return { ...student, ...normalizeStudentContact(saved || imported, student.name) };
+                    });
+                    setData(previous => previous ? { ...previous, students } : previous);
+                    for (const key of importedKeys) {
+                        if (!loaded.contacts[key]) await persistStudentContact(data.turma, { ...importedContacts[key], studentKey: key });
+                    }
+                    setContactStorageSource((await getNotebookFirestore()) ? "cloud" : "local");
+                    alert(`Dados Gerais carregados: ${matched} aluno(s) associado(s) à turma.`);
+                } catch (error) {
+                    alert("Erro ao ler os Dados Gerais: " + error.message);
+                }
+            };
+
+            const saveStudentContact = async () => {
+                if (!data || !selectedStudentForModal) return;
+                const index = data.students.findIndex(student => student.id === selectedStudentForModal.id);
+                if (index === -1) return;
+                setContactSaving(true);
+                setContactMessage("");
+                const student = data.students[index];
+                const normalized = normalizeStudentContact(contactDraft, student.name);
+                const updatedStudent = { ...student, ...normalized };
+                setData(previous => previous ? { ...previous, students: previous.students.map((item, itemIndex) => itemIndex === index ? updatedStudent : item) } : previous);
+                setSelectedStudentForModal(updatedStudent);
+                try {
+                    const saved = await persistStudentContact(data.turma, { ...normalized, studentKey: normalizeName(student.name) });
+                    setContactStorageSource(saved.source);
+                    setContactMessage(saved.source === "cloud" ? "Dados salvos no Firebase e compartilhados com a equipe." : "Dados salvos neste dispositivo.");
+                } catch (error) {
+                    setContactMessage("Não foi possível sincronizar com o Firebase; os dados ficaram salvos localmente.");
+                } finally {
+                    setContactSaving(false);
+                }
             };
             const handleActivityFile = async (file) => {
                 if (!file || !data) return;
@@ -2464,8 +2716,9 @@
                                 <p className="text-gray-500 mb-8 max-w-md mx-auto">Arraste sua planilha <strong>(.xlsm)</strong> para gerar o dashboard.</p>
                                 <div className={`border-2 border-dashed rounded-xl p-12 transition-all cursor-pointer ${dragActive ? 'border-senac-orange bg-orange-50 scale-105' : 'border-gray-300 hover:border-senac-blue hover:bg-blue-50'}`} onDragEnter={(e) => { e.preventDefault(); setDragActive(true); }} onDragLeave={(e) => { e.preventDefault(); setDragActive(false); }} onDragOver={(e) => e.preventDefault()} onDrop={handleDrop} onClick={() => document.getElementById('fileUpload').click()}>
                                     <IconUploadCloud className={`w-16 h-16 mx-auto mb-4 ${dragActive ? 'text-senac-orange' : 'text-gray-400'}`} /><p className="text-gray-700 font-semibold text-lg">Clique ou arraste o arquivo aqui</p>
-                                    <input id="fileUpload" type="file" className="hidden" accept=".xlsx, .xlsm" onChange={(e) => handleFile(e.target.files[0])} />
+                                    <input id="fileUpload" type="file" className="hidden" accept=".xlsx, .xls, .xlsm" onChange={(e) => { handleFile(e.target.files[0]); e.target.value = ''; }} />
                                 </div >
+                                <p className="text-xs text-gray-500 mt-4">Depois de abrir a turma, você poderá carregar o arquivo separado de Informações Gerais.</p>
                                 <div className="mt-8 pt-6 border-t border-gray-100"><button onClick={() => { setData(DEMO_DATA); setActivityTracking(null); setSelectedUC('all'); }} className="text-sm text-gray-400 hover:text-senac-orange">Testar com versão Demo</button></div>
                             </div>
                         </div>
@@ -2539,6 +2792,22 @@
                                 <div className="p-8 overflow-y-auto">
                                     <div className="mb-6 flex justify-between items-center"><h3 className="text-sm font-bold text-gray-400 uppercase tracking-wider">Situação Atual</h3><label className="flex items-center gap-2 text-xs bg-purple-50 px-2 py-1 rounded border border-purple-200 cursor-pointer hover:bg-purple-100"><input type="checkbox" checked={selectedStudentForModal.is_process_dropout} onChange={() => toggleProcessDropout(selectedStudentForModal.id)} className="rounded text-purple-600 focus:ring-purple-500" /> Marcar como "Em Processo de Desligamento"</label></div>
                                     <div className="flex gap-2 mb-6">{selectedStudentForModal.is_dropout ? (<div className="bg-orange-100 text-orange-800 px-4 py-2 rounded-lg font-bold flex items-center gap-2"><IconLogOut className="w-5 h-5"/> {selectedStudentForModal.dropout_reason || "Evadido"}</div>) : selectedStudentForModal.is_process_dropout ? (<div className="bg-purple-100 text-purple-800 px-4 py-2 rounded-lg font-bold flex items-center gap-2"><IconClock className="w-5 h-5"/> Em Processo de Desligamento</div>) : (<>{selectedStudentForModal.needs_recuperacao && <div className="bg-red-100 text-red-800 px-4 py-2 rounded-lg font-bold flex items-center gap-2"><IconXCircle className="w-5 h-5"/> Recuperação Necessária</div>}{selectedStudentForModal.needs_conselho && !selectedStudentForModal.needs_recuperacao && <div className="bg-yellow-100 text-yellow-800 px-4 py-2 rounded-lg font-bold flex items-center gap-2"><IconAlertTriangle className="w-5 h-5"/> Conselho de Classe</div>}{!selectedStudentForModal.needs_recuperacao && !selectedStudentForModal.needs_conselho && <div className="bg-green-100 text-green-800 px-4 py-2 rounded-lg font-bold flex items-center gap-2"><IconCheckCircle className="w-5 h-5"/> Desenvolvimento Pleno</div>}</>)}</div>
+
+                                    <div className="mb-6 bg-blue-50 rounded-xl border border-blue-200 overflow-hidden">
+                                        <div className="bg-blue-100 px-4 py-2 border-b border-blue-200 flex justify-between items-center">
+                                            <h3 className="text-sm font-bold text-blue-800 flex items-center gap-2"><IconUser className="w-4 h-4"/> Dados de contato</h3>
+                                            <span className="text-[10px] font-bold uppercase text-blue-700">{contactStorageSource === "cloud" ? "Compartilhado no Firebase" : "Salvo localmente"}</span>
+                                        </div>
+                                        <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-3">
+                                            <label className="text-xs font-bold text-gray-600">Nome do aluno<input type="text" value={contactDraft.studentContactName} onChange={event => setContactDraft(previous => ({ ...previous, studentContactName: event.target.value }))} className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm font-normal outline-none focus:border-blue-500" /></label>
+                                            <label className="text-xs font-bold text-gray-600">Telefone do aluno<input type="text" value={contactDraft.studentPhone} onChange={event => setContactDraft(previous => ({ ...previous, studentPhone: event.target.value }))} className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm font-normal outline-none focus:border-blue-500" /></label>
+                                            <label className="text-xs font-bold text-gray-600">E-mail do aluno<input type="text" value={contactDraft.studentEmail} onChange={event => setContactDraft(previous => ({ ...previous, studentEmail: event.target.value }))} className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm font-normal outline-none focus:border-blue-500" /></label>
+                                            <label className="text-xs font-bold text-gray-600">Nome do supervisor<input type="text" value={contactDraft.supervisorName} onChange={event => setContactDraft(previous => ({ ...previous, supervisorName: event.target.value }))} className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm font-normal outline-none focus:border-blue-500" /></label>
+                                            <label className="text-xs font-bold text-gray-600">Telefone do supervisor<input type="text" value={contactDraft.supervisorPhone} onChange={event => setContactDraft(previous => ({ ...previous, supervisorPhone: event.target.value }))} className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm font-normal outline-none focus:border-blue-500" /></label>
+                                            <label className="text-xs font-bold text-gray-600">E-mail do supervisor<input type="text" value={contactDraft.supervisorEmail} onChange={event => setContactDraft(previous => ({ ...previous, supervisorEmail: event.target.value }))} className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm font-normal outline-none focus:border-blue-500" /></label>
+                                        </div>
+                                        <div className="px-4 pb-4 flex flex-wrap items-center justify-between gap-3"><span className="text-xs text-gray-500">Os dados podem ser corrigidos e ficam disponíveis para os usuários autorizados.</span><div className="flex items-center gap-3"><span className="text-xs text-green-700">{contactMessage}</span><button onClick={saveStudentContact} disabled={contactSaving} className="px-4 py-2 rounded-md bg-senac-blue hover:bg-blue-800 disabled:opacity-60 text-white text-xs font-bold">{contactSaving ? "Salvando..." : "Salvar dados"}</button></div></div>
+                                    </div>
                                     
                                     {/* SEÇÃO NOVA: APONTAMENTOS DO INSTRUTOR NO QUADRO DO ALUNO */}
                                     {instructorNotesForStudent.length > 0 && (
@@ -2648,6 +2917,7 @@
                         <div className="max-w-7xl mx-auto px-4 py-3 flex flex-col md:flex-row justify-between items-center gap-4">
                             <div className="flex items-center gap-4"><img src="https://upload.wikimedia.org/wikipedia/commons/thumb/8/86/Senac_logo.svg/500px-Senac_logo.svg.png" className="h-12 w-auto object-contain" /><div><h1 className="text-lg font-bold text-senac-blue leading-tight">Gestão de Frequência - Relatório e ATA</h1><div className="text-xs font-bold text-senac-orange uppercase mb-1 leading-tight max-w-lg">{data.course}</div><div className="flex items-center gap-2 text-xs"><span className="font-medium text-gray-500">Turma: {data.turma}</span><button onClick={() => { setData(null); setActivityTracking(null); }} className="text-senac-blue hover:underline bg-blue-50 px-2 py-0.5 rounded-full flex items-center gap-1 transition-colors"><IconRefreshCw className="w-3 h-3" /> Trocar</button><span className="text-gray-300">|</span><span className="text-gray-400">Usuário: Acesso Livre</span><button onClick={() => {if(confirm('Reiniciar sistema?')) window.location.reload()}} className="text-red-400 hover:underline flex items-center gap-1 ml-2"><IconLogOut className="w-3 h-3"/> Sair</button></div></div></div>
                             <div className="flex items-center gap-3">
+                                <label className="cursor-pointer bg-white border border-senac-blue text-senac-blue hover:bg-blue-50 px-4 py-2 rounded-lg flex items-center gap-2 shadow transition-all active:scale-95 text-sm font-medium" title="Ler a aba DADOS GERAIS"><IconUploadCloud className="w-4 h-4" /> Dados Gerais <input type="file" className="hidden" accept=".xlsx,.xlsm,.xls" onChange={(e) => { handleGeneralDataFile(e.target.files[0]); e.target.value = ''; }} /></label>
                                 <label className="cursor-pointer bg-white border border-senac-orange text-senac-orange hover:bg-orange-50 px-4 py-2 rounded-lg flex items-center gap-2 shadow transition-all active:scale-95 text-sm font-medium" title="Ler planilha de atividades"><IconUploadCloud className="w-4 h-4" /> Ler atividades <input type="file" className="hidden" accept=".xlsx,.xlsm,.xls" onChange={(e) => { handleActivityFile(e.target.files[0]); e.target.value = ''; }} /></label>
                                 <button onClick={() => generateReport(reportSelection, data.students, data.turma, data.course, tutor1Name, tutor2Name, activityTracking, data, naJustifications)} className="bg-white border border-senac-blue text-senac-blue hover:bg-blue-50 px-4 py-2 rounded-lg flex items-center gap-2 shadow transition-all active:scale-95 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed" disabled={reportSelection.length === 0}><IconPrinter className="w-4 h-4" /> Gerar Relatório {reportSelection.length > 0 && `(${reportSelection.length})`}</button>
                                 <button onClick={() => setShowAtaModal(!showAtaModal)} className="bg-senac-blue hover:bg-blue-800 text-white px-4 py-2 rounded-lg flex items-center gap-2 shadow transition-all active:scale-95 text-sm font-medium"><IconFileText className="w-4 h-4" /> Gerar ATA</button>
@@ -2803,6 +3073,7 @@
                                                 </div>
                                             )}
                                             <div className="flex items-center gap-2 text-[11px] text-gray-500 mt-3 pt-2 border-t border-gray-50"><IconCalendar className="w-3 h-3 text-gray-400" /><span>Contra Turno: <span className={`font-semibold ${student.contra_turno_desc !== "Sem Contra Turno" ? 'text-senac-blue' : 'text-gray-400'}`}>{student.contra_turno_desc}</span></span></div>
+                                            {(student.studentEmail || student.studentPhone || student.supervisorEmail || student.supervisorPhone) && <div className="mt-2 pt-2 border-t border-blue-50 text-[10px] text-gray-500 space-y-0.5"><div className="flex items-center gap-1"><IconMail className="w-3 h-3 text-senac-blue"/><span className="truncate">Aluno: {student.studentEmail || student.studentPhone || 'Contato não informado'}</span></div><div className="flex items-center gap-1"><IconUser className="w-3 h-3 text-senac-orange"/><span className="truncate">Supervisor: {student.supervisorName || student.supervisorEmail || student.supervisorPhone || 'Contato não informado'}</span></div></div>}
                                         </div>
                                     </div>
                                 );
