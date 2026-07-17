@@ -2153,6 +2153,8 @@
             const dateStr = new Date().toLocaleDateString('pt-BR');
             const studentRecipients = selected.map(s => ({ name: s.studentContactName || s.name, email: s.studentEmail || "" }));
             const supervisorRecipients = selected.map(s => ({ name: s.supervisorName || "Supervisor", email: s.supervisorEmail || "" }));
+            const selectedStudentNames = selected.map(s => s.name).join(", ");
+            const reportSubject = `Relatório de Desempenho - ${selectedStudentNames} - Turma ${turma}`;
             const recipientLabel = selected.length === 1 ? "" : "s selecionados";
             const htmlContent = `
                 <html lang="pt-BR"><head><meta charset="UTF-8"><title>Relatório</title>
@@ -2174,7 +2176,7 @@
                     .source-tag { font-weight: bold; color: #F5821F; margin-right: 5px; }
                     .obs-text { white-space: pre-wrap; word-break: break-word; }
                 </style></head><body>
-                    <div class="report-menu"><div class="menu-title">Relatório</div><div class="menu-actions"><select id="report-recipient" class="recipient-select"><option value="student">Enviar para estudante${recipientLabel}</option><option value="supervisor">Enviar para supervisor${recipientLabel}</option></select><button onclick="sendReportEmail()" class="btn">Enviar por Outlook</button><button onclick="copyReportVisual()" id="copy-report" class="btn">Copiar para e-mail</button><button onclick="window.print()" class="btn">Imprimir</button></div></div>
+                    <div class="report-menu"><div class="menu-title">Relatório</div><div class="menu-actions"><select id="report-recipient" class="recipient-select"><option value="student">Enviar para estudante${recipientLabel}</option><option value="supervisor">Enviar para supervisor${recipientLabel}</option></select><button onclick="sendReportEmail()" class="btn" title="Copia o layout formatado e abre o Outlook">Enviar por Outlook</button><button onclick="copyReportVisual()" id="copy-report" class="btn">Copiar para e-mail</button><button onclick="window.print()" class="btn">Imprimir</button></div></div>
                     <div id="report-content">
                     <div style="text-align:center; margin-top: 10px;"><img src="https://upload.wikimedia.org/wikipedia/commons/thumb/8/86/Senac_logo.svg/500px-Senac_logo.svg.png" width="80" /></div>
                     <h1 style="text-align:center; font-size:18px;">Relatório de Desempenho</h1>
@@ -2186,9 +2188,6 @@
                     ${selected.map(s => {
                         let statusColor = "color:#16a34a";
                         if(s.is_dropout) statusColor = "color:#f97316"; else if(s.is_process_dropout) statusColor = "color:#9333ea"; else if(s.needs_recuperacao) statusColor = "color:#dc2626"; else if(s.needs_conselho) statusColor = "color:#ca8a04";
-                        const obsHtml = s.all_observations && s.all_observations.length > 0
-                            ? '<div class="section-title">Relatos e Observações de Todas as Abas:</div>' + s.all_observations.map(o => '<div class="comment-box"><span class="source-tag">[' + o.source + ']</span><span class="obs-text">' + o.text + '</span></div>').join('')
-                            : '<div class="comment-box" style="font-style:italic;">Nenhuma observação extra encontrada.</div>';
                         const mainObsHtml = s.conselho_text ? '<div class="section-title">Obs. Conselho (Principal):</div><div style="font-size:12px;">"' + s.conselho_text + '"</div>' : '';
                         const activitySummary = getActivityStudentSummary(activityTracking, s.name);
                         const activityAttention = activitySummary ? activitySummary.entries.filter(entry => entry.status !== "completed") : [];
@@ -2202,10 +2201,10 @@
                             : '';
                         return '<div class="student-card">' +
                             '<div class="header-row"><span class="student-name">' + s.name + '</span><span style="' + statusColor + '; font-weight:bold;">' + s.status + '</span></div>' +
-                            '<div class="info-grid"><div><strong>Frequência Global:</strong> ' + s.averageFreq + '%</div><div><strong>Contra Turno:</strong> ' + s.contra_turno_desc + '</div><div><strong>Aluno:</strong> ' + (s.studentContactName || s.name) + '<br><strong>E-mail:</strong> ' + (s.studentEmail || 'Não informado') + '<br><strong>Telefone:</strong> ' + (s.studentPhone || 'Não informado') + '</div><div><strong>Supervisor:</strong> ' + (s.supervisorName || 'Não informado') + '<br><strong>E-mail:</strong> ' + (s.supervisorEmail || 'Não informado') + '<br><strong>Telefone:</strong> ' + (s.supervisorPhone || 'Não informado') + '</div></div>' +
+                            '<div class="info-grid"><div><strong>Frequência Global:</strong> ' + s.averageFreq + '%</div><div><strong>Contra Turno:</strong> ' + s.contra_turno_desc + '</div></div>' +
                             (s.low_freq_ucs.length > 0 ? '<div style="font-size:12px; color:#ca8a04;">⚠️ Baixa Frequência: ' + s.low_freq_ucs.join(", ") + '</div>' : '') +
                             (s.failed_perf_ucs.length > 0 ? '<div style="font-size:12px; color:#dc2626;">❌ Desempenho: ' + s.failed_perf_ucs.join(", ") + '</div>' : '') +
-                            mainObsHtml + naHtml + activityHtml + obsHtml + '</div>';
+                            mainObsHtml + naHtml + activityHtml + '</div>';
                     }).join('')}
                     </div>
                     <script>
@@ -2219,18 +2218,23 @@
                                 alert(recipientType === 'supervisor' ? 'Nenhum e-mail de supervisor foi informado.' : 'Nenhum e-mail de estudante foi informado.');
                                 return;
                             }
-                            const subject = 'Relatório de Desempenho - Turma ${turma}';
+                            const subject = ${JSON.stringify(reportSubject)};
                             const body = document.getElementById('report-content')?.innerText || 'Relatório de Desempenho';
-                            window.location.href = 'mailto:' + emails.join(';') + '?subject=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(body);
+                            copyReportVisual(() => {
+                                alert('O relatório formatado foi copiado. No Outlook, cole no corpo do e-mail com Ctrl+V para manter o layout.');
+                                window.location.href = 'mailto:' + emails.join(';') + '?subject=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(body);
+                            });
                         }
-                        function copyReportVisual() {
+                        function copyReportVisual(afterCopy) {
                             const content = document.getElementById('report-content');
                             const button = document.getElementById('copy-report');
                             if (!content) return;
                             const done = () => {
-                                if (!button) return;
-                                button.textContent = 'Copiado';
-                                setTimeout(() => { button.textContent = 'Copiar para e-mail'; }, 1800);
+                                if (button) {
+                                    button.textContent = 'Copiado';
+                                    setTimeout(() => { button.textContent = 'Copiar para e-mail'; }, 1800);
+                                }
+                                if (typeof afterCopy === 'function') afterCopy();
                             };
                             const fallback = () => {
                                 const range = document.createRange();
