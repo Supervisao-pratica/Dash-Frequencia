@@ -100,7 +100,7 @@
             if (cleanHex.length === 8) cleanHex = cleanHex.substring(2); 
             if (cleanHex.length !== 6) return false;
 
-            const knownOranges = ['ED7D31', 'F4B084', 'C65911', '833C0C', 'FFC000', 'FFA500', 'FF9900', 'FF6600', 'E26B0A', 'F8CBAD', 'D9D9D9'];
+            const knownOranges = ['ED7D31', 'F4B084', 'C65911', '833C0C', 'FFC000', 'FFA500', 'FF9900', 'FF6600', 'E26B0A', 'F8CBAD'];
             if (knownOranges.includes(cleanHex)) return true;
 
             const r = parseInt(cleanHex.substring(0, 2), 16);
@@ -113,6 +113,12 @@
             if (greenRatio < 0.20) return false; 
             if (greenRatio > 0.85) return false; 
             return true;
+        };
+
+        const getCellColorHex = (color) => {
+            if (!color) return "";
+            if (typeof color === "string") return color;
+            return color.rgb || color.argb || color.hex || "";
         };
 
         const isOrangeColorValue = (color) => {
@@ -139,10 +145,15 @@
 
         const isOrangeFillCell = (cell) => {
             const colors = [
-                cell && cell.s && cell.s.fgColor && cell.s.fgColor.rgb,
-                cell && cell.s && cell.s.bgColor && cell.s.bgColor.rgb
+                cell && cell.s && cell.s.fgColor,
+                cell && cell.s && cell.s.bgColor
             ].filter(Boolean);
-            return colors.some(isOrangeColorValue);
+            return colors.map(getCellColorHex).some(isOrangeColorValue);
+        };
+
+        const isOrangeFontCell = (cell) => {
+            const color = cell && cell.s && cell.s.font ? getCellColorHex(cell.s.font.color) : "";
+            return isOrangeFont(color) || isOrangeColorValue(color);
         };
 
         const isOrangeRowFill = (sheet, rowIndex, nameColIdx) => {
@@ -204,6 +215,7 @@
             turma: "202500023 (DEMO)",
             tutor1: "Bruna",
             tutor2: "Ana Claudia",
+            instructors: ["Bruna", "Ana Claudia"],
             ucs: ["UC1", "UC2", "UC3", "UC7"],
             courseDates: [],
             students: [
@@ -1136,6 +1148,8 @@
             "PENDENTE DESLIGAMENTO", "DESLIGAMENTO EM ANDAMENTO"
         ];
 
+        const hasDropoutKeywordInRow = (row) => hasAnyKeyword(rowToSearchText(row), STUDENT_DROPOUT_KEYWORDS);
+
         const NOT_DEVELOPED_KEYWORDS = [
             "NAO DESENVOLVEU", "NAO DESENVOLVIDO", "REPROVADO", "INSUFICIENTE"
         ];
@@ -1660,11 +1674,40 @@
                 let tutor1 = "Não Identificado"; let tutor2 = "Não Identificado"; let course = "Curso não identificado"; let turma = "Turma não identificada";
                 const sheetNames = workbook.SheetNames;
                 const generalDataContacts = parseGeneralDataContacts(workbook);
-                
-                const uc1SheetName = sheetNames.find(n => n.toUpperCase().replace(/\s/g, '').includes("UC1"));
-                const uc7SheetName = sheetNames.find(n => n.toUpperCase().replace(/\s/g, '').includes("UC7"));
-                if (uc1SheetName) { const m = findMetadata(workbook.Sheets[uc1SheetName]); if(m.tutor) tutor1 = m.tutor; if(m.turma) turma = m.turma; if(m.curso) course = m.curso; }
-                if (uc7SheetName) { const m = findMetadata(workbook.Sheets[uc7SheetName]); if(m.tutor) tutor2 = m.tutor; if((!course || course.includes("não")) && m.curso) course = m.curso; }
+
+                // Cada UC pode estar sob responsabilidade de um instrutor diferente.
+                // A ordem das UCs mantém a ordem de apresentação dos cadernos.
+                const ucMetadata = sheetNames
+                    .map((sheetName, sheetIndex) => {
+                        const match = String(sheetName).match(/UC\s*(\d+)/i);
+                        return match ? { sheetName, sheetIndex, number: Number(match[1]) } : null;
+                    })
+                    .filter(Boolean)
+                    .sort((a, b) => a.number - b.number || a.sheetIndex - b.sheetIndex)
+                    .map(item => ({ ...item, metadata: findMetadata(workbook.Sheets[item.sheetName]) }));
+
+                const instructors = [];
+                ucMetadata.forEach(({ metadata }) => {
+                    const tutor = metadata && metadata.tutor ? String(metadata.tutor).trim() : "";
+                    if (!tutor || normalizeName(tutor) === normalizeName("Não Identificado")) return;
+                    if (!instructors.some(existing => normalizeName(existing) === normalizeName(tutor))) instructors.push(tutor);
+                    if (turma === "Turma não identificada" && metadata.turma) turma = metadata.turma;
+                    if ((!course || course.includes("não")) && metadata.curso) course = metadata.curso;
+                });
+
+                // Fallback para planilhas antigas que não nomeiam a aba como UC.
+                if (instructors.length === 0) {
+                    sheetNames.forEach(sheetName => {
+                        const metadata = findMetadata(workbook.Sheets[sheetName]);
+                        const tutor = metadata && metadata.tutor ? String(metadata.tutor).trim() : "";
+                        if (tutor && normalizeName(tutor) !== normalizeName("Não Identificado") && !instructors.some(existing => normalizeName(existing) === normalizeName(tutor))) instructors.push(tutor);
+                        if (turma === "Turma não identificada" && metadata.turma) turma = metadata.turma;
+                        if ((!course || course.includes("não")) && metadata.curso) course = metadata.curso;
+                    });
+                }
+
+                tutor1 = instructors[0] || "Não Identificado";
+                tutor2 = instructors[1] || "Não Identificado";
                 if (turma && String(turma).toUpperCase().includes("TURMA")) turma = String(turma).replace(/TURMA[:\s]*/i, '').trim();
 
                 const manualProcessOverrides = getManualProcessList(turma);
@@ -1816,17 +1859,18 @@
                         try {
                             const cellAddress = XLSX.utils.encode_cell({r: i, c: nameColIdx});
                             const cell = pedSheet[cellAddress];
-                            if (isOrangeRowFill(pedSheet, i, nameColIdx)) {
+                            const isNameOrangeFont = isOrangeFontCell(cell);
+                            const isNameOrangeFill = isOrangeFillCell(cell);
+                            const isPedagogicalDropout = hasDropoutKeywordInRow(row);
+                            if (isOrangeRowFill(pedSheet, i, nameColIdx) || isNameOrangeFont || isNameOrangeFill || isPedagogicalDropout) {
                                 studentRec.is_dropout = true;
                                 studentRec.is_process_dropout = false;
                                 studentRec.status = "Evadido/Desligado";
-                                studentRec.dropout_reason = "Linha identificada em laranja na planilha";
-                            } else if (!studentRec.is_process_dropout && cell && cell.s && cell.s.font && cell.s.font.color && cell.s.font.color.rgb) {
-                                const color = cell.s.font.color.rgb;
-                                if (isOrangeFont(color)) {
-                                    studentRec.is_process_dropout = true;
-                                    studentRec.status = "Em Processo de Desligamento";
-                                }
+                                studentRec.dropout_reason = isPedagogicalDropout
+                                    ? "Situação evadido, desistente ou desligado na aba pedagógica"
+                                    : isNameOrangeFont || isNameOrangeFill
+                                        ? "Nome identificado em laranja na planilha"
+                                        : "Linha identificada em laranja na planilha";
                             }
                         } catch (e) {}
                     }
@@ -1960,20 +2004,18 @@
                                 try {
                                     const cellAddress = XLSX.utils.encode_cell({r: r, c: nameColIdx});
                                     const cell = sheet[cellAddress];
-                                    if (isOrangeRowFill(sheet, r, nameColIdx)) {
+                                    const isNameOrangeFont = isOrangeFontCell(cell);
+                                    const isNameOrangeFill = isOrangeFillCell(cell);
+                                    const isPedagogicalDropout = isPedagogicalSheet && hasDropoutKeywordInRow(row);
+                                    if (isOrangeRowFill(sheet, r, nameColIdx) || isNameOrangeFont || isNameOrangeFill || isPedagogicalDropout) {
                                         student.is_dropout = true;
                                         student.is_process_dropout = false;
                                         student.status = "Evadido/Desligado";
-                                        student.dropout_reason = "Linha identificada em laranja na aba " + sheetName;
-                                    } else if (!student.is_process_dropout && cell && cell.s && cell.s.font && cell.s.font.color && cell.s.font.color.rgb) {
-                                        const color = cell.s.font.color.rgb;
-                                        if (isOrangeFont(color)) {
-                                            student.is_process_dropout = true;
-                                            student.status = "Em Processo de Desligamento";
-                                            if(!student.all_observations.some(o => o.text.includes("Identificado como 'Em Processo'"))) {
-                                                student.all_observations.push({ source: "Sistema", text: `Identificado como 'Em Processo' pela cor de fonte ${color} na aba ${sheetName}` });
-                                            }
-                                        }
+                                        student.dropout_reason = isPedagogicalDropout
+                                            ? "Situação evadido, desistente ou desligado na aba pedagógica"
+                                            : isNameOrangeFont || isNameOrangeFill
+                                                ? "Nome identificado em laranja na aba " + sheetName
+                                                : "Linha identificada em laranja na aba " + sheetName;
                                     }
                                 } catch(e) {}
                             }
@@ -2009,7 +2051,7 @@
 
                 const attendanceWarnings = analyzeAttendanceWarnings(workbook, students);
                 const naAlerts = analyzeNAWarnings(workbook, students);
-                return { course, turma, tutor1, tutor2, students, ucs: Array.from(allFoundUCs).sort(), courseDates: rawDates, attendanceWarnings, naAlerts };
+                return { course, turma, tutor1, tutor2, instructors, students, ucs: Array.from(allFoundUCs).sort(), courseDates: rawDates, attendanceWarnings, naAlerts };
             } catch (error) {
                 console.error(error);
                 alert("Erro ao ler o arquivo: " + error.message);
@@ -2422,6 +2464,15 @@
 
             const ataContentRef = useRef(null);
 
+            const activeInstructorNames = useMemo(() => {
+                const source = data && Array.isArray(data.instructors)
+                    ? data.instructors
+                    : [tutor1Name, tutor2Name];
+                return [...new Set(source
+                    .map(name => String(name || "").trim())
+                    .filter(name => name && normalizeName(name) !== normalizeName("Não Identificado")))];
+            }, [data, tutor1Name, tutor2Name]);
+
             useEffect(() => {
                 if(data) {
                     if(data.tutor1) setTutor1Name(data.tutor1);
@@ -2483,7 +2534,7 @@
             // Carrega notas locais ou do Firestore e inclui também registros feitos para a turma inteira.
             useEffect(() => {
                 if (selectedStudentForModal && data) {
-                    const instructors = [tutor1Name, tutor2Name].filter(Boolean);
+                    const instructors = activeInstructorNames;
                     let isCurrent = true;
                     Promise.all(instructors.map(async instName => {
                         const loaded = await loadNotebookNotes(data.turma, instName);
@@ -2499,7 +2550,7 @@
                 } else {
                     setInstructorNotesForStudent([]);
                 }
-            }, [selectedStudentForModal, data, tutor1Name, tutor2Name]);
+            }, [selectedStudentForModal, data, activeInstructorNames]);
 
 
             useEffect(() => {
@@ -2948,21 +2999,16 @@
                         <div className="bg-white border-t border-gray-100">
                             <div className="max-w-7xl mx-auto px-4 py-2 flex items-center gap-6 text-xs text-gray-600 overflow-x-auto">
                                 <span className="flex items-center gap-2 font-bold whitespace-nowrap text-senac-orange"><IconUser className="w-3.5 h-3.5" /> Instrutores (Clique para anotar):</span>
-                                <button 
-                                    onClick={() => setSelectedInstructorForNotes(tutor1Name)} 
-                                    className="whitespace-nowrap font-medium hover:bg-blue-50 px-2 py-0.5 rounded transition-colors text-blue-700 flex items-center gap-1"
-                                    title="Abrir Caderno do Instrutor"
-                                >
-                                    {tutor1Name} <IconEdit3 className="w-3 h-3 opacity-50"/>
-                                </button>
-                                <span className="text-gray-300">|</span>
-                                <button 
-                                    onClick={() => setSelectedInstructorForNotes(tutor2Name)} 
-                                    className="whitespace-nowrap font-medium hover:bg-blue-50 px-2 py-0.5 rounded transition-colors text-blue-700 flex items-center gap-1"
-                                    title="Abrir Caderno do Instrutor"
-                                >
-                                    {tutor2Name} <IconEdit3 className="w-3 h-3 opacity-50"/>
-                                </button>
+                                {activeInstructorNames.map((instructorName, index) => <React.Fragment key={`${instructorName}-${index}`}>
+                                    {index > 0 && <span className="text-gray-300">|</span>}
+                                    <button
+                                        onClick={() => setSelectedInstructorForNotes(instructorName)}
+                                        className="whitespace-nowrap font-medium hover:bg-blue-50 px-2 py-0.5 rounded transition-colors text-blue-700 flex items-center gap-1"
+                                        title="Abrir Caderno do Instrutor"
+                                    >
+                                        {instructorName} <IconEdit3 className="w-3 h-3 opacity-50"/>
+                                    </button>
+                                </React.Fragment>)}
                             </div>
                         </div>
                     </header>
