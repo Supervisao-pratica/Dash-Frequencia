@@ -161,19 +161,12 @@
             try {
                 const range = XLSX.utils.decode_range(sheet['!ref']);
                 const maxCols = Math.min(range.e.c + 1, 180);
+                // A cor laranja nas colunas de atividades indica uma situacao
+                // daquela atividade, nao a situacao cadastral do aluno.
                 const keyColumns = [...new Set([0, 1, 2, 3, 4, nameColIdx].filter(col => col >= 0 && col < maxCols))];
                 const keyOrangeCount = keyColumns.filter(col => isOrangeFillCell(sheet[XLSX.utils.encode_cell({ r: rowIndex, c: col })])).length;
                 if (nameColIdx >= 0 && isOrangeFillCell(sheet[XLSX.utils.encode_cell({ r: rowIndex, c: nameColIdx })])) return true;
-                if (keyOrangeCount >= 2) return true;
-
-                let orangeCount = 0;
-                let nonBlankCount = 0;
-                for (let col = 0; col < maxCols; col++) {
-                    const cell = sheet[XLSX.utils.encode_cell({ r: rowIndex, c: col })];
-                    if (isOrangeFillCell(cell)) orangeCount++;
-                    if (cell && cell.v !== undefined && cell.v !== null && String(cell.v).trim() !== "") nonBlankCount++;
-                }
-                return orangeCount >= 8 && orangeCount >= Math.max(8, Math.ceil(nonBlankCount * 0.5));
+                return keyOrangeCount >= 2;
             } catch (error) {
                 return false;
             }
