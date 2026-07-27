@@ -2175,6 +2175,8 @@
                     .comment-box { background-color: #f9fafb; padding: 8px; border-left: 3px solid #F5821F; font-size: 11px; margin-top: 5px; color: #555; }
                     .source-tag { font-weight: bold; color: #F5821F; margin-right: 5px; }
                     .obs-text { white-space: pre-wrap; word-break: break-word; }
+                    .expand-pending { border: 1px solid #004587; background: #fff; color: #004587; border-radius: 4px; padding: 5px 9px; margin-top: 7px; cursor: pointer; font-size: 11px; font-weight: bold; }
+                    .expand-pending:hover { background: #eef6ff; }
                 </style></head><body>
                     <div class="report-menu"><div class="menu-title">Relatório</div><div class="menu-actions"><select id="report-recipient" class="recipient-select"><option value="student">Enviar para estudante${recipientLabel}</option><option value="supervisor">Enviar para supervisor${recipientLabel}</option></select><button onclick="sendReportEmail()" class="btn" title="Copia o layout formatado e abre o Outlook">Enviar por Outlook</button><button onclick="copyReportVisual()" id="copy-report" class="btn">Copiar para e-mail</button><button onclick="window.print()" class="btn">Imprimir</button></div></div>
                     <div id="report-content">
@@ -2185,15 +2187,18 @@
                         <strong>Turma:</strong> ${turma} | <strong>Data:</strong> ${dateStr}<br>
                         <strong>Instrutores:</strong> ${tutor1} / ${tutor2}
                     </div>
-                    ${selected.map(s => {
+                    ${selected.map((s, studentIndex) => {
                         let statusColor = "color:#16a34a";
                         if(s.is_dropout) statusColor = "color:#f97316"; else if(s.is_process_dropout) statusColor = "color:#9333ea"; else if(s.needs_recuperacao) statusColor = "color:#dc2626"; else if(s.needs_conselho) statusColor = "color:#ca8a04";
                         const mainObsHtml = s.conselho_text ? '<div class="section-title">Obs. Conselho (Principal):</div><div style="font-size:12px;">"' + s.conselho_text + '"</div>' : '';
                         const activitySummary = getActivityStudentSummary(activityTracking, s.name);
                         const activityAttention = activitySummary ? activitySummary.entries.filter(entry => entry.status !== "completed") : [];
                         const activityItemsHtml = activityAttention.slice(0, 18).map(entry => '<span class="source-tag">' + formatActivityStatusLabel(entry.status) + ':</span>' + entry.label).join("<br>");
+                        const activityMoreHtml = activityAttention.length > 18
+                            ? '<div id="activity-more-' + studentIndex + '" style="display:none; margin-top:7px;">' + activityAttention.slice(18).map(entry => '<span class="source-tag">' + formatActivityStatusLabel(entry.status) + ':</span>' + entry.label).join("<br>") + '</div><button type="button" class="expand-pending" data-more-label="E + ' + (activityAttention.length - 18) + ' pendências" onclick="toggleActivityDetails(\'activity-more-' + studentIndex + '\', this)">E + ' + (activityAttention.length - 18) + ' pendências</button>'
+                            : '';
                         const activityHtml = activitySummary && activitySummary.total > 0
-                            ? '<div class="section-title">Acompanhamento de atividades:</div><div class="comment-box"><strong>Resumo:</strong> ' + activitySummary.completed + ' concluídas de ' + activitySummary.total + '; ' + activitySummary.not_completed + ' não concluídas; ' + activitySummary.blank + ' em branco; ' + activitySummary.requires_evaluation + ' requerem avaliação.</div>' + (activityAttention.length > 0 ? '<div class="comment-box">' + activityItemsHtml + (activityAttention.length > 18 ? '<br><em>... e mais ' + (activityAttention.length - 18) + ' pendência(s).</em>' : '') + '</div>' : '')
+                            ? '<div class="section-title">Acompanhamento de atividades:</div><div class="comment-box"><strong>Resumo:</strong> ' + activitySummary.completed + ' concluídas de ' + activitySummary.total + '; ' + activitySummary.not_completed + ' não concluídas; ' + activitySummary.blank + ' em branco; ' + activitySummary.requires_evaluation + ' requerem avaliação.</div>' + (activityAttention.length > 0 ? '<div class="comment-box">' + activityItemsHtml + activityMoreHtml + '</div>' : '')
                             : '';
                         const naSummary = getNAStudentSummary(reportData, s.name, naJustifications || {});
                         const naHtml = naSummary && naSummary.count >= 2
@@ -2210,6 +2215,17 @@
                     <script>
                         const studentRecipients = ${JSON.stringify(studentRecipients)};
                         const supervisorRecipients = ${JSON.stringify(supervisorRecipients)};
+                        function toggleActivityDetails(detailsId, button) {
+                            const details = document.getElementById(detailsId);
+                            if (!details) return;
+                            const isHidden = details.style.display === 'none';
+                            details.style.display = isHidden ? 'block' : 'none';
+                            if (button) button.textContent = isHidden ? 'Ocultar pendências' : button.dataset.moreLabel;
+                        }
+                        function showAllActivityDetails() {
+                            document.querySelectorAll('[id^="activity-more-"]').forEach(details => { details.style.display = 'block'; });
+                            document.querySelectorAll('.expand-pending').forEach(button => { button.style.display = 'none'; });
+                        }
                         function sendReportEmail() {
                             const recipientType = document.getElementById('report-recipient')?.value === 'supervisor' ? 'supervisor' : 'student';
                             const recipients = recipientType === 'supervisor' ? supervisorRecipients : studentRecipients;
@@ -2219,8 +2235,9 @@
                                 return;
                             }
                             const subject = ${JSON.stringify(reportSubject)};
-                            const body = document.getElementById('report-content')?.innerText || 'Relatório de Desempenho';
+                            showAllActivityDetails();
                             copyReportVisual(() => {
+                                const body = document.getElementById('report-content')?.innerText || 'Relatório de Desempenho';
                                 alert('O relatório formatado foi copiado. No Outlook, cole no corpo do e-mail com Ctrl+V para manter o layout.');
                                 window.location.href = 'mailto:' + emails.join(';') + '?subject=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(body);
                             });
@@ -2247,6 +2264,7 @@
                             if (navigator.clipboard && window.ClipboardItem) {
                                 const copyContent = content.cloneNode(true);
                                 copyContent.style.cssText = 'font-family:Arial,sans-serif;color:#333;background:#fff;margin:0;padding:20px;';
+                                copyContent.querySelectorAll('.expand-pending').forEach(element => element.remove());
                                 const inlineStyles = {
                                     '.student-card': 'border:1px solid #ddd;padding:15px;margin-bottom:15px;border-radius:8px;',
                                     '.header-row': 'display:flex;justify-content:space-between;border-bottom:2px solid #F5821F;padding-bottom:5px;margin-bottom:10px;',
