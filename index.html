@@ -540,6 +540,42 @@
             return cleaned || fallback;
         };
 
+        const getCurrentAuthenticatedEmail = () => {
+            try {
+                const configuredUser = window.SENAC_CURRENT_USER;
+                const firebaseUser = window.firebase && firebase.auth ? firebase.auth().currentUser : null;
+                return String((configuredUser && configuredUser.email) || (firebaseUser && firebaseUser.email) || "").trim().toLowerCase();
+            } catch (error) {
+                return "";
+            }
+        };
+
+        const normalizeInstructorIdentity = (value) => normalizeName(String(value || "").replace(/[._-]+/g, " "));
+
+        const instructorNameMatchesAccount = (instructorName, email) => {
+            const accountEmail = String(email || "").trim().toLowerCase();
+            if (!instructorName || !accountEmail || !accountEmail.includes("@")) return false;
+            const localPart = normalizeInstructorIdentity(accountEmail.split("@")[0]);
+            const displayName = normalizeInstructorIdentity(window.SENAC_CURRENT_USER && window.SENAC_CURRENT_USER.displayName);
+            const candidate = normalizeInstructorIdentity(instructorName);
+            if (!candidate || candidate === "NAO IDENTIFICADO") return false;
+            if (displayName && (displayName === candidate || displayName.includes(candidate) || candidate.includes(displayName))) return true;
+            if (localPart === candidate || localPart.replace(/\s+/g, "") === candidate.replace(/\s+/g, "")) return true;
+            const tokens = candidate.split(/\s+/).filter(token => token.length > 1);
+            if (tokens.length === 1 && tokens[0].length >= 4 && localPart.includes(tokens[0])) return true;
+            if (tokens.length > 1 && tokens.every(token => localPart.includes(token))) return true;
+            if (tokens.length > 1 && localPart.includes(tokens[0]) && localPart.includes(tokens[tokens.length - 1].slice(0, 3))) return true;
+            return false;
+        };
+
+        const filterInstructorNamesForCurrentUser = (instructorNames) => {
+            const email = getCurrentAuthenticatedEmail();
+            const names = [...new Set((instructorNames || []).map(name => String(name || "").trim()).filter(Boolean))];
+            // Em modo local, sem Firebase/Auth, preserva o comportamento administrativo anterior.
+            if (!email) return names;
+            return names.filter(name => instructorNameMatchesAccount(name, email));
+        };
+
         const makeNotebookStorageKey = (turma, instructorName) => `${NOTEBOOK_STORAGE_PREFIX}${cleanNotebookKey(turma, "TURMA_DESCONHECIDA")}_${cleanNotebookKey(instructorName, "INSTRUTOR")}`;
 
         const notebookDateInput = (value) => {
@@ -814,7 +850,8 @@
                 await db.collection("instructor_notes").doc(String(note.id)).set({
                     ...normalizeNotebookNote(note),
                     turmaKey: cleanNotebookKey(turma, "TURMA_DESCONHECIDA"),
-                    instructorKey: cleanNotebookKey(instructorName, "INSTRUTOR")
+                    instructorKey: cleanNotebookKey(instructorName, "INSTRUTOR"),
+                    ownerEmail: getCurrentAuthenticatedEmail()
                 });
                 return { source: "cloud" };
             } catch (error) {
@@ -831,7 +868,7 @@
             const db = await getNotebookFirestore();
             if (!db) return { source: "local" };
             try {
-                const payload = { ...normalized, turmaKey: cleanNotebookKey(turma, "TURMA_DESCONHECIDA"), instructorKey: cleanNotebookKey(instructorName, "INSTRUTOR") };
+                const payload = { ...normalized, turmaKey: cleanNotebookKey(turma, "TURMA_DESCONHECIDA"), instructorKey: cleanNotebookKey(instructorName, "INSTRUTOR"), ownerEmail: getCurrentAuthenticatedEmail() };
                 delete payload.id;
                 delete payload.instructorSource;
                 await db.collection("instructor_notes").doc(String(normalized.id)).set(payload, { merge: true });
@@ -930,7 +967,8 @@
                     treatmentDueDate: treatmentDays && Number.isInteger(parsedTreatmentDays) && parsedTreatmentDays > 0 ? addNotebookDays(treatmentStartDate, parsedTreatmentDays) : "",
                     attachments,
                     turma,
-                    instructorName
+                    instructorName,
+                    ownerEmail: getCurrentAuthenticatedEmail()
                 };
 
                 const updatedNotes = [normalizeNotebookNote(newNote), ...allNotes].filter(Boolean);
@@ -1316,8 +1354,16 @@
             );
         };
 
-        const StudentReportOptionsModal = ({ data, student, activityTracking, naJustifications, notebookNotes, onClose }) => {
-            const [options, setOptions] = useState({
+        const StudentReportOptionsModal = ({ data, student, activityTracking, naJustifications, notebookNotes, mode = "complete", onClose }) => {
+            const [options, setOptions] = useState(() => mode === "activities" ? ({
+                studentContact: false,
+                supervisorContact: false,
+                justifications: false,
+                academic: false,
+                observations: false,
+                notebook: false,
+                activities: true
+            }) : ({
                 studentContact: false,
                 supervisorContact: false,
                 justifications: true,
@@ -1325,7 +1371,7 @@
                 observations: true,
                 notebook: true,
                 activities: false
-            });
+            }));
             const toggleOption = key => setOptions(current => ({ ...current, [key]: !current[key] }));
             const reportOptions = [
                 ["studentContact", "Atualizacao de contato do aluno", "Nome, telefone e e-mail do aluno."],
@@ -1355,7 +1401,7 @@
             return (
                 <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onClick={event => { if (event.target === event.currentTarget) onClose(); }}>
                     <div className="bg-white w-full max-w-xl rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
-                        <div className="bg-senac-blue p-5 text-white flex justify-between items-center"><div><h2 className="text-xl font-bold flex items-center gap-2"><IconFileText className="w-6 h-6" /> Emitir relatorio do aluno</h2><p className="text-xs text-blue-100 mt-1">Escolha as informacoes que deseja enviar.</p></div><button onClick={onClose} className="hover:bg-white/20 p-1 rounded-full"><IconXCircle className="w-6 h-6" /></button></div>
+                        <div className="bg-senac-blue p-5 text-white flex justify-between items-center"><div><h2 className="text-xl font-bold flex items-center gap-2"><IconFileText className="w-6 h-6" /> {mode === "activities" ? "Relatorio de atividades" : "Emitir relatorio do aluno"}</h2><p className="text-xs text-blue-100 mt-1">Escolha as informacoes que deseja enviar.</p></div><button onClick={onClose} className="hover:bg-white/20 p-1 rounded-full"><IconXCircle className="w-6 h-6" /></button></div>
                         <div className="p-5 overflow-y-auto custom-scrollbar bg-gray-50"><div className="bg-white border border-gray-200 rounded-xl p-4 mb-4"><div className="text-sm font-bold text-gray-800">{student.name}</div><div className="text-xs text-gray-500 mt-1">Turma {data.turma}</div></div><div className="space-y-2">{reportOptions.map(([key, title, description]) => <label key={key} className={`flex items-start gap-3 rounded-lg border p-3 cursor-pointer ${options[key] ? "border-blue-300 bg-blue-50" : "border-gray-200 bg-white"}`}><input type="checkbox" checked={Boolean(options[key])} onChange={() => toggleOption(key)} className="mt-0.5 rounded text-senac-blue" /><span><span className="block text-sm font-bold text-gray-700">{title}</span><span className="block text-xs text-gray-500 mt-1">{description}</span></span></label>)}</div><div className="mt-4 rounded-lg border border-orange-200 bg-orange-50 px-3 py-2 text-xs text-orange-900"><strong>Importante:</strong> os contatos, justificativas, anotacoes e alteracoes ficam vinculados a turma. As informacoes de atividades sao somente do upload atual e nao sao gravadas.</div></div>
                         <div className="bg-white p-4 border-t border-gray-200 flex justify-end gap-2"><button onClick={onClose} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg font-bold text-sm">Cancelar</button><button onClick={generate} disabled={!Object.values(options).some(Boolean)} className="px-5 py-2 bg-senac-blue text-white rounded-lg font-bold text-sm disabled:opacity-50"><IconPrinter className="w-4 h-4 inline-block mr-1" /> Emitir relatorio</button></div>
                     </div>
@@ -3182,6 +3228,7 @@
             const [showNotebookReport, setShowNotebookReport] = useState(false);
             const [showUCIntervalReport, setShowUCIntervalReport] = useState(false);
             const [showStudentReportModal, setShowStudentReportModal] = useState(false);
+            const [studentReportMode, setStudentReportMode] = useState("complete");
             const [classNotebookNotes, setClassNotebookNotes] = useState([]);
 
             // --- FILTROS E SELEÇÃO ---
@@ -3211,9 +3258,10 @@
                 const source = data && Array.isArray(data.instructors)
                     ? data.instructors
                     : [tutor1Name, tutor2Name];
-                return [...new Set(source
+                const detectedNames = [...new Set(source
                     .map(name => String(name || "").trim())
                     .filter(name => name && normalizeName(name) !== normalizeName("Não Identificado")))];
+                return filterInstructorNamesForCurrentUser(detectedNames);
             }, [data, tutor1Name, tutor2Name]);
 
             useEffect(() => {
@@ -3613,7 +3661,7 @@
 
                     {showNotebookReport && <NotebookNotesReport turma={data.turma} instructors={activeInstructorNames} onClose={() => setShowNotebookReport(false)} />}
                     {showUCIntervalReport && <UCIntervalReportModal data={data} activityTracking={activityTracking} naJustifications={naJustifications} notebookNotes={classNotebookNotes} onClose={() => setShowUCIntervalReport(false)} />}
-                    {showStudentReportModal && selectedStudentForModal && <StudentReportOptionsModal data={data} student={selectedStudentForModal} activityTracking={activityTracking} naJustifications={naJustifications} notebookNotes={instructorNotesForStudent} onClose={() => setShowStudentReportModal(false)} />}
+                    {showStudentReportModal && selectedStudentForModal && <StudentReportOptionsModal data={data} student={selectedStudentForModal} mode={studentReportMode} activityTracking={activityTracking} naJustifications={naJustifications} notebookNotes={instructorNotesForStudent} onClose={() => setShowStudentReportModal(false)} />}
 
                     {showAtaModal && (
                         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-fade-in" onClick={(e) => {if(e.target===e.currentTarget) setShowAtaModal(false)}}>
@@ -3664,7 +3712,7 @@
                                     <button onClick={() => setSelectedStudentForModal(null)} className="p-1 hover:bg-white/20 rounded-full"><IconXCircle className="w-8 h-8"/></button>
                                 </div>
                                 <div className="p-8 overflow-y-auto">
-                                    <div className="mb-5 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2"><span className="text-xs text-blue-800">Relatorio individual com informacoes escolhidas por situacao.</span><button type="button" onClick={() => setShowStudentReportModal(true)} className="px-3 py-2 rounded-md bg-senac-blue text-white text-xs font-bold hover:bg-blue-800 flex items-center gap-2"><IconFileText className="w-4 h-4" /> Emitir relatorio</button></div>
+                                    <div className="mb-5 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2"><span className="text-xs text-blue-800">Relatorios individuais por situacao.</span><div className="flex flex-wrap gap-2"><button type="button" onClick={() => { setStudentReportMode("complete"); setShowStudentReportModal(true); }} className="px-3 py-2 rounded-md bg-senac-blue text-white text-xs font-bold hover:bg-blue-800 flex items-center gap-2"><IconFileText className="w-4 h-4" /> Emitir relatorio</button><button type="button" disabled={!activityTracking} onClick={() => { setStudentReportMode("activities"); setShowStudentReportModal(true); }} title={activityTracking ? "Emitir relatorio do upload atual de atividades" : "Carregue uma planilha em Ler atividades primeiro"} className="px-3 py-2 rounded-md bg-senac-orange text-white text-xs font-bold hover:bg-orange-600 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"><IconBarChart2 className="w-4 h-4" /> Relatorio de atividades</button></div></div>
                                     <div className="mb-6 flex justify-between items-center"><h3 className="text-sm font-bold text-gray-400 uppercase tracking-wider">Situação Atual</h3><label className="flex items-center gap-2 text-xs bg-purple-50 px-2 py-1 rounded border border-purple-200 cursor-pointer hover:bg-purple-100"><input type="checkbox" checked={selectedStudentForModal.is_process_dropout} onChange={() => toggleProcessDropout(selectedStudentForModal.id)} className="rounded text-purple-600 focus:ring-purple-500" /> Marcar como "Em Processo de Desligamento"</label></div>
                                     <div className="flex gap-2 mb-6">{selectedStudentForModal.is_dropout ? (<div className="bg-orange-100 text-orange-800 px-4 py-2 rounded-lg font-bold flex items-center gap-2"><IconLogOut className="w-5 h-5"/> {selectedStudentForModal.dropout_reason || "Evadido"}</div>) : selectedStudentForModal.is_process_dropout ? (<div className="bg-purple-100 text-purple-800 px-4 py-2 rounded-lg font-bold flex items-center gap-2"><IconClock className="w-5 h-5"/> Em Processo de Desligamento</div>) : (<>{selectedStudentForModal.needs_recuperacao && <div className="bg-red-100 text-red-800 px-4 py-2 rounded-lg font-bold flex items-center gap-2"><IconXCircle className="w-5 h-5"/> Recuperação Necessária</div>}{selectedStudentForModal.needs_conselho && !selectedStudentForModal.needs_recuperacao && <div className="bg-yellow-100 text-yellow-800 px-4 py-2 rounded-lg font-bold flex items-center gap-2"><IconAlertTriangle className="w-5 h-5"/> Conselho de Classe</div>}{!selectedStudentForModal.needs_recuperacao && !selectedStudentForModal.needs_conselho && <div className="bg-green-100 text-green-800 px-4 py-2 rounded-lg font-bold flex items-center gap-2"><IconCheckCircle className="w-5 h-5"/> Desenvolvimento Pleno</div>}</>)}</div>
 
@@ -3801,7 +3849,7 @@
                     
                     <header className="bg-white border-b-4 border-senac-orange shadow-sm sticky top-0 z-20">
                         <div className="max-w-7xl mx-auto px-4 py-3 flex flex-col md:flex-row justify-between items-center gap-4">
-                            <div className="flex items-center gap-4"><img src="https://upload.wikimedia.org/wikipedia/commons/thumb/8/86/Senac_logo.svg/500px-Senac_logo.svg.png" className="h-12 w-auto object-contain" /><div><h1 className="text-lg font-bold text-senac-blue leading-tight">Gestão de Frequência - Relatório e ATA</h1><div className="text-xs font-bold text-senac-orange uppercase mb-1 leading-tight max-w-lg">{data.course}</div><div className="flex items-center gap-2 text-xs"><span className="font-medium text-gray-500">Turma: {data.turma}</span><button onClick={() => { setData(null); setActivityTracking(null); }} className="text-senac-blue hover:underline bg-blue-50 px-2 py-0.5 rounded-full flex items-center gap-1 transition-colors"><IconRefreshCw className="w-3 h-3" /> Trocar</button><span className="text-gray-300">|</span><span className="text-gray-400">Usuário: Acesso Livre</span><button onClick={() => {if(confirm('Reiniciar sistema?')) window.location.reload()}} className="text-red-400 hover:underline flex items-center gap-1 ml-2"><IconLogOut className="w-3 h-3"/> Sair</button></div></div></div>
+                            <div className="flex items-center gap-4"><img src="https://upload.wikimedia.org/wikipedia/commons/thumb/8/86/Senac_logo.svg/500px-Senac_logo.svg.png" className="h-12 w-auto object-contain" /><div><h1 className="text-lg font-bold text-senac-blue leading-tight">Gestão de Frequência - Relatório e ATA</h1><div className="text-xs font-bold text-senac-orange uppercase mb-1 leading-tight max-w-lg">{data.course}</div><div className="flex items-center gap-2 text-xs"><span className="font-medium text-gray-500">Turma: {data.turma}</span><button onClick={() => { setData(null); setActivityTracking(null); }} className="text-senac-blue hover:underline bg-blue-50 px-2 py-0.5 rounded-full flex items-center gap-1 transition-colors"><IconRefreshCw className="w-3 h-3" /> Trocar</button><span className="text-gray-300">|</span><span className="text-gray-400">Usuário: {getCurrentAuthenticatedEmail() || "Acesso Livre"}</span><button onClick={() => {if(confirm('Reiniciar sistema?')) window.location.reload()}} className="text-red-400 hover:underline flex items-center gap-1 ml-2"><IconLogOut className="w-3 h-3"/> Sair</button></div></div></div>
                             <div className="flex items-center gap-3">
                                 <label className="cursor-pointer bg-white border border-senac-blue text-senac-blue hover:bg-blue-50 px-4 py-2 rounded-lg flex items-center gap-2 shadow transition-all active:scale-95 text-sm font-medium" title="Ler a aba DADOS GERAIS"><IconUploadCloud className="w-4 h-4" /> Dados Gerais <input type="file" className="hidden" accept=".xlsx,.xlsm,.xls" onChange={(e) => { handleGeneralDataFile(e.target.files[0]); e.target.value = ''; }} /></label>
                                 <label className="cursor-pointer bg-white border border-senac-orange text-senac-orange hover:bg-orange-50 px-4 py-2 rounded-lg flex items-center gap-2 shadow transition-all active:scale-95 text-sm font-medium" title="Ler planilha de atividades"><IconUploadCloud className="w-4 h-4" /> Ler atividades <input type="file" className="hidden" accept=".xlsx,.xlsm,.xls" onChange={(e) => { handleActivityFile(e.target.files[0]); e.target.value = ''; }} /></label>
@@ -3824,6 +3872,7 @@
                                         {instructorName} <IconEdit3 className="w-3 h-3 opacity-50"/>
                                     </button>
                                 </React.Fragment>)}
+                                {activeInstructorNames.length === 0 && <span className="text-gray-500 italic">Nenhum caderno associado ao e-mail autenticado.</span>}
                             </div>
                         </div>
                     </header>
