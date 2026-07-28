@@ -2708,7 +2708,7 @@
                 return `
                     <div class="sig-block" style="text-align: center; margin: 20px auto 30px auto; width: 100%;">
                         <img src="${rubricaSrc}" alt="Assinatura" style="height: 60px; max-width: 200px; margin-bottom: 5px; object-fit: contain; display: block; margin-left: auto; margin-right: auto;" />
-                        <div style="border-top: 1px solid black; width: 300px; margin: 5px auto 0 auto;"></div>
+                        <table role="presentation" cellpadding="0" cellspacing="0" style="border-collapse: collapse; width: 300px; margin: 5px auto 0 auto;"><tr><td style="border-top: 1px solid #000000; height: 1px; line-height: 1px; font-size: 1px;">&nbsp;</td></tr></table>
                         <div><strong>${name}</strong></div>
                         <div>${role}</div>
                     </div>
@@ -2727,13 +2727,13 @@
                         <div><strong>CPF:</strong> ${masked} | <strong>Matrícula:</strong> ${matricula}</div>
                         <div style="margin-top:5px; font-size: 8pt; color: #555;">Hash de Validação: <span style="font-family: monospace;">${hash}</span></div>
                         <div style="font-size: 8pt; color: #777;">Data: ${timestamp}</div>
-                        <div style="border-top: 1px solid #000; width: 300px; margin: 14px auto 0 auto;"></div>
+                        <table role="presentation" cellpadding="0" cellspacing="0" style="border-collapse: collapse; width: 300px; margin: 14px auto 0 auto;"><tr><td style="border-top: 1px solid #000000; height: 1px; line-height: 1px; font-size: 1px;">&nbsp;</td></tr></table>
                     </div>
                 `;
             }
             return `
                 <div class="sig-block" style="text-align: center; margin: 20px auto 30px auto; width: 100%;">
-                    <div style="border-top: 1px solid black; width: 300px; margin: 0 auto 5px auto;"></div>
+                    <table role="presentation" cellpadding="0" cellspacing="0" style="border-collapse: collapse; width: 300px; margin: 0 auto 5px auto;"><tr><td style="border-top: 1px solid #000000; height: 1px; line-height: 1px; font-size: 1px;">&nbsp;</td></tr></table>
                     <div><strong>${name}</strong></div>
                     <div>${role}</div>
                 </div>`;
