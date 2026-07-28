@@ -2727,6 +2727,7 @@
                         <div><strong>CPF:</strong> ${masked} | <strong>Matrícula:</strong> ${matricula}</div>
                         <div style="margin-top:5px; font-size: 8pt; color: #555;">Hash de Validação: <span style="font-family: monospace;">${hash}</span></div>
                         <div style="font-size: 8pt; color: #777;">Data: ${timestamp}</div>
+                        <div style="border-top: 1px solid #000; width: 300px; margin: 14px auto 0 auto;"></div>
                     </div>
                 `;
             }
@@ -2738,6 +2739,22 @@
                 </div>`;
         };
 
+        const UC_NUMBER_WORDS = {
+            1: "um", 2: "dois", 3: "três", 4: "quatro", 5: "cinco", 6: "seis", 7: "sete", 8: "oito", 9: "nove", 10: "dez",
+            11: "onze", 12: "doze", 13: "treze", 14: "quatorze", 15: "quinze", 16: "dezesseis", 17: "dezessete", 18: "dezoito", 19: "dezenove", 20: "vinte",
+            21: "vinte e um", 22: "vinte e dois", 23: "vinte e três", 24: "vinte e quatro", 25: "vinte e cinco", 26: "vinte e seis", 27: "vinte e sete", 28: "vinte e oito", 29: "vinte e nove", 30: "trinta"
+        };
+
+        const formatUCInAta = (value) => {
+            const raw = String(value || "").trim();
+            const match = raw.match(/UC\s*(\d+)/i);
+            if (!match) return raw;
+            const number = Number(match[1]);
+            return `UC ${number} (${UC_NUMBER_WORDS[number] || number})`;
+        };
+
+        const formatUCSInAta = (values) => (values || []).map(formatUCInAta).join(", ");
+
         const generateAtaHTMLContent = (analistaName, analistaCPF, analistaMatricula, analistaRubrica, students, course, turma, tutor1, tutor1CPF, tutor1Matricula, tutor1Rubrica, tutor2, tutor2CPF, tutor2Matricula, tutor2Rubrica, logoSrc) => {
             const date = new Date();
             const dateStr = date.toLocaleDateString('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' });
@@ -2747,12 +2764,12 @@
             const studentsDropouts = students.filter(s => s.is_dropout);
             const studentsProcess = students.filter(s => s.is_process_dropout);
             const isVendas = String(course).toLowerCase().includes("vendas");
-            const rangeTutor1 = "UC1 à UC6";
-            const rangeTutor2 = isVendas ? "UC7 à UC13" : "UC7 à UC11";
+            const rangeTutor1 = `${formatUCInAta("UC1")} à ${formatUCInAta("UC6")}`;
+            const rangeTutor2 = isVendas ? `${formatUCInAta("UC7")} à ${formatUCInAta("UC13")}` : `${formatUCInAta("UC7")} à ${formatUCInAta("UC11")}`;
             let textIssues = "";
             const issueDescriptions = studentsWithIssues.map(s => {
-                const ucsFreq = s.low_freq_ucs.join(", ");
-                const ucsPerf = s.failed_perf_ucs.join(", ");
+                const ucsFreq = formatUCSInAta(s.low_freq_ucs);
+                const ucsPerf = formatUCSInAta(s.failed_perf_ucs);
                 let desc = "";
                 if (s.needs_recuperacao) { const ucs = ucsPerf || "Geral"; desc = `o(a) aluno(a) <strong>${s.name}</strong> não atendeu os indicadores de avaliação na(s) Unidade(s) Curricular(es) ${ucs}, não desenvolvendo o curso`; } 
                 else if (s.needs_conselho) { desc = `o(a) aluno(a) <strong>${s.name}</strong> finalizou a(s) Unidade(s) Curricular(es) ${ucsFreq} com baixa frequência, porém atendeu os indicadores finais de avaliação, desenvolvendo o curso`; }
@@ -2764,6 +2781,8 @@
             if (studentsDropouts.length > 0) { const names = studentsDropouts.map(s => s.name).join(", "); textDropouts = `<p>Constatou-se ainda que os alunos <strong>${names}</strong>, solicitaram desligamento do Programa de Aprendizagem.</p>`; }
             let textProcess = "";
             if (studentsProcess.length > 0) { const names = studentsProcess.map(s => s.name).join(", "); textProcess = `<p>Os alunos <strong>${names}</strong> encontram-se em processo administrativo de desligamento.</p>`; }
+            const dropoutNames = studentsDropouts.map(s => s.name).join(", ");
+            const textDropoutsWithoutDocument = `<p><strong>Desligados sem documento:</strong> O Conselho registrou a informação de que ${dropoutNames ? `<strong>${dropoutNames}</strong>` : "o(a) aluno(a) citado(a)"} solicitaram o desligamento; entretanto, até a presente data, não foram recebidos os documentos comprobatórios.</p>`;
             const sigAnalista = generateSignatureBlock("Analista Responsável", analistaName || "Analista", analistaCPF, analistaMatricula, analistaRubrica);
             const sigTutor1 = generateSignatureBlock("Instrutor(a)", tutor1, tutor1CPF, tutor1Matricula, tutor1Rubrica);
             const sigTutor2 = generateSignatureBlock("Instrutor(a)", tutor2, tutor2CPF, tutor2Matricula, tutor2Rubrica);
@@ -2771,12 +2790,13 @@
                 <html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
                 <head><meta charset='utf-8'><title>Ata de Conselho</title>
                 <style>
-                    body { font-family: 'Arial', sans-serif; font-size: 12pt; line-height: 1.5; text-align: justify; margin: 20px; color: #000; background: white; }
+                    body { font-family: 'Aptos', Arial, sans-serif; font-size: 12pt; line-height: 1.5; text-align: justify; margin: 20px; color: #000; background: white; }
                     .header { text-align: center; font-weight: bold; margin-bottom: 20px; }
                     .ata-number { text-align: left; font-weight: bold; margin-bottom: 20px; }
                     p { text-indent: 1.25cm; margin-bottom: 0; margin-top: 0; }
                     .logo-container { text-align: center; margin-bottom: 20px; }
                     .signatures { margin-top: 50px; }
+                    .document-date { text-align: right; text-indent: 0; margin-top: 28px; margin-bottom: 0; }
                 </style>
                 </head>
                 <body>
@@ -2788,8 +2808,9 @@
                         <p>A analista <strong>${analistaName || "[ANALISTA]"}</strong> iniciou os trabalhos solicitando que as análises do desempenho dos alunos bem como suas necessidades/dificuldades fossem levadas em consideração. ${textIssues} ${textOk}</p>
                         ${textDropouts}
                         ${textProcess}
+                        ${textDropoutsWithoutDocument}
                         <p>Nada mais havendo a tratar, foi lavrada a presente ata que vai assinada por mim, ${analistaName || "[ANALISTA]"} e pelos que estiveram presentes na qualidade de participantes da reunião.</p>
-                        <br><br><p>Curitiba, ${dateStr}.</p>
+                        <p class="document-date">Curitiba, ${dateStr}.</p>
                         <div class="signatures"><h4 style="text-align:center; font-size:12pt; margin-bottom:10px;">Manifesto de Assinaturas</h4>${sigAnalista} ${sigTutor1} ${sigTutor2}</div>
                     </div>
                 </body>
@@ -2800,14 +2821,14 @@
         const downloadAtaDocument = (contentRef, turma) => {
             if (!contentRef.current) return;
             const editedHtml = contentRef.current.innerHTML;
-            const fullHtml = `<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'><head><meta charset='utf-8'><title>Ata</title><style>@page { size: A4; margin: 3cm 2cm 2cm 3cm; }</style></head><body>${editedHtml}</body></html>`;
+            const fullHtml = `<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'><head><meta charset='utf-8'><title>Ata</title><style>@page { size: A4; margin: 3cm 2cm 2cm 3cm; } body { font-family: 'Aptos', Arial, sans-serif; text-align: justify; font-size: 12pt; line-height: 1.5; } .document-date { text-align: right !important; text-indent: 0 !important; }</style></head><body>${editedHtml}</body></html>`;
             const blob = new Blob([fullHtml], { type: 'application/msword' });
             const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = `Ata_Conselho_${turma}.doc`; document.body.appendChild(link); link.click(); document.body.removeChild(link);
         };
         
         const printAtaDocument = () => {
              const style = document.createElement('style');
-             style.innerHTML = `@media print { @page { size: A4 portrait; margin: 2cm; } body { -webkit-print-color-adjust: exact; } }`;
+             style.innerHTML = `@media print { @page { size: A4 portrait; margin: 2cm; } body { font-family: 'Aptos', Arial, sans-serif !important; text-align: justify; -webkit-print-color-adjust: exact; } .document-date { text-align: right !important; text-indent: 0 !important; } }`;
              document.head.appendChild(style);
              const printContent = document.getElementById("ata-preview-content");
              if(printContent) {
@@ -3697,7 +3718,7 @@
                                         </div>
                                     </div>
                                     <div className="flex-1 bg-gray-200/50 p-6 overflow-y-auto flex justify-center items-start preview-scroll relative">
-                                        <div className="bg-white shadow-2xl min-h-[29.7cm] w-[21cm] p-[2.5cm] text-justify text-[12pt] leading-relaxed relative transition-all editable-document" ref={ataContentRef} contentEditable={true} suppressContentEditableWarning={true} spellCheck={true}><div className="flex flex-col items-center justify-center h-full text-gray-400 gap-3"><div className="w-10 h-10 border-4 border-gray-200 border-t-senac-blue rounded-full animate-spin"></div><p className="font-medium">Gerando documento...</p></div></div>
+                                        <div className="bg-white shadow-2xl min-h-[29.7cm] w-[21cm] p-[2.5cm] text-justify text-[12pt] leading-relaxed relative transition-all editable-document" style={{fontFamily: "Aptos, Arial, sans-serif", textAlign: "justify"}} ref={ataContentRef} contentEditable={true} suppressContentEditableWarning={true} spellCheck={true}><div className="flex flex-col items-center justify-center h-full text-gray-400 gap-3"><div className="w-10 h-10 border-4 border-gray-200 border-t-senac-blue rounded-full animate-spin"></div><p className="font-medium">Gerando documento...</p></div></div>
                                     </div>
                                 </div>
                                 <div className="bg-white p-4 border-t border-gray-200 flex justify-end gap-3 shrink-0 z-20 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)]"><button onClick={() => setShowAtaModal(false)} className="px-5 py-2.5 text-gray-600 hover:bg-gray-100 rounded-lg font-bold text-sm transition-colors border border-transparent hover:border-gray-200">Cancelar</button><button onClick={() => printAtaDocument()} className="px-6 py-2.5 bg-senac-orange text-white hover:bg-orange-600 rounded-lg font-bold shadow-lg flex items-center gap-2 text-sm"><IconPrinter className="w-4 h-4"/> Imprimir / Salvar PDF</button><button onClick={() => downloadAtaDocument(ataContentRef, data.turma)} className="px-8 py-2.5 bg-senac-blue hover:bg-blue-800 text-white rounded-lg font-bold shadow-lg hover:shadow-xl flex items-center gap-2 text-sm transition-all transform hover:-translate-y-0.5"><IconDownload className="w-4 h-4"/> Baixar Documento (.doc)</button></div>
@@ -3848,19 +3869,19 @@
                     )}
                     
                     <header className="bg-white border-b-4 border-senac-orange shadow-sm sticky top-0 z-20">
-                        <div className="max-w-7xl mx-auto px-4 py-3 flex flex-col md:flex-row justify-between items-center gap-4">
-                            <div className="flex items-center gap-4"><img src="https://upload.wikimedia.org/wikipedia/commons/thumb/8/86/Senac_logo.svg/500px-Senac_logo.svg.png" className="h-12 w-auto object-contain" /><div><h1 className="text-lg font-bold text-senac-blue leading-tight">Gestão de Frequência - Relatório e ATA</h1><div className="text-xs font-bold text-senac-orange uppercase mb-1 leading-tight max-w-lg">{data.course}</div><div className="flex items-center gap-2 text-xs"><span className="font-medium text-gray-500">Turma: {data.turma}</span><button onClick={() => { setData(null); setActivityTracking(null); }} className="text-senac-blue hover:underline bg-blue-50 px-2 py-0.5 rounded-full flex items-center gap-1 transition-colors"><IconRefreshCw className="w-3 h-3" /> Trocar</button><span className="text-gray-300">|</span><span className="text-gray-400">Usuário: {getCurrentAuthenticatedEmail() || "Acesso Livre"}</span><button onClick={() => {if(confirm('Reiniciar sistema?')) window.location.reload()}} className="text-red-400 hover:underline flex items-center gap-1 ml-2"><IconLogOut className="w-3 h-3"/> Sair</button></div></div></div>
-                            <div className="flex items-center gap-3">
-                                <label className="cursor-pointer bg-white border border-senac-blue text-senac-blue hover:bg-blue-50 px-4 py-2 rounded-lg flex items-center gap-2 shadow transition-all active:scale-95 text-sm font-medium" title="Ler a aba DADOS GERAIS"><IconUploadCloud className="w-4 h-4" /> Dados Gerais <input type="file" className="hidden" accept=".xlsx,.xlsm,.xls" onChange={(e) => { handleGeneralDataFile(e.target.files[0]); e.target.value = ''; }} /></label>
-                                <label className="cursor-pointer bg-white border border-senac-orange text-senac-orange hover:bg-orange-50 px-4 py-2 rounded-lg flex items-center gap-2 shadow transition-all active:scale-95 text-sm font-medium" title="Ler planilha de atividades"><IconUploadCloud className="w-4 h-4" /> Ler atividades <input type="file" className="hidden" accept=".xlsx,.xlsm,.xls" onChange={(e) => { handleActivityFile(e.target.files[0]); e.target.value = ''; }} /></label>
-                                <button onClick={() => setShowNotebookReport(true)} className="bg-white border border-senac-orange text-senac-orange hover:bg-orange-50 px-4 py-2 rounded-lg flex items-center gap-2 shadow transition-all active:scale-95 text-sm font-medium"><IconBookOpen className="w-4 h-4" /> Relatório de Anotações</button>
-                                <button onClick={() => setShowUCIntervalReport(true)} className="bg-white border border-senac-blue text-senac-blue hover:bg-blue-50 px-4 py-2 rounded-lg flex items-center gap-2 shadow transition-all active:scale-95 text-sm font-medium"><IconFileText className="w-4 h-4" /> Relatório por UCs</button>
-                                <button onClick={() => generateReport(reportSelection, data.students, data.turma, data.course, tutor1Name, tutor2Name, activityTracking, data, naJustifications)} className="bg-white border border-senac-blue text-senac-blue hover:bg-blue-50 px-4 py-2 rounded-lg flex items-center gap-2 shadow transition-all active:scale-95 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed" disabled={reportSelection.length === 0}><IconPrinter className="w-4 h-4" /> Gerar Relatório {reportSelection.length > 0 && `(${reportSelection.length})`}</button>
-                                <button onClick={() => setShowAtaModal(!showAtaModal)} className="bg-senac-blue hover:bg-blue-800 text-white px-4 py-2 rounded-lg flex items-center gap-2 shadow transition-all active:scale-95 text-sm font-medium"><IconFileText className="w-4 h-4" /> Gerar ATA</button>
+                        <div className="max-w-7xl mx-auto px-4 py-3 flex flex-col xl:flex-row xl:items-start justify-between gap-5">
+                            <div className="flex min-w-0 items-start gap-3 xl:w-[390px] xl:shrink-0"><img src="https://upload.wikimedia.org/wikipedia/commons/thumb/8/86/Senac_logo.svg/500px-Senac_logo.svg.png" className="h-12 w-auto shrink-0 object-contain" /><div className="min-w-0 flex-1"><h1 className="text-lg md:text-xl font-bold text-senac-blue leading-tight">Gestão de Frequência - Relatório e ATA</h1><div className="mt-1 max-w-full break-words text-xs font-bold text-senac-orange uppercase leading-tight">{data.course}</div><div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs"><span className="font-medium text-gray-500">Turma: {data.turma}</span><button onClick={() => { setData(null); setActivityTracking(null); }} className="inline-flex shrink-0 items-center gap-1 rounded-full bg-blue-50 px-2 py-1 text-senac-blue transition-colors hover:underline"><IconRefreshCw className="w-3 h-3" /> Trocar</button><span className="text-gray-300">|</span><span className="max-w-full break-all text-gray-500">Usuário: {getCurrentAuthenticatedEmail() || "Acesso Livre"}</span><button onClick={() => {if(confirm("Reiniciar sistema?")) window.location.reload()}} className="inline-flex shrink-0 items-center gap-1 rounded-md border border-red-200 bg-red-50 px-2 py-1 font-semibold text-red-600 hover:bg-red-100"><IconLogOut className="w-3 h-3"/> Sair</button></div></div></div>
+                            <div className="w-full min-w-0 flex-1 flex flex-wrap items-stretch justify-start gap-2 xl:justify-end">
+                                <label className="cursor-pointer bg-white border border-senac-blue text-senac-blue hover:bg-blue-50 px-4 py-2 rounded-lg flex items-center gap-2 shadow transition-all active:scale-95 text-sm font-medium min-h-[54px] min-w-[116px] max-w-[160px] justify-center whitespace-normal text-center leading-tight" title="Ler a aba DADOS GERAIS"><IconUploadCloud className="w-4 h-4" /> Dados Gerais <input type="file" className="hidden" accept=".xlsx,.xlsm,.xls" onChange={(e) => { handleGeneralDataFile(e.target.files[0]); e.target.value = ''; }} /></label>
+                                <label className="cursor-pointer bg-white border border-senac-orange text-senac-orange hover:bg-orange-50 px-4 py-2 rounded-lg flex items-center gap-2 shadow transition-all active:scale-95 text-sm font-medium min-h-[54px] min-w-[116px] max-w-[160px] justify-center whitespace-normal text-center leading-tight" title="Ler planilha de atividades"><IconUploadCloud className="w-4 h-4" /> Ler atividades <input type="file" className="hidden" accept=".xlsx,.xlsm,.xls" onChange={(e) => { handleActivityFile(e.target.files[0]); e.target.value = ''; }} /></label>
+                                <button onClick={() => setShowNotebookReport(true)} className="bg-white border border-senac-orange text-senac-orange hover:bg-orange-50 px-4 py-2 rounded-lg flex items-center gap-2 shadow transition-all active:scale-95 text-sm font-medium min-h-[54px] min-w-[116px] max-w-[160px] justify-center whitespace-normal text-center leading-tight"><IconBookOpen className="w-4 h-4" /> Relatório de Anotações</button>
+                                <button onClick={() => setShowUCIntervalReport(true)} className="bg-white border border-senac-blue text-senac-blue hover:bg-blue-50 px-4 py-2 rounded-lg flex items-center gap-2 shadow transition-all active:scale-95 text-sm font-medium min-h-[54px] min-w-[116px] max-w-[160px] justify-center whitespace-normal text-center leading-tight"><IconFileText className="w-4 h-4" /> Relatório por UCs</button>
+                                <button onClick={() => generateReport(reportSelection, data.students, data.turma, data.course, tutor1Name, tutor2Name, activityTracking, data, naJustifications)} className="bg-white border border-senac-blue text-senac-blue hover:bg-blue-50 px-4 py-2 rounded-lg flex items-center gap-2 shadow transition-all active:scale-95 text-sm font-medium min-h-[54px] min-w-[116px] max-w-[160px] justify-center whitespace-normal text-center leading-tight disabled:opacity-50 disabled:cursor-not-allowed" disabled={reportSelection.length === 0}><IconPrinter className="w-4 h-4" /> Gerar Relatório {reportSelection.length > 0 && `(${reportSelection.length})`}</button>
+                                <button onClick={() => setShowAtaModal(!showAtaModal)} className="bg-senac-blue hover:bg-blue-800 text-white px-4 py-2 rounded-lg flex items-center gap-2 shadow transition-all active:scale-95 text-sm font-medium min-h-[54px] min-w-[116px] max-w-[160px] justify-center whitespace-normal text-center leading-tight"><IconFileText className="w-4 h-4" /> Gerar ATA</button>
                             </div>
                         </div>
                         <div className="bg-white border-t border-gray-100">
-                            <div className="max-w-7xl mx-auto px-4 py-2 flex items-center gap-6 text-xs text-gray-600 overflow-x-auto">
+                            <div className="max-w-7xl mx-auto px-4 py-2 flex flex-wrap items-center gap-x-5 gap-y-1 text-xs text-gray-600">
                                 <span className="flex items-center gap-2 font-bold whitespace-nowrap text-senac-orange"><IconUser className="w-3.5 h-3.5" /> Instrutores (Clique para anotar):</span>
                                 {activeInstructorNames.map((instructorName, index) => <React.Fragment key={`${instructorName}-${index}`}>
                                     {index > 0 && <span className="text-gray-300">|</span>}
