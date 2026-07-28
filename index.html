@@ -172,6 +172,35 @@
             }
         };
 
+        // A situacao cadastral depende somente da celula do nome (e, na aba
+        // pedagogica, de uma linha inteira claramente marcada). Cores nas
+        // colunas de atividades nao devem alterar a situacao do aluno.
+        const applyOrangeStudentSituation = ({ student, cell, row, sheetName, isPedagogicalSheet, sheet, rowIndex, nameColIdx }) => {
+            if (!student) return;
+            const nameHasOrangeFont = isOrangeFontCell(cell);
+            const nameHasOrangeFill = isOrangeFillCell(cell);
+            const pedagogicalKeyword = Boolean(isPedagogicalSheet && hasDropoutKeywordInRow(row));
+            const pedagogicalRowFill = Boolean(isPedagogicalSheet && isOrangeRowFill(sheet, rowIndex, nameColIdx));
+
+            if (nameHasOrangeFill || pedagogicalKeyword || pedagogicalRowFill) {
+                student.is_dropout = true;
+                student.is_process_dropout = false;
+                student.status = "Evadido/Desligado";
+                student.dropout_reason = pedagogicalKeyword
+                    ? "Situacao evadido, desistente ou desligado na aba pedagogica"
+                    : nameHasOrangeFill
+                        ? `Celula do nome preenchida em laranja na aba ${sheetName}`
+                        : `Linha pedagogica identificada em laranja na aba ${sheetName}`;
+                return;
+            }
+
+            if (nameHasOrangeFont && !student.is_dropout) {
+                student.is_process_dropout = true;
+                student.status = "Em Processo de Desligamento";
+                student.dropout_reason = `Nome com fonte laranja na aba ${sheetName}`;
+            }
+        };
+
         // --- ÍCONES (Lucide React) ---
         const IconUsers = (props) => <svg {...props} xmlns="http://www.w3.org/TR/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>;
         const IconAlertTriangle = (props) => <svg {...props} xmlns="http://www.w3.org/TR/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>;
@@ -1287,6 +1316,116 @@
             );
         };
 
+        const StudentReportOptionsModal = ({ data, student, activityTracking, naJustifications, notebookNotes, onClose }) => {
+            const [options, setOptions] = useState({
+                studentContact: false,
+                supervisorContact: false,
+                justifications: true,
+                academic: true,
+                observations: true,
+                notebook: true,
+                activities: false
+            });
+            const toggleOption = key => setOptions(current => ({ ...current, [key]: !current[key] }));
+            const reportOptions = [
+                ["studentContact", "Atualizacao de contato do aluno", "Nome, telefone e e-mail do aluno."],
+                ["supervisorContact", "Atualizacao de contato do supervisor", "Nome, telefone e e-mail do supervisor."],
+                ["justifications", "Justificativas e faltas NA", "Registros NA, status da justificativa e motivo informado."],
+                ["academic", "Frequencia, desempenho e situacao", "Status cadastral, frequencia e detalhamento por UC."],
+                ["observations", "Observacoes das planilhas", "Observacoes organizadas das abas e comentarios da chamada."],
+                ["notebook", "Anotacoes do caderno do instrutor", "Chamados, pontos de atencao e tratativas."],
+                ["activities", "Atividades do upload atual", "NC, em branco e requer avaliacao. Nao fica gravado na turma."]
+            ];
+            const generate = () => {
+                generateStudentSituationReport({
+                    student,
+                    turma: data.turma,
+                    course: data.course,
+                    instructors: data.instructors || [],
+                    tutor1: data.tutor1,
+                    tutor2: data.tutor2,
+                    activityTracking,
+                    reportData: data,
+                    naJustifications,
+                    notebookNotes,
+                    options
+                });
+                onClose();
+            };
+            return (
+                <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onClick={event => { if (event.target === event.currentTarget) onClose(); }}>
+                    <div className="bg-white w-full max-w-xl rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+                        <div className="bg-senac-blue p-5 text-white flex justify-between items-center"><div><h2 className="text-xl font-bold flex items-center gap-2"><IconFileText className="w-6 h-6" /> Emitir relatorio do aluno</h2><p className="text-xs text-blue-100 mt-1">Escolha as informacoes que deseja enviar.</p></div><button onClick={onClose} className="hover:bg-white/20 p-1 rounded-full"><IconXCircle className="w-6 h-6" /></button></div>
+                        <div className="p-5 overflow-y-auto custom-scrollbar bg-gray-50"><div className="bg-white border border-gray-200 rounded-xl p-4 mb-4"><div className="text-sm font-bold text-gray-800">{student.name}</div><div className="text-xs text-gray-500 mt-1">Turma {data.turma}</div></div><div className="space-y-2">{reportOptions.map(([key, title, description]) => <label key={key} className={`flex items-start gap-3 rounded-lg border p-3 cursor-pointer ${options[key] ? "border-blue-300 bg-blue-50" : "border-gray-200 bg-white"}`}><input type="checkbox" checked={Boolean(options[key])} onChange={() => toggleOption(key)} className="mt-0.5 rounded text-senac-blue" /><span><span className="block text-sm font-bold text-gray-700">{title}</span><span className="block text-xs text-gray-500 mt-1">{description}</span></span></label>)}</div><div className="mt-4 rounded-lg border border-orange-200 bg-orange-50 px-3 py-2 text-xs text-orange-900"><strong>Importante:</strong> os contatos, justificativas, anotacoes e alteracoes ficam vinculados a turma. As informacoes de atividades sao somente do upload atual e nao sao gravadas.</div></div>
+                        <div className="bg-white p-4 border-t border-gray-200 flex justify-end gap-2"><button onClick={onClose} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg font-bold text-sm">Cancelar</button><button onClick={generate} disabled={!Object.values(options).some(Boolean)} className="px-5 py-2 bg-senac-blue text-white rounded-lg font-bold text-sm disabled:opacity-50"><IconPrinter className="w-4 h-4 inline-block mr-1" /> Emitir relatorio</button></div>
+                    </div>
+                </div>
+            );
+        };
+
+        const UCIntervalReportModal = ({ data, activityTracking, naJustifications, notebookNotes, onClose }) => {
+            const ucOptions = useMemo(() => [...(data && data.ucs || [])].filter(uc => getUCNumber(uc) !== null).sort((a, b) => getUCNumber(a) - getUCNumber(b)), [data]);
+            const [fromUC, setFromUC] = useState("");
+            const [toUC, setToUC] = useState("");
+            const [scope, setScope] = useState("class");
+            const [selectedIds, setSelectedIds] = useState([]);
+            const [search, setSearch] = useState("");
+
+            useEffect(() => {
+                if (ucOptions.length > 0) {
+                    setFromUC(current => current || ucOptions[0]);
+                    setToUC(current => current || ucOptions[ucOptions.length - 1]);
+                }
+            }, [ucOptions]);
+
+            const visibleStudents = (data && data.students || []).filter(student => normalizeText(student.name).includes(normalizeText(search)));
+            const toggleStudent = (id) => setSelectedIds(current => current.includes(id) ? current.filter(item => item !== id) : [...current, id]);
+            const selectVisible = () => setSelectedIds(current => {
+                const visibleIds = visibleStudents.map(student => student.id);
+                const allSelected = visibleIds.length > 0 && visibleIds.every(id => current.includes(id));
+                return allSelected ? current.filter(id => !visibleIds.includes(id)) : [...new Set([...current, ...visibleIds])];
+            });
+            const reportIds = scope === "class" ? (data && data.students || []).map(student => student.id) : selectedIds;
+
+            const generate = () => generateRangeReport({
+                selectedStudentIds: reportIds,
+                students: data.students,
+                turma: data.turma,
+                course: data.course,
+                instructors: data.instructors || [],
+                tutor1: data.tutor1 || "Não Identificado",
+                tutor2: data.tutor2 || "Não Identificado",
+                activityTracking,
+                reportData: data,
+                naJustifications,
+                notebookNotes,
+                fromUC,
+                toUC
+            });
+
+            return (
+                <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+                    <div className="bg-white w-full max-w-3xl rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh]">
+                        <div className="bg-senac-blue p-4 text-white flex justify-between items-center shrink-0"><div><h2 className="text-xl font-bold flex items-center gap-2"><IconFileText className="w-6 h-6" /> Relatório por intervalo de UCs</h2><p className="text-xs text-blue-100 mt-1">Frequência, desempenho, chamada, atividades, situações e caderno.</p></div><button onClick={onClose} className="hover:bg-white/20 p-1 rounded-full"><IconXCircle className="w-6 h-6" /></button></div>
+                        <div className="p-5 overflow-y-auto custom-scrollbar bg-gray-50">
+                            <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm mb-4">
+                                <label className="block text-xs font-bold text-gray-500 uppercase mb-2">Intervalo de Unidades Curriculares</label>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3"><label className="text-xs font-bold text-gray-600">Da UC<select value={fromUC} onChange={(e) => setFromUC(e.target.value)} className="mt-1 w-full p-2 border border-gray-300 rounded text-sm font-normal">{ucOptions.map(uc => <option key={`from-${uc}`} value={uc}>{uc}</option>)}</select></label><label className="text-xs font-bold text-gray-600">Até a UC<select value={toUC} onChange={(e) => setToUC(e.target.value)} className="mt-1 w-full p-2 border border-gray-300 rounded text-sm font-normal">{ucOptions.map(uc => <option key={`to-${uc}`} value={uc}>{uc}</option>)}</select></label></div>
+                                <p className="text-[11px] text-gray-500 mt-2">O relatório incluirá todas as UCs entre a inicial e a final, mesmo que sejam escolhidas em ordem inversa.</p>
+                            </div>
+                            <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm mb-4">
+                                <label className="block text-xs font-bold text-gray-500 uppercase mb-2">Alcance do relatório</label>
+                                <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Alcance do relatório"><button type="button" onClick={() => setScope("class")} className={`py-3 rounded-lg text-sm font-bold border ${scope === "class" ? "bg-orange-50 text-senac-orange border-senac-orange ring-2 ring-orange-100" : "bg-gray-50 text-gray-500 border-gray-200"}`}><IconUsers className="w-4 h-4 inline-block mr-1" /> Turma inteira</button><button type="button" onClick={() => setScope("students")} className={`py-3 rounded-lg text-sm font-bold border ${scope === "students" ? "bg-blue-50 text-senac-blue border-senac-blue ring-2 ring-blue-100" : "bg-gray-50 text-gray-500 border-gray-200"}`}><IconUser className="w-4 h-4 inline-block mr-1" /> Alunos selecionados</button></div>
+                                {scope === "class" ? <div className="mt-3 rounded-lg bg-orange-50 border border-orange-200 px-3 py-2 text-xs text-orange-800">Serão incluídos os {data.students.length} alunos da turma.</div> : <div className="mt-3"><div className="flex flex-wrap justify-between items-center gap-2 mb-2"><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar aluno" className="p-2 border border-gray-300 rounded text-xs flex-1 min-w-[180px]" /><button type="button" onClick={selectVisible} className="px-3 py-2 border border-senac-blue text-senac-blue rounded text-xs font-bold">Selecionar visíveis</button></div><div className="max-h-56 overflow-y-auto border border-gray-200 rounded-lg bg-gray-50 p-2 space-y-1">{visibleStudents.map(student => <label key={student.id} className="flex items-center gap-2 rounded px-2 py-1.5 text-xs hover:bg-white cursor-pointer"><input type="checkbox" checked={selectedIds.includes(student.id)} onChange={() => toggleStudent(student.id)} className="rounded text-senac-blue" /><span>{student.name}</span></label>)}{visibleStudents.length === 0 && <div className="p-4 text-center text-xs text-gray-500">Nenhum aluno encontrado.</div>}</div><div className="text-xs text-gray-500 mt-2">{selectedIds.length} aluno(s) selecionado(s).</div></div>}
+                            </div>
+                            <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-3 text-xs text-blue-900"><strong>O relatório reunirá:</strong> frequência média e detalhada por UC, desempenho, baixa frequência, recuperação, observações, NA pendentes, atividades, situações cadastrais e anotações do caderno.</div>
+                        </div>
+                        <div className="bg-white p-4 border-t border-gray-200 flex justify-between items-center gap-3"><span className="text-xs text-gray-500">{reportIds.length} aluno(s) no relatório</span><div className="flex gap-2"><button onClick={onClose} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg font-bold text-sm">Cancelar</button><button onClick={generate} disabled={!fromUC || !toUC || reportIds.length === 0} className="px-5 py-2 bg-senac-blue text-white rounded-lg font-bold text-sm disabled:opacity-50"><IconPrinter className="w-4 h-4 inline-block mr-1" /> Emitir relatório</button></div></div>
+                    </div>
+                </div>
+            );
+        };
+
         const findMetadata = (worksheet) => {
             if (!worksheet || !window.XLSX) return {};
             const data = window.XLSX.utils.sheet_to_json(worksheet, { header: 1 });
@@ -1359,6 +1498,96 @@
             if (normalizeName(t) === normalizeName(studentName)) return false;
             if (/^\d{1,2}\/\d{1,2}(\/\d{2,4})?$/.test(t)) return false; 
             return true;
+        };
+
+        const cleanObservationText = (value) => String(value || "")
+            .replace(/\r\n?/g, "\n")
+            .split("\n")
+            .map(line => line.replace(/\s+/g, " ").trim())
+            .filter(Boolean)
+            .join("\n")
+            .trim();
+
+        const getObservationContext = (rawData, headerRowIdx, columnIdx, sheetName) => {
+            const ucMatch = String(sheetName || "").match(/UC\s*(\d+)/i);
+            const headerValues = [];
+            const dateValues = [];
+            const start = Math.max(0, Number(headerRowIdx || 0) - 4);
+            const end = Math.min(rawData.length, Number(headerRowIdx || 0) + 3);
+            const ignoredHeader = /^(N|N[º°]?|NUMERO|NOME|ALUNO|APRENDIZ|APRENDIZES|SOBRENOME|UC\s*\d+)$/i;
+
+            for (let rowIdx = start; rowIdx < end; rowIdx++) {
+                const value = rawData[rowIdx] && rawData[rowIdx][columnIdx];
+                if (value === null || value === undefined || String(value).trim() === "") continue;
+                const formatted = formatActivityHeaderValue(value);
+                const parsedDate = parseAttendanceDate(value);
+                if (parsedDate) {
+                    if (!dateValues.some(existing => existing.getTime() === parsedDate.getTime())) dateValues.push(parsedDate);
+                    continue;
+                }
+                const normalized = normalizeText(formatted);
+                if (!normalized || ignoredHeader.test(normalized) || normalized === normalizeText(sheetName)) continue;
+                if (!headerValues.includes(formatted)) headerValues.push(formatted);
+            }
+
+            return {
+                sheet: String(sheetName || ""),
+                uc: ucMatch ? `UC${ucMatch[1]}` : "",
+                date: dateValues.length > 0 ? formatShortDate(dateValues[0]) : "",
+                column: window.XLSX ? XLSX.utils.encode_col(columnIdx) : String(columnIdx + 1),
+                header: headerValues.slice(-2).join(" · ").slice(0, 120)
+            };
+        };
+
+        const addStudentObservation = (student, value, metadata = {}) => {
+            const text = cleanObservationText(value);
+            if (!student || !text || text.length < 2) return;
+            const source = String(metadata.source || metadata.sheet || "Planilha").trim();
+            const duplicate = (student.all_observations || []).some(item =>
+                cleanObservationText(item.text) === text
+                && String(item.source || "").trim() === source
+                && String(item.date || "") === String(metadata.date || "")
+                && String(item.column || "") === String(metadata.column || "")
+            );
+            if (duplicate) return;
+            student.all_observations.push({
+                source,
+                text,
+                sheet: metadata.sheet || "",
+                uc: metadata.uc || "",
+                date: metadata.date || "",
+                column: metadata.column || "",
+                header: metadata.header || "",
+                kind: metadata.kind || "observation"
+            });
+        };
+
+        const getObservationKindMeta = (observation) => {
+            if (observation && observation.kind === "attendance_comment") return { label: "Anotação da chamada", className: "bg-orange-100 text-orange-800 border-orange-200", icon: IconCalendar };
+            if (observation && observation.kind === "pedagogical") return { label: "Registro pedagógico", className: "bg-blue-100 text-blue-800 border-blue-200", icon: IconBookOpen };
+            return { label: "Observação da planilha", className: "bg-gray-100 text-gray-700 border-gray-200", icon: IconMessageSquare };
+        };
+
+        const getObservationGroupLabel = (observation) => {
+            if (observation && observation.uc) return observation.uc;
+            const number = getUCNumber(observation && observation.source);
+            if (number !== null) return `UC${number}`;
+            return "Geral";
+        };
+
+        const ObservationEntry = ({ observation }) => {
+            const meta = getObservationKindMeta(observation);
+            const KindIcon = meta.icon;
+            return <div className="px-3 py-3 bg-white">
+                <div className="flex flex-wrap items-center gap-1.5 mb-1.5">
+                    <span className={`inline-flex items-center gap-1 rounded border px-2 py-0.5 text-[10px] font-bold ${meta.className}`}><KindIcon className="w-3 h-3" /> {meta.label}</span>
+                    {observation.source && <span className="rounded bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600">{String(observation.source).replace(/^\[|\]$/g, "")}</span>}
+                    {observation.date && <span className="rounded bg-orange-50 px-2 py-0.5 text-[10px] font-semibold text-orange-700">Data: {observation.date}</span>}
+                    {observation.column && <span className="rounded bg-gray-50 px-2 py-0.5 text-[10px] font-semibold text-gray-500">Coluna {observation.column}</span>}
+                </div>
+                {observation.header && <div className="mb-1 text-[10px] font-medium text-gray-500">Campo: {observation.header}</div>}
+                <p className="text-sm leading-relaxed text-gray-700 whitespace-pre-wrap">{observation.text}</p>
+            </div>;
         };
 
         const findHeaderRow = (data) => {
@@ -1891,6 +2120,83 @@
 
         const getNAJustificationStorageKey = (turma) => `na_justifications_v1_${String(turma || "TURMA").replace(/[^a-zA-Z0-9]/g, "")}`;
 
+        const makeNAJustificationDocId = (turma, entryKey) => `na_${generateHash(String(turma || "TURMA"))}_${generateHash(String(entryKey || "REGISTRO"))}`;
+
+        const readNAJustificationsLocal = (turma) => {
+            try {
+                const value = localStorage.getItem(getNAJustificationStorageKey(turma));
+                const parsed = value ? JSON.parse(value) : {};
+                return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+            } catch (error) {
+                console.error("Erro ao carregar justificativas locais", error);
+                return {};
+            }
+        };
+
+        const writeNAJustificationsLocal = (turma, values) => {
+            try { localStorage.setItem(getNAJustificationStorageKey(turma), JSON.stringify(values || {})); }
+            catch (error) { console.error("Erro ao salvar justificativas locais", error); }
+        };
+
+        const loadNAJustifications = async (turma) => {
+            const localValues = readNAJustificationsLocal(turma);
+            const db = await getNotebookFirestore();
+            if (!db) return { justifications: localValues, source: "local" };
+            try {
+                const turmaKey = cleanNotebookKey(turma, "TURMA_DESCONHECIDA");
+                const snapshot = await db.collection("na_justifications").where("turmaKey", "==", turmaKey).get();
+                const values = { ...localValues };
+                snapshot.docs.forEach(doc => {
+                    const record = doc.data() || {};
+                    if (record.entryKey) values[record.entryKey] = { ...record, id: doc.id };
+                });
+                writeNAJustificationsLocal(turma, values);
+                return { justifications: values, source: "cloud" };
+            } catch (error) {
+                console.error("Erro ao carregar justificativas do Firebase; usando dados locais", error);
+                return { justifications: localValues, source: "local" };
+            }
+        };
+
+        const persistNAJustification = async (turma, entryKey, value) => {
+            const current = readNAJustificationsLocal(turma);
+            current[entryKey] = { ...(value || {}), entryKey };
+            writeNAJustificationsLocal(turma, current);
+            const db = await getNotebookFirestore();
+            if (!db) return { source: "local" };
+            try {
+                await db.collection("na_justifications").doc(makeNAJustificationDocId(turma, entryKey)).set({
+                    turmaKey: cleanNotebookKey(turma, "TURMA_DESCONHECIDA"),
+                    entryKey: String(entryKey),
+                    justified: true,
+                    sheet: String(value && value.sheet || ""),
+                    date: String(value && value.date || ""),
+                    reason: String(value && value.reason || ""),
+                    justifiedAt: String(value && value.justifiedAt || new Date().toISOString()),
+                    updatedAt: new Date().toISOString()
+                }, { merge: true });
+                return { source: "cloud" };
+            } catch (error) {
+                console.error("Erro ao salvar justificativa no Firebase; dados mantidos localmente", error);
+                return { source: "local" };
+            }
+        };
+
+        const removeNAJustification = async (turma, entryKey) => {
+            const current = readNAJustificationsLocal(turma);
+            delete current[entryKey];
+            writeNAJustificationsLocal(turma, current);
+            const db = await getNotebookFirestore();
+            if (!db) return { source: "local" };
+            try {
+                await db.collection("na_justifications").doc(makeNAJustificationDocId(turma, entryKey)).delete();
+                return { source: "cloud" };
+            } catch (error) {
+                console.error("Erro ao remover justificativa do Firebase", error);
+                return { source: "local" };
+            }
+        };
+
         const compactGeneralHeader = (value) => normalizeText(value).replace(/[^A-Z0-9]/g, "");
 
         const cleanContactValue = (value) => {
@@ -2143,20 +2449,16 @@
                     if (!studentRec.is_dropout) {
                         try {
                             const cellAddress = XLSX.utils.encode_cell({r: i, c: nameColIdx});
-                            const cell = pedSheet[cellAddress];
-                            const isNameOrangeFont = isOrangeFontCell(cell);
-                            const isNameOrangeFill = isOrangeFillCell(cell);
-                            const isPedagogicalDropout = hasDropoutKeywordInRow(row);
-                            if (isOrangeRowFill(pedSheet, i, nameColIdx) || isNameOrangeFont || isNameOrangeFill || isPedagogicalDropout) {
-                                studentRec.is_dropout = true;
-                                studentRec.is_process_dropout = false;
-                                studentRec.status = "Evadido/Desligado";
-                                studentRec.dropout_reason = isPedagogicalDropout
-                                    ? "Situação evadido, desistente ou desligado na aba pedagógica"
-                                    : isNameOrangeFont || isNameOrangeFill
-                                        ? "Nome identificado em laranja na planilha"
-                                        : "Linha identificada em laranja na planilha";
-                            }
+                            applyOrangeStudentSituation({
+                                student: studentRec,
+                                cell: pedSheet[cellAddress],
+                                row,
+                                sheetName: pedSheetName,
+                                isPedagogicalSheet: true,
+                                sheet: pedSheet,
+                                rowIndex: i,
+                                nameColIdx
+                            });
                         } catch (e) {}
                     }
 
@@ -2288,20 +2590,16 @@
                             if (!student.is_dropout) {
                                 try {
                                     const cellAddress = XLSX.utils.encode_cell({r: r, c: nameColIdx});
-                                    const cell = sheet[cellAddress];
-                                    const isNameOrangeFont = isOrangeFontCell(cell);
-                                    const isNameOrangeFill = isOrangeFillCell(cell);
-                                    const isPedagogicalDropout = isPedagogicalSheet && hasDropoutKeywordInRow(row);
-                                    if (isOrangeRowFill(sheet, r, nameColIdx) || isNameOrangeFont || isNameOrangeFill || isPedagogicalDropout) {
-                                        student.is_dropout = true;
-                                        student.is_process_dropout = false;
-                                        student.status = "Evadido/Desligado";
-                                        student.dropout_reason = isPedagogicalDropout
-                                            ? "Situação evadido, desistente ou desligado na aba pedagógica"
-                                            : isNameOrangeFont || isNameOrangeFill
-                                                ? "Nome identificado em laranja na aba " + sheetName
-                                                : "Linha identificada em laranja na aba " + sheetName;
-                                    }
+                                    applyOrangeStudentSituation({
+                                        student,
+                                        cell: sheet[cellAddress],
+                                        row,
+                                        sheetName,
+                                        isPedagogicalSheet,
+                                        sheet,
+                                        rowIndex: r,
+                                        nameColIdx
+                                    });
                                 } catch(e) {}
                             }
                             
@@ -2310,12 +2608,13 @@
                                 const valStr = String(cellVal || "").trim();
                                 if(valStr.length < 2 || valStr === "0" || valStr === "-") return;
                                 if (/^[\d.,\s%-]+$/.test(valStr)) return;
+                                const observationContext = getObservationContext(rawData, sheetHeaderRow, idx, sheetName);
                                 const isCritical = criticalCols.find(cc => cc.idx === idx);
                                 if (isCritical) {
-                                    if (isCritical.type === 'force_conselho') { student.conselho_text = valStr; if(!student.all_observations.some(o => o.text === valStr)) student.all_observations.push({ source: "[Conselho]", text: valStr }); }
-                                    else if (isCritical.type === 'force_obs') { let sourceLabel = `[${isCritical.name}]`; if(!student.all_observations.some(o => o.text === valStr)) student.all_observations.push({ source: sourceLabel, text: valStr }); }
-                                    else { let sourceLabel = sheetName; if(isCritical.name.includes("ORION") || isCritical.name.includes("ÓRION")) sourceLabel = "Órion/Recuperação"; if(!student.all_observations.some(o => o.text === valStr)) student.all_observations.push({ source: sourceLabel, text: valStr }); }
-                                } else { if(isInterestingText(valStr, student.name)) { if(!student.all_observations.some(o => o.text === valStr && o.source === sheetName)) student.all_observations.push({ source: sheetName, text: valStr }); } }
+                                    if (isCritical.type === 'force_conselho') { student.conselho_text = valStr; addStudentObservation(student, valStr, { ...observationContext, source: "[Conselho]", kind: "pedagogical" }); }
+                                    else if (isCritical.type === 'force_obs') { addStudentObservation(student, valStr, { ...observationContext, source: `[${isCritical.name}]`, kind: "observation" }); }
+                                    else { let sourceLabel = sheetName; if(isCritical.name.includes("ORION") || isCritical.name.includes("ÓRION")) sourceLabel = "Órion/Recuperação"; addStudentObservation(student, valStr, { ...observationContext, source: sourceLabel, kind: "observation" }); }
+                                } else { if(isInterestingText(valStr, student.name)) addStudentObservation(student, valStr, { ...observationContext, kind: "observation" }); }
                             });
                             if (sheet['!ref']) {
                                 row.forEach((_, colIdx) => {
@@ -2325,7 +2624,10 @@
                                         const comment = extractCellComments(cell);
                                         if(comment) {
                                             const cleanComment = comment.replace(student.name, '').trim();
-                                            if(cleanComment.length > 2 && !cleanComment.toUpperCase().includes("TOTAL")) { if(!student.all_observations.some(o => o.text.includes(cleanComment))) student.all_observations.push({ source: sheetName, text: `[Comentário]: ${cleanComment}` }); }
+                                            if(cleanComment.length > 2 && !cleanComment.toUpperCase().includes("TOTAL")) {
+                                                const commentContext = getObservationContext(rawData, sheetHeaderRow, colIdx, sheetName);
+                                                addStudentObservation(student, `[Comentário da chamada] ${cleanComment}`, { ...commentContext, kind: "attendance_comment" });
+                                            }
                                         }
                                     }
                                 });
@@ -2471,6 +2773,158 @@
                  document.body.removeChild(printArea);
              }
              document.head.removeChild(style);
+        };
+
+        const getUCNumber = (value) => {
+            const match = String(value || "").match(/UC\s*(\d+)/i);
+            return match ? Number(match[1]) : null;
+        };
+
+        const normalizeUCInterval = (fromUC, toUC) => {
+            const from = getUCNumber(fromUC);
+            const to = getUCNumber(toUC);
+            if (from === null || to === null) return null;
+            return { from: Math.min(from, to), to: Math.max(from, to) };
+        };
+
+        const isUCInInterval = (value, interval) => {
+            const number = getUCNumber(value);
+            return Boolean(interval && number !== null && number >= interval.from && number <= interval.to);
+        };
+
+        const escapeReportHTML = (value) => String(value === null || value === undefined ? "" : value)
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#039;");
+
+        const generateStudentSituationReport = ({ student, turma, course, instructors, tutor1, tutor2, activityTracking, reportData, naJustifications, notebookNotes, options }) => {
+            if (!student) return;
+            const selectedOptions = options || {};
+            const enabledSections = Object.values(selectedOptions).filter(Boolean).length;
+            if (enabledSections === 0) {
+                alert("Selecione pelo menos uma informacao para emitir o relatorio.");
+                return;
+            }
+            const printWindow = window.open("", "_blank");
+            if (!printWindow) {
+                alert("Nao foi possivel abrir o relatorio. Verifique se o navegador bloqueou a nova janela.");
+                return;
+            }
+
+            const dateStr = new Date().toLocaleDateString("pt-BR");
+            const studentRecipients = [{ name: student.studentContactName || student.name, email: student.studentEmail || "" }];
+            const supervisorRecipients = [{ name: student.supervisorName || "Supervisor", email: student.supervisorEmail || "" }];
+            const reportSubject = `Relatorio de situacoes - ${student.name} - Turma ${turma}`;
+            const instructorLabel = [...new Set([...(instructors || []), tutor1, tutor2].map(value => String(value || "").trim()).filter(value => value && value !== "Nao Identificado"))].join(" / ") || "Nao Identificado";
+            const section = (title, body, className = "") => `<section class="report-section ${className}"><h2>${escapeReportHTML(title)}</h2>${body}</section>`;
+
+            const studentContactHTML = `<div class="contact-grid"><div><strong>Aluno</strong><br>${escapeReportHTML(student.studentContactName || student.name)}<br>${escapeReportHTML(student.studentEmail || "E-mail nao informado")}<br>${escapeReportHTML(student.studentPhone || "Telefone nao informado")}</div></div>`;
+            const supervisorContactHTML = `<div class="contact-grid"><div><strong>Supervisor</strong><br>${escapeReportHTML(student.supervisorName || "Supervisor nao informado")}<br>${escapeReportHTML(student.supervisorEmail || "E-mail nao informado")}<br>${escapeReportHTML(student.supervisorPhone || "Telefone nao informado")}</div></div>`;
+
+            const academicRows = Object.entries(student.uc_scores || {})
+                .sort((a, b) => (getUCNumber(a[0]) || 0) - (getUCNumber(b[0]) || 0))
+                .map(([ucName, value]) => {
+                    const score = Number(value && value.score);
+                    const scoreLabel = Number.isNaN(score) ? "Nao informado" : `${(score <= 1 ? score * 100 : score).toFixed(1)}%`;
+                    return `<tr><td>${escapeReportHTML(ucName)}</td><td>${scoreLabel}</td><td>${escapeReportHTML(value && value.status || "Nao informado")}</td></tr>`;
+                }).join("");
+            const academicHTML = `<div class="status-line"><strong>Status:</strong> ${escapeReportHTML(student.status || "Nao informado")} &nbsp; | &nbsp; <strong>Frequencia media:</strong> ${escapeReportHTML(student.averageFreq)}%</div><table><thead><tr><th>UC</th><th>Frequencia</th><th>Desempenho</th></tr></thead><tbody>${academicRows || `<tr><td colspan="3">Sem dados detalhados por UC.</td></tr>`}</tbody></table><p><strong>Baixa frequencia:</strong> ${escapeReportHTML((student.low_freq_ucs || []).join(", ") || "Nenhuma")}</p><p><strong>Desempenho pendente:</strong> ${escapeReportHTML((student.failed_perf_ucs || []).join(", ") || "Nenhum")}</p>`;
+
+            const naRaw = reportData && reportData.naAlerts && reportData.naAlerts.students ? reportData.naAlerts.students[normalizeName(student.name)] : null;
+            const naEntries = naRaw && Array.isArray(naRaw.entries) ? naRaw.entries : [];
+            const naHTML = naEntries.length > 0 ? `<table><thead><tr><th>UC</th><th>Data</th><th>Aba</th><th>Situacao</th><th>Motivo</th></tr></thead><tbody>${naEntries.map(entry => {
+                const justification = naJustifications && naJustifications[entry.key];
+                return `<tr class="${justification ? "ok" : "attention"}"><td>${escapeReportHTML(entry.uc)}</td><td>${escapeReportHTML(entry.date)}</td><td>${escapeReportHTML(entry.sheet)}</td><td>${justification ? "Justificado" : "Pendente"}</td><td>${escapeReportHTML(justification && justification.reason || "Nao informado")}</td></tr>`;
+            }).join("")}</tbody></table>` : `<p class="muted">Nenhum registro NA de chamada encontrado.</p>`;
+
+            const observations = student.all_observations || [];
+            const observationsHTML = observations.length > 0 ? `<div class="observation-list">${observations.map(observation => `<div class="observation"><strong>${escapeReportHTML(getObservationGroupLabel(observation))}</strong><div>${escapeReportHTML(observation.text)}</div>${observation.date ? `<small>${escapeReportHTML(observation.date)}</small>` : ""}</div>`).join("")}</div>` : `<p class="muted">Nenhuma observacao registrada nas abas.</p>`;
+
+            const studentNotes = (notebookNotes || []).filter(note => note.scope === "class" || Number(note.studentId) === Number(student.id) || (note.studentIds || []).includes(Number(student.id)));
+            const notesHTML = studentNotes.length > 0 ? `<div class="observation-list">${studentNotes.map(note => `<div class="observation"><strong>${escapeReportHTML(getNotebookSituationLabel(note))}</strong> <span class="pill">${escapeReportHTML(getNotebookStatusMeta(note).label)}</span><div>${escapeReportHTML(note.notes || "Sem texto")}</div><small>Instrutor: ${escapeReportHTML(note.instructorSource || note.instructorName || "Nao informado")} | Analista: ${escapeReportHTML(note.responsibleAnalyst || "Nao informado")} | Registro: ${escapeReportHTML(formatNotebookDate(note.date))}</small></div>`).join("")}</div>` : `<p class="muted">Nenhuma anotacao do caderno vinculada.</p>`;
+
+            const activitySummary = getActivityStudentSummary(activityTracking, student.name);
+            const activityHTML = activitySummary && activitySummary.total > 0 ? `<div class="status-line"><strong>Fonte:</strong> ${escapeReportHTML(activityTracking.sourceName || "Upload atual")} (nao gravado na turma)<br><strong>Total:</strong> ${activitySummary.total} | <strong>Concluiu:</strong> ${activitySummary.completed} | <strong>NC:</strong> ${activitySummary.not_completed} | <strong>Em branco:</strong> ${activitySummary.blank} | <strong>Requer avaliacao:</strong> ${activitySummary.requires_evaluation}</div><ul>${activitySummary.entries.filter(entry => entry.status !== "completed").slice(0, 80).map(entry => `<li><strong>${escapeReportHTML(formatActivityStatusLabel(entry.status))}:</strong> ${escapeReportHTML(entry.label)}</li>`).join("") || `<li class="muted">Nenhuma pendencia de atividade.</li>`}</ul>` : `<p class="muted">Nenhum upload de atividades disponivel para este aluno.</p>`;
+
+            const sections = [];
+            if (selectedOptions.studentContact) sections.push(section("Contato do aluno", studentContactHTML));
+            if (selectedOptions.supervisorContact) sections.push(section("Contato do supervisor", supervisorContactHTML));
+            if (selectedOptions.academic) sections.push(section("Frequencia, desempenho e situacao", academicHTML));
+            if (selectedOptions.justifications) sections.push(section("Justificativas e registros NA da chamada", naHTML, "na-section"));
+            if (selectedOptions.observations) sections.push(section("Observacoes das planilhas", observationsHTML));
+            if (selectedOptions.notebook) sections.push(section("Anotacoes do caderno do instrutor", notesHTML));
+            if (selectedOptions.activities) sections.push(section("Atividades do upload atual", activityHTML, "activity-section"));
+
+            const recipientsJSON = value => JSON.stringify(value).replace(/<\/script/gi, "<\\/script");
+            const htmlContent = `<html lang="pt-BR"><head><meta charset="UTF-8"><title>${escapeReportHTML(reportSubject)}</title><style>body{font-family:Arial,sans-serif;margin:0;padding:0;color:#243447;background:#fff}.menu{background:#004587;color:#fff;padding:10px 16px;display:flex;justify-content:space-between;align-items:center;gap:10px;position:sticky;top:0;z-index:5}.menu strong{font-size:14px}.actions{display:flex;gap:7px;flex-wrap:wrap}.btn,.recipient{border:0;border-radius:4px;padding:8px 10px;font-size:11px;font-weight:bold}.btn{cursor:pointer;background:#F5821F;color:#fff}.recipient{color:#123;background:#fff}.content{max-width:980px;margin:0 auto;padding:24px}.header{text-align:center;border-bottom:3px solid #F5821F;padding-bottom:16px}.header img{width:82px}.header h1{color:#004587;font-size:21px;margin:8px 0}.header p{margin:4px;font-size:12px}.student{margin-top:18px;border:1px solid #d9e2ec;border-left:4px solid #F5821F;border-radius:7px;padding:16px}.student h3{margin:0;color:#004587;font-size:17px}.student-meta{font-size:12px;color:#64748b;margin-top:6px}.report-section{margin-top:16px;border-top:1px solid #e2e8f0;padding-top:10px}.report-section h2{font-size:14px;color:#004587;margin:0 0 8px;border-bottom:1px solid #dce7f0;padding-bottom:5px}.contact-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;font-size:12px}.contact-grid>div{background:#f8fafc;border:1px solid #e2e8f0;border-radius:5px;padding:9px}.status-line{background:#f8fafc;border-left:3px solid #F5821F;padding:9px;font-size:12px;margin-bottom:8px}.report-section p,.report-section li{font-size:12px;line-height:1.45}.report-section table{width:100%;border-collapse:collapse;font-size:11px;margin:7px 0}.report-section th,.report-section td{border:1px solid #d9e2ec;padding:6px;text-align:left}.report-section th{background:#eef5fb;color:#004587}.attention{background:#fff7ed;color:#9a3412}.ok{background:#f0fdf4;color:#166534}.observation{background:#f8fafc;border-left:3px solid #F5821F;padding:8px;margin:6px 0;font-size:12px}.observation small{display:block;color:#64748b;margin-top:4px}.pill{background:#eaf2fa;color:#004587;border-radius:4px;padding:2px 5px;font-size:10px}.muted{color:#64748b;font-style:italic}@media(max-width:700px){.menu{align-items:flex-start;flex-direction:column}.contact-grid{grid-template-columns:1fr}}@media print{.menu{display:none!important}.content{padding:0}}</style></head><body><div class="menu"><strong>Relatorio individual</strong><div class="actions"><select id="recipient" class="recipient"><option value="student">Enviar ao aluno</option><option value="supervisor">Enviar ao supervisor</option></select><button class="btn" onclick="sendEmail()">Enviar por Outlook</button><button class="btn" onclick="copyReport()">Copiar para e-mail</button><button class="btn" onclick="window.print()">Imprimir / PDF</button></div></div><main id="report-content" class="content"><div class="header"><img src="https://upload.wikimedia.org/wikipedia/commons/thumb/8/86/Senac_logo.svg/500px-Senac_logo.svg.png" alt="Senac"><h1>Relatorio de situacoes</h1><p><strong>Curso:</strong> ${escapeReportHTML(course)}</p><p><strong>Turma:</strong> ${escapeReportHTML(turma)} | <strong>Emitido em:</strong> ${dateStr}</p><p><strong>Instrutores:</strong> ${escapeReportHTML(instructorLabel)}</p></div><article class="student"><h3>${escapeReportHTML(student.name)}</h3><div class="student-meta">Contra turno: ${escapeReportHTML(student.contra_turno_desc || "Nao informado")} | Status: ${escapeReportHTML(student.status || "Nao informado")}</div>${sections.join("")}</article></main><script>const studentRecipients=${recipientsJSON(studentRecipients)};const supervisorRecipients=${recipientsJSON(supervisorRecipients)};const subject=${JSON.stringify(reportSubject).replace(/<\/script/gi, "<\\/script")};function copyReport(afterCopy){const content=document.getElementById('report-content');if(!content)return;const done=()=>{if(typeof afterCopy==='function')afterCopy();else alert('Relatorio copiado. Cole no Outlook com Ctrl+V para manter o layout.');};if(navigator.clipboard&&window.ClipboardItem){const item=new ClipboardItem({'text/html':new Blob([content.outerHTML],{type:'text/html'}),'text/plain':new Blob([content.innerText],{type:'text/plain'})});navigator.clipboard.write([item]).then(done).catch(()=>fallback(done));}else fallback(done);}function fallback(done){const range=document.createRange();range.selectNodeContents(document.getElementById('report-content'));const selection=window.getSelection();selection.removeAllRanges();selection.addRange(range);try{document.execCommand('copy');done();}finally{selection.removeAllRanges();}}function sendEmail(){const type=document.getElementById('recipient').value;const list=type==='supervisor'?supervisorRecipients:studentRecipients;const emails=[...new Set(list.map(item=>String(item.email||'').trim()).filter(Boolean))];if(emails.length===0){alert(type==='supervisor'?'Nenhum e-mail de supervisor foi informado.':'Nenhum e-mail de aluno foi informado.');return;}copyReport(()=>{alert('Relatorio copiado. Cole no corpo do Outlook com Ctrl+V para manter o layout.');window.location.href='mailto:'+emails.join(';')+'?subject='+encodeURIComponent(subject)+'&body='+encodeURIComponent(document.getElementById('report-content').innerText);});}${String.fromCharCode(60)}/script></body></html>`;
+            printWindow.document.write(htmlContent);
+            printWindow.document.close();
+        };
+
+        const generateRangeReport = ({ selectedStudentIds, students, turma, course, instructors, tutor1, tutor2, activityTracking, reportData, naJustifications, notebookNotes, fromUC, toUC }) => {
+            const interval = normalizeUCInterval(fromUC, toUC);
+            const selected = students.filter(student => selectedStudentIds.includes(student.id));
+            if (!interval || selected.length === 0) {
+                alert("Selecione a UC inicial, a UC final e pelo menos um aluno ou a turma inteira.");
+                return;
+            }
+
+            const rangeLabel = interval.from === interval.to ? `UC${interval.from}` : `UC${interval.from} à UC${interval.to}`;
+            const printWindow = window.open("", "_blank");
+            if (!printWindow) {
+                alert("Não foi possível abrir o relatório. Verifique se o navegador bloqueou a nova janela.");
+                return;
+            }
+            const dateStr = new Date().toLocaleDateString("pt-BR");
+            const studentRecipients = selected.map(student => ({ name: student.studentContactName || student.name, email: student.studentEmail || "" }));
+            const supervisorRecipients = selected.map(student => ({ name: student.supervisorName || "Supervisor", email: student.supervisorEmail || "" }));
+            const reportSubject = `Relatório completo - ${rangeLabel} - Turma ${turma}`;
+            const instructorLabel = [...new Set([...(instructors || []), tutor1, tutor2].map(value => String(value || "").trim()).filter(value => value && value !== "Não Identificado"))].join(" / ") || "Não Identificado";
+
+            const studentHTML = selected.map((student, studentIndex) => {
+                const ucEntries = Object.entries(student.uc_scores || {})
+                    .filter(([ucName]) => isUCInInterval(ucName, interval))
+                    .sort((a, b) => (getUCNumber(a[0]) || 0) - (getUCNumber(b[0]) || 0));
+                const scores = ucEntries.map(([, value]) => Number(value && value.score)).filter(value => !Number.isNaN(value));
+                const average = scores.length > 0 ? (scores.reduce((total, value) => total + (value <= 1 ? value * 100 : value), 0) / scores.length).toFixed(1) : "N/A";
+                const lowFrequency = ucEntries.filter(([, value]) => Number(value && value.score) < 0.75).map(([ucName]) => ucName);
+                const performanceIssues = ucEntries.filter(([, value]) => isNotDevelopedStatus(value && value.status)).map(([ucName]) => ucName);
+                const observations = (student.all_observations || []).filter(observation => {
+                    const number = getUCNumber(observation.source);
+                    return number === null || isUCInInterval(observation.source, interval);
+                });
+                const activitySummary = getActivityStudentSummary(activityTracking, student.name);
+                const activityEntries = activitySummary ? activitySummary.entries.filter(entry => isUCInInterval(entry.uc || entry.sheet, interval)) : [];
+                const activityAttention = activityEntries.filter(entry => entry.status !== "completed");
+                const activityCounts = activityEntries.reduce((counts, entry) => {
+                    counts[entry.status] = (counts[entry.status] || 0) + 1;
+                    return counts;
+                }, {});
+                const naRaw = reportData && reportData.naAlerts && reportData.naAlerts.students ? reportData.naAlerts.students[normalizeName(student.name)] : null;
+                const naEntries = naRaw ? naRaw.entries.filter(entry => isUCInInterval(entry.uc || entry.sheet, interval) && !(naJustifications || {})[entry.key]) : [];
+                const studentNotes = (notebookNotes || []).filter(note => note.scope === "class" || Number(note.studentId) === Number(student.id) || (note.studentIds || []).includes(Number(student.id)));
+                const statusColor = student.is_dropout ? "#f97316" : student.is_process_dropout ? "#9333ea" : student.needs_recuperacao ? "#dc2626" : student.needs_conselho ? "#ca8a04" : "#16a34a";
+                const ucRows = ucEntries.length > 0 ? ucEntries.map(([ucName, value]) => {
+                    const score = Number(value && value.score);
+                    const scoreLabel = Number.isNaN(score) ? "N/A" : `${(score <= 1 ? score * 100 : score).toFixed(1)}%`;
+                    const performance = String(value && value.status || "Não informado");
+                    const rowClass = Number.isNaN(score) ? "" : score < 0.75 ? "attention" : isNotDevelopedStatus(performance) ? "danger" : "";
+                    return `<tr class="${rowClass}"><td>${escapeReportHTML(ucName)}</td><td>${scoreLabel}</td><td>${escapeReportHTML(performance)}</td></tr>`;
+                }).join("") : `<tr><td colspan="3" class="muted">Sem dados de frequência/desempenho no intervalo.</td></tr>`;
+                const observationHTML = observations.length > 0 ? observations.slice(0, 40).map(observation => `<li><strong>${escapeReportHTML(observation.source || "Geral")}:</strong> ${escapeReportHTML(observation.text)}</li>`).join("") : `<li class="muted">Nenhuma observação registrada.</li>`;
+                const activityHTML = activityEntries.length > 0 ? `<div class="summary-box"><strong>${activityEntries.length} atividade(s) identificada(s)</strong><br>Concluiu: ${activityCounts.completed || 0} | Não concluiu: ${activityCounts.not_completed || 0} | Em branco: ${activityCounts.blank || 0} | Requer avaliação: ${activityCounts.requires_evaluation || 0}${activityAttention.length > 0 ? `<ul>${activityAttention.slice(0, 30).map(entry => `<li><strong>${escapeReportHTML(formatActivityStatusLabel(entry.status))}:</strong> ${escapeReportHTML(entry.label)}</li>`).join("")}</ul>` : ""}</div>` : `<div class="summary-box muted">Nenhuma atividade da planilha foi encontrada no intervalo.</div>`;
+                const naHTML = naEntries.length > 0 ? `<div class="summary-box danger-box"><strong>${naEntries.length} NA pendente(s) na chamada</strong><br>${naEntries.map(entry => `${escapeReportHTML(entry.uc)} - ${escapeReportHTML(entry.date)}`).join("; ")}</div>` : `<div class="summary-box muted">Nenhum NA pendente no intervalo.</div>`;
+                const notesHTML = studentNotes.length > 0 ? studentNotes.map(note => `<div class="notebook-note"><div><strong>${escapeReportHTML(getNotebookSituationLabel(note))}</strong> <span class="status-pill">${escapeReportHTML(getNotebookStatusMeta(note).label)}</span></div><div class="meta">Instrutor: ${escapeReportHTML(note.instructorSource || note.instructorName || "Não informado")} | Analista: ${escapeReportHTML(note.responsibleAnalyst || "Não informado")} | Registro: ${escapeReportHTML(formatNotebookDate(note.date))}</div>${getNotebookTreatmentDue(note) ? `<div class="meta">${escapeReportHTML(getNotebookTreatmentLabel(note))}</div>` : ""}${note.notes ? `<p>${escapeReportHTML(note.notes)}</p>` : ""}</div>`).join("") : `<div class="summary-box muted">Nenhuma anotação de caderno vinculada.</div>`;
+
+                return `<article class="student-card"><div class="header-row"><span class="student-name">${escapeReportHTML(student.name)}</span><span style="color:${statusColor};font-weight:bold">${escapeReportHTML(student.status)}</span></div><div class="info-grid"><div><strong>Frequência média no intervalo:</strong> ${average}%</div><div><strong>Contra Turno:</strong> ${escapeReportHTML(student.contra_turno_desc)}</div><div><strong>UCs com baixa frequência:</strong> ${escapeReportHTML(lowFrequency.join(", ") || "Nenhuma")}</div><div><strong>UCs com desempenho pendente:</strong> ${escapeReportHTML(performanceIssues.join(", ") || "Nenhuma")}</div></div><h3>Frequência e desempenho por UC</h3><table class="uc-table"><thead><tr><th>UC</th><th>Frequência</th><th>Desempenho</th></tr></thead><tbody>${ucRows}</tbody></table><h3>Atividades no intervalo</h3>${activityHTML}<h3>Chamada e NA</h3>${naHTML}<h3>Observações e situações</h3><ul>${observationHTML}</ul><h3>Anotações do caderno</h3>${notesHTML}</article>`;
+            }).join("");
+
+            const htmlContent = `<html lang="pt-BR"><head><meta charset="UTF-8"><title>${escapeReportHTML(reportSubject)}</title><style>body{font-family:Arial,sans-serif;padding:20px;color:#243447;background:#fff;margin:0}.report-menu{background:#004587;padding:10px 20px;display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;z-index:10;box-shadow:0 2px 5px rgba(0,0,0,.2)}.menu-title{color:#fff;font-weight:bold;font-size:14px}.menu-actions{display:flex;gap:8px;flex-wrap:wrap}.btn,.recipient-select{border:0;border-radius:4px;padding:8px 10px;font-size:12px;font-weight:bold}.btn{cursor:pointer;color:#fff;background:#F5821F}.recipient-select{color:#123}.report-header{text-align:center;margin:18px 0 22px}.report-header img{width:80px}.report-header h1{font-size:20px;color:#004587;margin:8px 0}.report-header h2{font-size:14px;color:#666;margin:4px}.student-card{border:1px solid #d9e2ec;border-left:4px solid #F5821F;border-radius:8px;padding:16px;margin:0 0 18px;break-inside:avoid}.header-row{display:flex;justify-content:space-between;gap:12px;border-bottom:2px solid #F5821F;padding-bottom:7px;margin-bottom:10px}.student-name{font-size:17px;font-weight:bold}.info-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px;margin-bottom:12px}.student-card h3{font-size:12px;color:#004587;border-bottom:1px solid #e6edf4;padding-bottom:4px;margin:14px 0 7px}.uc-table{width:100%;border-collapse:collapse;font-size:11px}.uc-table th,.uc-table td{border:1px solid #d9e2ec;padding:6px;text-align:left}.uc-table th{background:#eef5fb;color:#004587}.uc-table .attention{background:#fff7ed;color:#9a3412}.uc-table .danger{background:#fef2f2;color:#b91c1c}.summary-box{background:#f8fafc;border-left:3px solid #F5821F;padding:8px;font-size:11px;margin:6px 0}.danger-box{border-left-color:#dc2626;background:#fef2f2;color:#991b1b}.muted{color:#6b7280;font-style:italic}.student-card ul{font-size:11px;margin:5px 0 8px;padding-left:18px}.notebook-note{border:1px solid #d9e2ec;border-left:3px solid #004587;padding:8px;margin:6px 0;font-size:11px}.status-pill{display:inline-block;border-radius:4px;background:#eef5fb;color:#004587;padding:2px 5px;font-size:10px}.meta{color:#64748b;font-size:10px;margin-top:4px}@media(max-width:760px){.report-menu{align-items:flex-start;flex-direction:column;gap:8px}.info-grid{grid-template-columns:1fr}}@media print{.report-menu{display:none!important}}</style></head><body><div class="report-menu"><div class="menu-title">Relatório completo por UCs</div><div class="menu-actions"><select id="report-recipient" class="recipient-select"><option value="student">Enviar para estudante(s)</option><option value="supervisor">Enviar para supervisor(es)</option></select><button class="btn" onclick="sendReportEmail()">Enviar por Outlook</button><button class="btn" onclick="copyReport()">Copiar para e-mail</button><button class="btn" onclick="window.print()">Imprimir / PDF</button></div></div><div id="report-content"><div class="report-header"><img src="https://upload.wikimedia.org/wikipedia/commons/thumb/8/86/Senac_logo.svg/500px-Senac_logo.svg.png" alt="Senac"/><h1>Relatório completo da turma/aluno</h1><h2>${escapeReportHTML(course)}</h2><div><strong>Turma:</strong> ${escapeReportHTML(turma)} | <strong>Intervalo:</strong> ${escapeReportHTML(rangeLabel)} | <strong>Emitido em:</strong> ${dateStr}<br><strong>Instrutores:</strong> ${escapeReportHTML(tutor1)} / ${escapeReportHTML(tutor2)}</div></div>${studentHTML}</div><script>const studentRecipients=${JSON.stringify(studentRecipients)};const supervisorRecipients=${JSON.stringify(supervisorRecipients)};const subject=${JSON.stringify(reportSubject)};function copyReport(afterCopy){const content=document.getElementById('report-content');if(!content)return;const done=()=>{if(typeof afterCopy==='function')afterCopy();else alert('Relatório copiado. Cole no Outlook ou em outro documento.');};if(navigator.clipboard&&window.ClipboardItem){const item=new ClipboardItem({'text/html':new Blob([content.outerHTML],{type:'text/html'}),'text/plain':new Blob([content.innerText],{type:'text/plain'})});navigator.clipboard.write([item]).then(done).catch(()=>fallbackCopy(done));}else fallbackCopy(done);}function fallbackCopy(done){const range=document.createRange();range.selectNodeContents(document.getElementById('report-content'));const selection=window.getSelection();selection.removeAllRanges();selection.addRange(range);try{document.execCommand('copy');done();}finally{selection.removeAllRanges();}}function sendReportEmail(){const type=document.getElementById('report-recipient').value;const list=type==='supervisor'?supervisorRecipients:studentRecipients;const emails=[...new Set(list.map(item=>String(item.email||'').trim()).filter(Boolean))];if(emails.length===0){alert(type==='supervisor'?'Nenhum e-mail de supervisor foi informado.':'Nenhum e-mail de estudante foi informado.');return;}copyReport(()=>{alert('Relatório copiado. Cole no corpo do Outlook com Ctrl+V para manter o layout.');window.location.href='mailto:'+emails.join(';')+'?subject='+encodeURIComponent(subject)+'&body='+encodeURIComponent(document.getElementById('report-content').innerText);});}<\/script></body></html>`;
+            const completeHTML = htmlContent.replace(`${escapeReportHTML(tutor1)} / ${escapeReportHTML(tutor2)}`, escapeReportHTML(instructorLabel));
+            printWindow.document.write(completeHTML);
+            printWindow.document.close();
         };
 
         const generateReport = (selectedStudentIds, students, turma, course, tutor1, tutor2, activityTracking, reportData, naJustifications) => {
@@ -2726,6 +3180,8 @@
             // Novo Estado V72 - Instrutor Selecionado para Notas
             const [selectedInstructorForNotes, setSelectedInstructorForNotes] = useState(null);
             const [showNotebookReport, setShowNotebookReport] = useState(false);
+            const [showUCIntervalReport, setShowUCIntervalReport] = useState(false);
+            const [showStudentReportModal, setShowStudentReportModal] = useState(false);
             const [classNotebookNotes, setClassNotebookNotes] = useState([]);
 
             // --- FILTROS E SELEÇÃO ---
@@ -2773,19 +3229,21 @@
                     setNaJustificationDrafts({});
                     return;
                 }
-                try {
-                    const saved = localStorage.getItem(getNAJustificationStorageKey(data.turma));
-                    const parsed = saved ? JSON.parse(saved) : {};
+                let isCurrent = true;
+                const applyLoaded = (parsed) => {
+                    if (!isCurrent) return;
                     const drafts = {};
                     Object.entries(parsed).forEach(([key, value]) => {
                         if (value && typeof value.reason === "string") drafts[key] = value.reason;
                     });
                     setNaJustifications(parsed);
                     setNaJustificationDrafts(drafts);
-                } catch (error) {
-                    setNaJustifications({});
-                    setNaJustificationDrafts({});
-                }
+                };
+                applyLoaded(readNAJustificationsLocal(data.turma));
+                loadNAJustifications(data.turma).then(loaded => {
+                    if (loaded && loaded.justifications) applyLoaded(loaded.justifications);
+                }).catch(error => console.error("Erro ao carregar justificativas da turma", error));
+                return () => { isCurrent = false; };
             }, [data ? data.turma : ""]);
 
             useEffect(() => {
@@ -2972,36 +3430,49 @@
                     setActivityTracking(tracking);
                 } catch (e) { alert("Erro ao ler o acompanhamento de atividades: " + e.message); }
             };
-            const toggleNAJustification = (entry) => {
+            const toggleNAJustification = async (entry) => {
                 if (!data || !data.turma || !entry || !entry.key) return;
-                setNaJustifications(previous => {
-                    const next = { ...previous };
-                    if (next[entry.key]) delete next[entry.key];
-                    else next[entry.key] = {
+                const currentValue = naJustifications[entry.key];
+                if (currentValue) {
+                    setNaJustifications(previous => {
+                        const next = { ...previous };
+                        delete next[entry.key];
+                        writeNAJustificationsLocal(data.turma, next);
+                        return next;
+                    });
+                    await removeNAJustification(data.turma, entry.key);
+                    return;
+                }
+                const value = {
                         justifiedAt: new Date().toISOString(),
                         sheet: entry.sheet,
                         date: entry.date,
                         reason: String(naJustificationDrafts[entry.key] || "").trim()
-                    };
-                    try { localStorage.setItem(getNAJustificationStorageKey(data.turma), JSON.stringify(next)); } catch (error) {}
+                };
+                setNaJustifications(previous => {
+                    const next = { ...previous, [entry.key]: value };
+                    writeNAJustificationsLocal(data.turma, next);
                     return next;
                 });
+                await persistNAJustification(data.turma, entry.key, value);
             };
-            const saveNAJustificationReason = (entry) => {
+            const saveNAJustificationReason = async (entry) => {
                 if (!data || !data.turma || !entry || !entry.key || !naJustifications[entry.key]) return;
+                const value = {
+                    ...naJustifications[entry.key],
+                    reason: String(naJustificationDrafts[entry.key] || "").trim(),
+                    updatedAt: new Date().toISOString()
+                };
                 setNaJustifications(previous => {
                     if (!previous[entry.key]) return previous;
                     const next = {
                         ...previous,
-                        [entry.key]: {
-                            ...previous[entry.key],
-                            reason: String(naJustificationDrafts[entry.key] || "").trim(),
-                            updatedAt: new Date().toISOString()
-                        }
+                        [entry.key]: value
                     };
-                    try { localStorage.setItem(getNAJustificationStorageKey(data.turma), JSON.stringify(next)); } catch (error) {}
+                    writeNAJustificationsLocal(data.turma, next);
                     return next;
                 });
+                await persistNAJustification(data.turma, entry.key, value);
             };
             const handleLogoUpload = (e) => { const file = e.target.files[0]; if(file) { const r = new FileReader(); r.onloadend=()=>{setCustomLogo(r.result)}; r.readAsDataURL(file); } };
             const handleDrop = (e) => { e.preventDefault(); setDragActive(false); if(e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]); };
@@ -3087,6 +3558,18 @@
             const selectedNAStudentSummary = selectedStudentForModal ? getNAStudentSummary(data, selectedStudentForModal.name, naJustifications) : null;
             const selectedNAStudentRaw = selectedStudentForModal && data && data.naAlerts && data.naAlerts.students ? data.naAlerts.students[normalizeName(selectedStudentForModal.name)] : null;
             const naAttentionTotal = naAttentionStudents.reduce((total, student) => total + student.count, 0);
+            const selectedObservationGroups = useMemo(() => {
+                if (!selectedStudentForModal) return [];
+                const groups = new Map();
+                [...(selectedStudentForModal.all_observations || [])]
+                    .sort((a, b) => String(a.date || "").localeCompare(String(b.date || "")) || String(a.sheet || a.source || "").localeCompare(String(b.sheet || b.source || ""), "pt-BR"))
+                    .forEach(observation => {
+                        const label = getObservationGroupLabel(observation);
+                        if (!groups.has(label)) groups.set(label, []);
+                        groups.get(label).push(observation);
+                    });
+                return Array.from(groups.entries());
+            }, [selectedStudentForModal]);
 
             if (!data) {
                 return (
@@ -3129,6 +3612,8 @@
                     )}
 
                     {showNotebookReport && <NotebookNotesReport turma={data.turma} instructors={activeInstructorNames} onClose={() => setShowNotebookReport(false)} />}
+                    {showUCIntervalReport && <UCIntervalReportModal data={data} activityTracking={activityTracking} naJustifications={naJustifications} notebookNotes={classNotebookNotes} onClose={() => setShowUCIntervalReport(false)} />}
+                    {showStudentReportModal && selectedStudentForModal && <StudentReportOptionsModal data={data} student={selectedStudentForModal} activityTracking={activityTracking} naJustifications={naJustifications} notebookNotes={instructorNotesForStudent} onClose={() => setShowStudentReportModal(false)} />}
 
                     {showAtaModal && (
                         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-fade-in" onClick={(e) => {if(e.target===e.currentTarget) setShowAtaModal(false)}}>
@@ -3179,6 +3664,7 @@
                                     <button onClick={() => setSelectedStudentForModal(null)} className="p-1 hover:bg-white/20 rounded-full"><IconXCircle className="w-8 h-8"/></button>
                                 </div>
                                 <div className="p-8 overflow-y-auto">
+                                    <div className="mb-5 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2"><span className="text-xs text-blue-800">Relatorio individual com informacoes escolhidas por situacao.</span><button type="button" onClick={() => setShowStudentReportModal(true)} className="px-3 py-2 rounded-md bg-senac-blue text-white text-xs font-bold hover:bg-blue-800 flex items-center gap-2"><IconFileText className="w-4 h-4" /> Emitir relatorio</button></div>
                                     <div className="mb-6 flex justify-between items-center"><h3 className="text-sm font-bold text-gray-400 uppercase tracking-wider">Situação Atual</h3><label className="flex items-center gap-2 text-xs bg-purple-50 px-2 py-1 rounded border border-purple-200 cursor-pointer hover:bg-purple-100"><input type="checkbox" checked={selectedStudentForModal.is_process_dropout} onChange={() => toggleProcessDropout(selectedStudentForModal.id)} className="rounded text-purple-600 focus:ring-purple-500" /> Marcar como "Em Processo de Desligamento"</label></div>
                                     <div className="flex gap-2 mb-6">{selectedStudentForModal.is_dropout ? (<div className="bg-orange-100 text-orange-800 px-4 py-2 rounded-lg font-bold flex items-center gap-2"><IconLogOut className="w-5 h-5"/> {selectedStudentForModal.dropout_reason || "Evadido"}</div>) : selectedStudentForModal.is_process_dropout ? (<div className="bg-purple-100 text-purple-800 px-4 py-2 rounded-lg font-bold flex items-center gap-2"><IconClock className="w-5 h-5"/> Em Processo de Desligamento</div>) : (<>{selectedStudentForModal.needs_recuperacao && <div className="bg-red-100 text-red-800 px-4 py-2 rounded-lg font-bold flex items-center gap-2"><IconXCircle className="w-5 h-5"/> Recuperação Necessária</div>}{selectedStudentForModal.needs_conselho && !selectedStudentForModal.needs_recuperacao && <div className="bg-yellow-100 text-yellow-800 px-4 py-2 rounded-lg font-bold flex items-center gap-2"><IconAlertTriangle className="w-5 h-5"/> Conselho de Classe</div>}{!selectedStudentForModal.needs_recuperacao && !selectedStudentForModal.needs_conselho && <div className="bg-green-100 text-green-800 px-4 py-2 rounded-lg font-bold flex items-center gap-2"><IconCheckCircle className="w-5 h-5"/> Desenvolvimento Pleno</div>}</>)}</div>
 
@@ -3302,7 +3788,10 @@
                                     )}
 
                                     <div className="mb-6"><h3 className="text-sm font-bold text-gray-700 mb-3 flex items-center gap-2"><IconBarChart2 className="w-4 h-4"/> Detalhamento por UC</h3><div className="grid grid-cols-2 sm:grid-cols-4 gap-2">{Object.entries(selectedStudentForModal.uc_scores || {}).map(([ucName, data]) => ( <div key={ucName} className={`p-2 rounded border text-center ${data.score < 0.75 ? 'bg-red-50 border-red-200' : 'bg-gray-50 border-gray-100'}`}><div className="text-xs font-bold text-gray-500">{ucName}</div><div className={`font-bold ${data.score < 0.75 ? 'text-red-700' : 'text-gray-800'}`}>{(data.score*100).toFixed(0)}%</div></div> ))}{Object.keys(selectedStudentForModal.uc_scores || {}).length === 0 && <span className="text-xs text-gray-400 italic col-span-4">Sem dados detalhados.</span>}</div></div>
-                                    <div className="mb-6"><h3 className="text-sm font-bold text-gray-700 mb-3 flex items-center gap-2"><IconMessageSquare className="w-4 h-4"/> Diário Geral (Planilhas e Observações)</h3><div className="space-y-2 max-h-60 overflow-y-auto pr-2 custom-scrollbar">{selectedStudentForModal.all_observations && selectedStudentForModal.all_observations.length > 0 ? ( selectedStudentForModal.all_observations.map((obs, idx) => ( <div key={idx} className="bg-gray-50 border border-gray-200 p-3 rounded-lg text-sm relative hover:bg-gray-100 transition-colors"><span className={`absolute top-2 right-2 text-[10px] font-bold uppercase tracking-wider px-1 rounded ${obs.source.includes('Órion') || obs.source.includes('UC') ? 'bg-orange-100 text-orange-700' : 'bg-white text-gray-400 border border-gray-200'}`}>{obs.source}</span><p className="text-gray-700 pr-12 obs-text">{obs.text}</p></div> )) ) : ( <div className="text-center p-6 border-2 border-dashed border-gray-200 rounded-lg bg-gray-50"><p className="text-gray-400 text-sm italic">Nenhuma observação ou comentário encontrado em nenhuma aba.</p></div> )}</div></div>
+                                    <div className="mb-6">
+                                        <div className="flex flex-wrap items-center justify-between gap-2 mb-3"><h3 className="text-sm font-bold text-gray-700 flex items-center gap-2"><IconMessageSquare className="w-4 h-4"/> Observações organizadas da planilha</h3>{selectedStudentForModal.all_observations && selectedStudentForModal.all_observations.length > 0 && <span className="rounded bg-blue-50 px-2 py-1 text-[10px] font-bold text-blue-700">{selectedStudentForModal.all_observations.length} registro(s)</span>}</div>
+                                        {selectedObservationGroups.length > 0 ? <div className="space-y-3 max-h-80 overflow-y-auto pr-2 custom-scrollbar">{selectedObservationGroups.map(([groupLabel, observations]) => <div key={groupLabel} className="overflow-hidden rounded-lg border border-gray-200 bg-gray-50"><div className="flex items-center justify-between gap-2 border-b border-gray-200 bg-gray-100 px-3 py-2"><span className="text-xs font-bold text-gray-700">{groupLabel}</span><span className="text-[10px] font-semibold uppercase text-gray-500">{observations.length} registro(s)</span></div><div className="divide-y divide-gray-100">{observations.map((observation, index) => <ObservationEntry key={`${groupLabel}-${observation.column || ""}-${observation.date || ""}-${index}`} observation={observation} />)}</div></div>)}</div> : <div className="rounded-lg border-2 border-dashed border-gray-200 bg-gray-50 p-6 text-center"><p className="text-gray-400 text-sm italic">Nenhuma observação ou anotação encontrada nas abas.</p></div>}
+                                    </div>
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6"><div className="bg-slate-50 p-4 rounded-xl border border-slate-100"><h3 className="text-sm font-bold text-gray-700 mb-2">Pendências Acadêmicas</h3><ul className="space-y-2 text-sm">{selectedStudentForModal.low_freq_ucs.length > 0 && (<li className="flex items-start gap-2 text-yellow-700"><IconAlertTriangle className="w-4 h-4 mt-0.5 shrink-0"/> <span>Baixa Frequência: <strong>{selectedStudentForModal.low_freq_ucs.join(", ")}</strong></span></li>)}{selectedStudentForModal.failed_perf_ucs.length > 0 && (<li className="flex items-start gap-2 text-red-700"><IconXCircle className="w-4 h-4 mt-0.5 shrink-0"/> <span>Dificuldade Desempenho: <strong>{selectedStudentForModal.failed_perf_ucs.join(", ")}</strong></span></li>)}{selectedStudentForModal.low_freq_ucs.length === 0 && selectedStudentForModal.failed_perf_ucs.length === 0 && (<li className="text-gray-400 italic">Nenhuma pendência registrada.</li>)}</ul></div><div className="bg-blue-50 p-4 rounded-xl border border-blue-100"><h3 className="text-sm font-bold text-blue-800 mb-2 flex items-center gap-2"><IconMessageSquare className="w-4 h-4"/> Observação Pedagógica (Principal)</h3><p className="text-sm text-blue-900 italic">{selectedStudentForModal.conselho_text || "Sem observações do conselho."}</p></div></div>
                                 </div>
                                 <div className="bg-gray-50 p-4 border-t border-gray-100 text-right"><button onClick={() => setSelectedStudentForModal(null)} className="px-6 py-2 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-lg font-medium transition-colors">Fechar</button></div>
@@ -3317,6 +3806,7 @@
                                 <label className="cursor-pointer bg-white border border-senac-blue text-senac-blue hover:bg-blue-50 px-4 py-2 rounded-lg flex items-center gap-2 shadow transition-all active:scale-95 text-sm font-medium" title="Ler a aba DADOS GERAIS"><IconUploadCloud className="w-4 h-4" /> Dados Gerais <input type="file" className="hidden" accept=".xlsx,.xlsm,.xls" onChange={(e) => { handleGeneralDataFile(e.target.files[0]); e.target.value = ''; }} /></label>
                                 <label className="cursor-pointer bg-white border border-senac-orange text-senac-orange hover:bg-orange-50 px-4 py-2 rounded-lg flex items-center gap-2 shadow transition-all active:scale-95 text-sm font-medium" title="Ler planilha de atividades"><IconUploadCloud className="w-4 h-4" /> Ler atividades <input type="file" className="hidden" accept=".xlsx,.xlsm,.xls" onChange={(e) => { handleActivityFile(e.target.files[0]); e.target.value = ''; }} /></label>
                                 <button onClick={() => setShowNotebookReport(true)} className="bg-white border border-senac-orange text-senac-orange hover:bg-orange-50 px-4 py-2 rounded-lg flex items-center gap-2 shadow transition-all active:scale-95 text-sm font-medium"><IconBookOpen className="w-4 h-4" /> Relatório de Anotações</button>
+                                <button onClick={() => setShowUCIntervalReport(true)} className="bg-white border border-senac-blue text-senac-blue hover:bg-blue-50 px-4 py-2 rounded-lg flex items-center gap-2 shadow transition-all active:scale-95 text-sm font-medium"><IconFileText className="w-4 h-4" /> Relatório por UCs</button>
                                 <button onClick={() => generateReport(reportSelection, data.students, data.turma, data.course, tutor1Name, tutor2Name, activityTracking, data, naJustifications)} className="bg-white border border-senac-blue text-senac-blue hover:bg-blue-50 px-4 py-2 rounded-lg flex items-center gap-2 shadow transition-all active:scale-95 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed" disabled={reportSelection.length === 0}><IconPrinter className="w-4 h-4" /> Gerar Relatório {reportSelection.length > 0 && `(${reportSelection.length})`}</button>
                                 <button onClick={() => setShowAtaModal(!showAtaModal)} className="bg-senac-blue hover:bg-blue-800 text-white px-4 py-2 rounded-lg flex items-center gap-2 shadow transition-all active:scale-95 text-sm font-medium"><IconFileText className="w-4 h-4" /> Gerar ATA</button>
                             </div>
