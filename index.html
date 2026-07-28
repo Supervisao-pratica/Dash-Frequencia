@@ -1621,6 +1621,24 @@
             return "Geral";
         };
 
+        const getPrimaryPedagogicalObservation = (student) => {
+            if (!student) return null;
+            const directText = cleanObservationText(student.conselho_text);
+            if (directText) return { text: directText, source: "Conselho de Classe", date: "" };
+            const candidates = (student.all_observations || [])
+                .filter(observation => {
+                    const source = normalizeText(observation.source || "");
+                    const sheet = normalizeText(observation.sheet || "");
+                    return observation.kind === "pedagogical"
+                        || source.includes("CONSELHO")
+                        || source.includes("PEDAGOG")
+                        || sheet.includes("PEDAGOG")
+                        || sheet.includes("GERAL");
+                })
+                .sort((a, b) => String(a.date || "").localeCompare(String(b.date || "")));
+            return candidates.length > 0 ? candidates[0] : null;
+        };
+
         const ObservationEntry = ({ observation }) => {
             const meta = getObservationKindMeta(observation);
             const KindIcon = meta.icon;
@@ -3038,7 +3056,8 @@
                     ${selected.map((s, studentIndex) => {
                         let statusColor = "color:#16a34a";
                         if(s.is_dropout) statusColor = "color:#f97316"; else if(s.is_process_dropout) statusColor = "color:#9333ea"; else if(s.needs_recuperacao) statusColor = "color:#dc2626"; else if(s.needs_conselho) statusColor = "color:#ca8a04";
-                        const mainObsHtml = s.conselho_text ? '<div class="section-title">Obs. Conselho (Principal):</div><div style="font-size:12px;">"' + s.conselho_text + '"</div>' : '';
+                        const primaryObservation = getPrimaryPedagogicalObservation(s);
+                        const mainObsHtml = primaryObservation ? '<div class="section-title">Obs. Conselho/Pedagógica (Principal):</div><div style="font-size:12px;">"' + primaryObservation.text + '"</div>' : '';
                         const activitySummary = getActivityStudentSummary(activityTracking, s.name);
                         const activityAttention = activitySummary ? activitySummary.entries.filter(entry => entry.status !== "completed") : [];
                         const activityItemsHtml = activityAttention.slice(0, 18).map(entry => '<span class="source-tag">' + formatActivityStatusLabel(entry.status) + ':</span>' + entry.label).join("<br>");
@@ -3639,6 +3658,10 @@
                     });
                 return Array.from(groups.entries());
             }, [selectedStudentForModal]);
+            const selectedPrimaryPedagogicalObservation = useMemo(
+                () => getPrimaryPedagogicalObservation(selectedStudentForModal),
+                [selectedStudentForModal]
+            );
 
             if (!data) {
                 return (
@@ -3861,7 +3884,7 @@
                                         <div className="flex flex-wrap items-center justify-between gap-2 mb-3"><h3 className="text-sm font-bold text-gray-700 flex items-center gap-2"><IconMessageSquare className="w-4 h-4"/> Observações organizadas da planilha</h3>{selectedStudentForModal.all_observations && selectedStudentForModal.all_observations.length > 0 && <span className="rounded bg-blue-50 px-2 py-1 text-[10px] font-bold text-blue-700">{selectedStudentForModal.all_observations.length} registro(s)</span>}</div>
                                         {selectedObservationGroups.length > 0 ? <div className="space-y-3 max-h-80 overflow-y-auto pr-2 custom-scrollbar">{selectedObservationGroups.map(([groupLabel, observations]) => <div key={groupLabel} className="overflow-hidden rounded-lg border border-gray-200 bg-gray-50"><div className="flex items-center justify-between gap-2 border-b border-gray-200 bg-gray-100 px-3 py-2"><span className="text-xs font-bold text-gray-700">{groupLabel}</span><span className="text-[10px] font-semibold uppercase text-gray-500">{observations.length} registro(s)</span></div><div className="divide-y divide-gray-100">{observations.map((observation, index) => <ObservationEntry key={`${groupLabel}-${observation.column || ""}-${observation.date || ""}-${index}`} observation={observation} />)}</div></div>)}</div> : <div className="rounded-lg border-2 border-dashed border-gray-200 bg-gray-50 p-6 text-center"><p className="text-gray-400 text-sm italic">Nenhuma observação ou anotação encontrada nas abas.</p></div>}
                                     </div>
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6"><div className="bg-slate-50 p-4 rounded-xl border border-slate-100"><h3 className="text-sm font-bold text-gray-700 mb-2">Pendências Acadêmicas</h3><ul className="space-y-2 text-sm">{selectedStudentForModal.low_freq_ucs.length > 0 && (<li className="flex items-start gap-2 text-yellow-700"><IconAlertTriangle className="w-4 h-4 mt-0.5 shrink-0"/> <span>Baixa Frequência: <strong>{selectedStudentForModal.low_freq_ucs.join(", ")}</strong></span></li>)}{selectedStudentForModal.failed_perf_ucs.length > 0 && (<li className="flex items-start gap-2 text-red-700"><IconXCircle className="w-4 h-4 mt-0.5 shrink-0"/> <span>Dificuldade Desempenho: <strong>{selectedStudentForModal.failed_perf_ucs.join(", ")}</strong></span></li>)}{selectedStudentForModal.low_freq_ucs.length === 0 && selectedStudentForModal.failed_perf_ucs.length === 0 && (<li className="text-gray-400 italic">Nenhuma pendência registrada.</li>)}</ul></div><div className="bg-blue-50 p-4 rounded-xl border border-blue-100"><h3 className="text-sm font-bold text-blue-800 mb-2 flex items-center gap-2"><IconMessageSquare className="w-4 h-4"/> Observação Pedagógica (Principal)</h3><p className="text-sm text-blue-900 italic">{selectedStudentForModal.conselho_text || "Sem observações do conselho."}</p></div></div>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6"><div className="bg-slate-50 p-4 rounded-xl border border-slate-100"><h3 className="text-sm font-bold text-gray-700 mb-2">Pendências Acadêmicas</h3><ul className="space-y-2 text-sm">{selectedStudentForModal.low_freq_ucs.length > 0 && (<li className="flex items-start gap-2 text-yellow-700"><IconAlertTriangle className="w-4 h-4 mt-0.5 shrink-0"/> <span>Baixa Frequência: <strong>{selectedStudentForModal.low_freq_ucs.join(", ")}</strong></span></li>)}{selectedStudentForModal.failed_perf_ucs.length > 0 && (<li className="flex items-start gap-2 text-red-700"><IconXCircle className="w-4 h-4 mt-0.5 shrink-0"/> <span>Dificuldade Desempenho: <strong>{selectedStudentForModal.failed_perf_ucs.join(", ")}</strong></span></li>)}{selectedStudentForModal.low_freq_ucs.length === 0 && selectedStudentForModal.failed_perf_ucs.length === 0 && (<li className="text-gray-400 italic">Nenhuma pendência registrada.</li>)}</ul></div><div className="bg-blue-50 p-4 rounded-xl border border-blue-100"><div className="flex items-center justify-between gap-2 mb-2"><h3 className="text-sm font-bold text-blue-800 flex items-center gap-2"><IconMessageSquare className="w-4 h-4"/> Observação Pedagógica (Principal)</h3>{selectedPrimaryPedagogicalObservation && <span className="text-[10px] font-bold uppercase text-blue-600">{selectedPrimaryPedagogicalObservation.source || "Pedagógico"}</span>}</div><p className="text-sm text-blue-900 italic whitespace-pre-wrap">{selectedPrimaryPedagogicalObservation ? selectedPrimaryPedagogicalObservation.text : "Sem registro pedagógico principal nas planilhas carregadas."}</p>{selectedPrimaryPedagogicalObservation && selectedPrimaryPedagogicalObservation.date && <p className="mt-2 text-[10px] text-blue-700">Data identificada: {selectedPrimaryPedagogicalObservation.date}</p>}</div></div>
                                 </div>
                                 <div className="bg-gray-50 p-4 border-t border-gray-100 text-right"><button onClick={() => setSelectedStudentForModal(null)} className="px-6 py-2 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-lg font-medium transition-colors">Fechar</button></div>
                             </div>
