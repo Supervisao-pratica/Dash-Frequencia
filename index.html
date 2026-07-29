@@ -550,21 +550,40 @@
             }
         };
 
-        const normalizeInstructorIdentity = (value) => normalizeName(String(value || "").replace(/[._-]+/g, " "));
+        const normalizeInstructorIdentity = (value) => normalizeName(String(value || "")
+            .replace(/\([^)]*\)/g, " ")
+            .replace(/\bUC\s*\d+\b/gi, " ")
+            .replace(/\b(?:TUTOR(?:A)?|INSTRUTOR(?:A)?|DOCENTE)\b/gi, " ")
+            .replace(/[._-]+/g, " "));
+
+        const getInstructorIdentityTokens = (value) => normalizeInstructorIdentity(value)
+            .split(/\s+/)
+            .filter(token => token.length > 1 && !["DA", "DE", "DO", "DAS", "DOS", "E"].includes(token));
+
+        const getInstructorDisplayNameFromEmail = (email) => {
+            const localPart = String(email || "").trim().toLowerCase().split("@")[0];
+            const tokens = localPart
+                .replace(/[._-]+/g, " ")
+                .split(/\s+/)
+                .map(token => token.trim())
+                .filter(token => token.length > 1 && !/^\d+$/.test(token));
+            if (tokens.length === 0) return "";
+            return tokens.map(token => token.charAt(0).toUpperCase() + token.slice(1)).join(" ");
+        };
 
         const instructorNameMatchesAccount = (instructorName, email) => {
             const accountEmail = String(email || "").trim().toLowerCase();
             if (!instructorName || !accountEmail || !accountEmail.includes("@")) return false;
-            const localPart = normalizeInstructorIdentity(accountEmail.split("@")[0]);
-            const displayName = normalizeInstructorIdentity(window.SENAC_CURRENT_USER && window.SENAC_CURRENT_USER.displayName);
-            const candidate = normalizeInstructorIdentity(instructorName);
-            if (!candidate || candidate === "NAO IDENTIFICADO") return false;
-            if (displayName && (displayName === candidate || displayName.includes(candidate) || candidate.includes(displayName))) return true;
-            if (localPart === candidate || localPart.replace(/\s+/g, "") === candidate.replace(/\s+/g, "")) return true;
-            const tokens = candidate.split(/\s+/).filter(token => token.length > 1);
-            if (tokens.length === 1 && tokens[0].length >= 4 && localPart.includes(tokens[0])) return true;
-            if (tokens.length > 1 && tokens.every(token => localPart.includes(token))) return true;
-            if (tokens.length > 1 && localPart.includes(tokens[0]) && localPart.includes(tokens[tokens.length - 1].slice(0, 3))) return true;
+            const localTokens = getInstructorIdentityTokens(accountEmail.split("@")[0]);
+            const displayTokens = getInstructorIdentityTokens(window.SENAC_CURRENT_USER && window.SENAC_CURRENT_USER.displayName);
+            const candidateTokens = getInstructorIdentityTokens(instructorName);
+            if (candidateTokens.length === 0 || candidateTokens.join(" ") === "NAO IDENTIFICADO") return false;
+
+            const containsAll = (small, large) => small.length > 0 && small.every(token => large.includes(token));
+            if (displayTokens.length > 0 && (containsAll(candidateTokens, displayTokens) || containsAll(displayTokens, candidateTokens))) return true;
+            if (containsAll(candidateTokens, localTokens) || containsAll(localTokens, candidateTokens)) return true;
+            if (candidateTokens.length === 1 && candidateTokens[0].length >= 4 && localTokens.some(token => token.includes(candidateTokens[0]) || candidateTokens[0].includes(token))) return true;
+            if (localTokens.length === 1 && localTokens[0].length >= 4 && candidateTokens.some(token => token.includes(localTokens[0]) || localTokens[0].includes(token))) return true;
             return false;
         };
 
@@ -573,7 +592,12 @@
             const names = [...new Set((instructorNames || []).map(name => String(name || "").trim()).filter(Boolean))];
             // Em modo local, sem Firebase/Auth, preserva o comportamento administrativo anterior.
             if (!email) return names;
-            return names.filter(name => instructorNameMatchesAccount(name, email));
+            const matched = names.filter(name => instructorNameMatchesAccount(name, email));
+            // Algumas planilhas informam apenas o primeiro nome ou não trazem o tutor no cabeçalho.
+            // Nesse caso, o nome derivado do e-mail mantém o caderno acessível ao instrutor correto.
+            if (matched.length > 0) return matched;
+            const inferredName = getInstructorDisplayNameFromEmail(email);
+            return inferredName ? [inferredName] : [];
         };
 
         const makeNotebookStorageKey = (turma, instructorName) => `${NOTEBOOK_STORAGE_PREFIX}${cleanNotebookKey(turma, "TURMA_DESCONHECIDA")}_${cleanNotebookKey(instructorName, "INSTRUTOR")}`;
@@ -1017,8 +1041,9 @@
 
                 body += `Enviado via Dashboard de Frequência.`;
 
-                const mailtoLink = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-                window.location.href = mailtoLink;
+                const outlookUrl = `https://outlook.office.com/mail/deeplink/compose?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+                const outlookWindow = window.open(outlookUrl, "_blank", "noopener,noreferrer");
+                if (!outlookWindow) window.location.href = outlookUrl;
 
                 if (attachments.length > 0) {
                     alert("⚠️ AVISO DE SEGURANÇA:\n\nDevido a restrições técnicas dos navegadores web, arquivos NÃO podem ser anexados automaticamente ao programa de e-mail.\n\nO texto do e-mail foi gerado, mas você deve ARRASTAR OS ARQUIVOS MANUALMENTE para o e-mail.");
@@ -1472,6 +1497,69 @@
             );
         };
 
+        const HistoryBars = ({ title, history, getValue, color = "#004587" }) => {
+            const points = (history || []).slice(-12);
+            const values = points.map(item => Number(getValue(item) || 0));
+            const max = Math.max(1, ...values);
+            if (points.length === 0) return <div className="rounded-lg border border-dashed border-gray-200 p-6 text-center text-xs text-gray-400">Ainda não há leituras históricas para este gráfico.</div>;
+            return (
+                <div className="rounded-lg border border-gray-200 bg-white p-3">
+                    <div className="mb-3 flex items-center justify-between gap-2"><h3 className="text-xs font-bold uppercase text-gray-600">{title}</h3><span className="text-[10px] text-gray-400">Últimas {points.length} leituras</span></div>
+                    <div className="flex h-36 items-end gap-2 border-b border-l border-gray-200 px-2 pb-1 pt-3">
+                        {points.map((item, index) => {
+                            const value = values[index];
+                            const height = value > 0 ? Math.max(8, Math.round((value / max) * 100)) : 3;
+                            return <div key={item.id || `${item.capturedAt}-${index}`} className="flex h-full min-w-0 flex-1 flex-col items-center justify-end gap-1" title={`${formatHistoryDate(item.capturedAt)}: ${value}`}><span className="text-[10px] font-bold text-gray-600">{value}</span><div className="w-full max-w-[28px] rounded-t" style={{ height: `${height}%`, backgroundColor: color }}></div><span className="w-12 truncate text-center text-[9px] text-gray-400">{formatHistoryDate(item.capturedAt)}</span></div>;
+                        })}
+                    </div>
+                </div>
+            );
+        };
+
+        const formatHistoryDate = (value) => {
+            const parsed = new Date(value);
+            return Number.isNaN(parsed.getTime()) ? "--/--" : parsed.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
+        };
+
+        const DashboardHistoryModal = ({ data, history, onClose }) => {
+            const studentOptions = useMemo(() => (data && data.students || []).map(student => ({ key: normalizeName(student.name), name: student.name })), [data]);
+            const [selectedStudentKey, setSelectedStudentKey] = useState(() => studentOptions[0] ? studentOptions[0].key : "");
+            const orderedHistory = useMemo(() => [...(history || [])].sort((a, b) => new Date(a.capturedAt) - new Date(b.capturedAt)), [history]);
+            const selectedStudent = studentOptions.find(student => student.key === selectedStudentKey) || studentOptions[0];
+            const studentHistory = orderedHistory.map(snapshot => ({ snapshot, metric: selectedStudent && snapshot.students ? snapshot.students[selectedStudent.key] : null })).filter(item => item.metric);
+            const latest = orderedHistory[orderedHistory.length - 1];
+            const latestClass = latest && latest.class ? latest.class : {};
+            const latestStudent = studentHistory.length > 0 ? studentHistory[studentHistory.length - 1].metric : null;
+
+            const printHistoryReport = () => {
+                const rows = orderedHistory.map(snapshot => {
+                    const metric = selectedStudent && snapshot.students ? snapshot.students[selectedStudent.key] : null;
+                    return `<tr><td>${escapeReportHTML(formatHistoryDate(snapshot.capturedAt))}</td><td>${escapeReportHTML(snapshot.trigger || "Leitura")}</td><td>${snapshot.class && snapshot.class.naPending || 0}</td><td>${snapshot.class && snapshot.class.activityPending || 0}</td><td>${metric ? metric.naPending : "-"}</td><td>${metric ? metric.activityPending : "-"}</td><td>${metric ? escapeReportHTML(metric.status) : "-"}</td></tr>`;
+                }).join("");
+                const reportWindow = window.open("", "_blank");
+                if (!reportWindow) { alert("Não foi possível abrir o relatório histórico. Verifique o bloqueio de pop-ups."); return; }
+                reportWindow.document.write(`<html lang="pt-BR"><head><meta charset="UTF-8"><title>Histórico da turma ${escapeReportHTML(data.turma)}</title><style>body{font-family:Arial,sans-serif;color:#243447;padding:24px}h1,h2{color:#004587}table{width:100%;border-collapse:collapse;font-size:12px;margin-top:16px}th,td{border:1px solid #d9e2ec;padding:7px;text-align:left}th{background:#eef5fb;color:#004587}.summary{background:#f8fafc;border-left:4px solid #F5821F;padding:10px;margin:12px 0}@media print{button{display:none}}</style></head><body><button onclick="window.print()">Imprimir / PDF</button><h1>Histórico de acompanhamento</h1><p><strong>Turma:</strong> ${escapeReportHTML(data.turma)}<br><strong>Aluno selecionado:</strong> ${escapeReportHTML(selectedStudent ? selectedStudent.name : "Turma inteira")}</p><div class="summary"><strong>Última leitura da turma:</strong> ${escapeReportHTML(formatHistoryDate(latest && latest.capturedAt))} | NA pendente(s): ${latestClass.naPending || 0} | Pendências de atividades: ${latestClass.activityPending || 0}</div><table><thead><tr><th>Data</th><th>Origem</th><th>NA turma</th><th>Atividades turma</th><th>NA aluno</th><th>Atividades aluno</th><th>Status aluno</th></tr></thead><tbody>${rows || `<tr><td colspan="7">Nenhuma leitura registrada.</td></tr>`}</tbody></table></body></html>`);
+                reportWindow.document.close();
+            };
+
+            return (
+                <div className="fixed inset-0 z-[65] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onClick={event => { if (event.target === event.currentTarget) onClose(); }}>
+                    <div className="flex max-h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+                        <div className="flex shrink-0 items-center justify-between bg-senac-blue p-5 text-white"><div><h2 className="flex items-center gap-2 text-xl font-bold"><IconBarChart2 className="h-6 w-6" /> Histórico de acompanhamento</h2><p className="mt-1 text-xs text-blue-100">Evolução das pendências de chamada, atividades e tratativas.</p></div><button onClick={onClose} className="rounded-full p-1 hover:bg-white/20"><IconXCircle className="h-7 w-7" /></button></div>
+                        <div className="flex-1 overflow-y-auto bg-gray-50 p-5 custom-scrollbar">
+                            <div className="mb-4 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-xs text-blue-900"><strong>Como funciona:</strong> cada leitura da frequência, upload de atividades ou alteração de justificativa registra uma fotografia da situação naquele momento. O upload atual continua não sendo usado como cadastro permanente.</div>
+                            {orderedHistory.length === 0 ? <div className="rounded-xl border-2 border-dashed border-gray-200 bg-white p-12 text-center text-sm text-gray-500">Ainda não há histórico. Faça uma leitura da frequência ou carregue uma planilha de atividades.</div> : <>
+                                <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4"><div className="rounded-lg border border-gray-200 bg-white p-3"><div className="text-[10px] font-bold uppercase text-gray-400">Leituras</div><div className="mt-1 text-2xl font-bold text-senac-blue">{orderedHistory.length}</div></div><div className="rounded-lg border border-gray-200 bg-white p-3"><div className="text-[10px] font-bold uppercase text-gray-400">NA atuais</div><div className="mt-1 text-2xl font-bold text-red-700">{latestClass.naPending || 0}</div></div><div className="rounded-lg border border-gray-200 bg-white p-3"><div className="text-[10px] font-bold uppercase text-gray-400">Atividades pendentes</div><div className="mt-1 text-2xl font-bold text-orange-700">{latestClass.activityPending || 0}</div></div><div className="rounded-lg border border-gray-200 bg-white p-3"><div className="text-[10px] font-bold uppercase text-gray-400">Tratativas abertas</div><div className="mt-1 text-2xl font-bold text-blue-700">{latestClass.treatmentOpen || 0}</div></div></div>
+                                <div className="mb-4 grid grid-cols-1 gap-4 lg:grid-cols-3"><HistoryBars title="NA pendentes da turma" history={orderedHistory} getValue={snapshot => snapshot.class && snapshot.class.naPending} color="#dc2626" /><HistoryBars title="Atividades pendentes da turma" history={orderedHistory} getValue={snapshot => snapshot.class && snapshot.class.activityPending} color="#f5821f" /><HistoryBars title="Tratativas abertas da turma" history={orderedHistory} getValue={snapshot => snapshot.class && snapshot.class.treatmentOpen} color="#2563eb" /></div>
+                                <div className="rounded-xl border border-gray-200 bg-white p-4"><div className="mb-4 flex flex-wrap items-center justify-between gap-3"><div><h3 className="text-sm font-bold text-gray-700">Evolução por aluno</h3><p className="mt-1 text-xs text-gray-500">Selecione um aluno para consultar o histórico individual.</p></div><select value={selectedStudent ? selectedStudent.key : ""} onChange={event => setSelectedStudentKey(event.target.value)} className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-senac-blue">{studentOptions.map(student => <option key={student.key} value={student.key}>{student.name}</option>)}</select></div>{latestStudent && <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4"><div className="rounded-lg bg-red-50 p-3 text-center"><div className="text-[10px] font-bold uppercase text-red-700">NA</div><div className="text-xl font-bold text-red-800">{latestStudent.naPending}</div></div><div className="rounded-lg bg-orange-50 p-3 text-center"><div className="text-[10px] font-bold uppercase text-orange-700">Atividades pendentes</div><div className="text-xl font-bold text-orange-800">{latestStudent.activityPending}</div></div><div className="rounded-lg bg-blue-50 p-3 text-center"><div className="text-[10px] font-bold uppercase text-blue-700">Tratativas abertas</div><div className="text-xl font-bold text-blue-800">{latestStudent.treatmentOpen}</div></div><div className="rounded-lg bg-gray-50 p-3 text-center"><div className="text-[10px] font-bold uppercase text-gray-500">Status</div><div className="mt-1 truncate text-sm font-bold text-gray-700">{latestStudent.status}</div></div></div>}{studentHistory.length > 0 && <div className="grid grid-cols-1 gap-4 lg:grid-cols-3"><HistoryBars title="NA do aluno" history={studentHistory.map(item => item.snapshot)} getValue={snapshot => snapshot.students[selectedStudent.key] && snapshot.students[selectedStudent.key].naPending} color="#dc2626" /><HistoryBars title="Atividades pendentes do aluno" history={studentHistory.map(item => item.snapshot)} getValue={snapshot => snapshot.students[selectedStudent.key] && snapshot.students[selectedStudent.key].activityPending} color="#f5821f" /><HistoryBars title="Tratativas abertas do aluno" history={studentHistory.map(item => item.snapshot)} getValue={snapshot => snapshot.students[selectedStudent.key] && snapshot.students[selectedStudent.key].treatmentOpen} color="#2563eb" /></div>}<div className="mt-5 overflow-x-auto"><table className="w-full min-w-[720px] border-collapse text-xs"><thead><tr className="bg-gray-50 text-left text-gray-500"><th className="border border-gray-200 px-3 py-2">Data</th><th className="border border-gray-200 px-3 py-2">Origem</th><th className="border border-gray-200 px-3 py-2">NA turma</th><th className="border border-gray-200 px-3 py-2">Ativ. turma</th><th className="border border-gray-200 px-3 py-2">NA aluno</th><th className="border border-gray-200 px-3 py-2">Ativ. aluno</th><th className="border border-gray-200 px-3 py-2">Status</th></tr></thead><tbody>{orderedHistory.slice().reverse().map(snapshot => { const metric = selectedStudent && snapshot.students ? snapshot.students[selectedStudent.key] : null; return <tr key={snapshot.id}><td className="border border-gray-200 px-3 py-2">{formatHistoryDate(snapshot.capturedAt)}</td><td className="border border-gray-200 px-3 py-2">{snapshot.trigger}</td><td className="border border-gray-200 px-3 py-2 font-bold text-red-700">{snapshot.class && snapshot.class.naPending || 0}</td><td className="border border-gray-200 px-3 py-2 font-bold text-orange-700">{snapshot.class && snapshot.class.activityPending || 0}</td><td className="border border-gray-200 px-3 py-2">{metric ? metric.naPending : "-"}</td><td className="border border-gray-200 px-3 py-2">{metric ? metric.activityPending : "-"}</td><td className="border border-gray-200 px-3 py-2">{metric ? metric.status : "-"}</td></tr>; })}</tbody></table></div></div>
+                            </>}
+                        </div>
+                        <div className="flex shrink-0 justify-end gap-2 border-t border-gray-200 bg-white p-4"><button onClick={onClose} className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-bold text-gray-600 hover:bg-gray-50">Fechar</button><button onClick={printHistoryReport} disabled={orderedHistory.length === 0} className="rounded-lg bg-senac-blue px-5 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-50"><IconPrinter className="mr-1 inline-block h-4 w-4" /> Imprimir / PDF</button></div>
+                    </div>
+                </div>
+            );
+        };
+
         const findMetadata = (worksheet) => {
             if (!worksheet || !window.XLSX) return {};
             const data = window.XLSX.utils.sheet_to_json(worksheet, { header: 1 });
@@ -1917,11 +2005,14 @@
             return String(value || "").trim();
         };
 
-        const simplifyActivityHeaderLabel = (label) => String(label || "")
+        const formatActivityScheduleLabel = (value) => String(value || "")
+            .replace(/\bS\s*(\d+)\s*D\s*(\d+)\b/gi, "Semana $1, Dia $2");
+
+        const simplifyActivityHeaderLabel = (label) => formatActivityScheduleLabel(String(label || "")
             .replace(/\s*\|\s*\d+\s*$/, "")
             .replace(/\s*\[\s*TOTAL DE PONTOS:[^\]]*\]/gi, "")
             .replace(/\s+/g, " ")
-            .trim();
+            .trim());
 
         const findActivityHeader = (rows) => {
             for (let rowIdx = 0; rowIdx < Math.min(rows.length, 80); rowIdx++) {
@@ -2034,6 +2125,15 @@
         const getActivityStudentSummary = (tracking, studentName) => tracking && tracking.students ? tracking.students[normalizeName(studentName)] || null : null;
 
         const formatActivityStatusLabel = (status) => ({ completed: "Concluiu", not_completed: "Não concluiu", blank: "Não fez", requires_evaluation: "Requer avaliação" }[status] || status);
+
+        const getActivityStatusReportClass = (status) => ({
+            completed: "ok",
+            not_completed: "attention",
+            blank: "blank-status",
+            requires_evaluation: "evaluation-status"
+        }[status] || "");
+
+        const buildActivityStatusRows = (entries, limit = 120) => (entries || []).slice(0, limit).map(entry => `<tr class="${getActivityStatusReportClass(entry.status)}"><td>${escapeReportHTML(entry.uc || entry.sheet || "")}</td><td>${escapeReportHTML(entry.label || "Atividade")}</td><td><strong>${escapeReportHTML(formatActivityStatusLabel(entry.status))}</strong></td></tr>`).join("");
 
         const analyzeAttendanceWarnings = (workbook, students) => {
             const XLSX = window.XLSX;
@@ -2257,6 +2357,143 @@
                 return { source: "cloud" };
             } catch (error) {
                 console.error("Erro ao remover justificativa do Firebase", error);
+                return { source: "local" };
+            }
+        };
+
+        const DASHBOARD_HISTORY_STORAGE_PREFIX = "dashboard_history_v1_";
+        const getDashboardHistoryStorageKey = (turma) => `${DASHBOARD_HISTORY_STORAGE_PREFIX}${cleanNotebookKey(turma, "TURMA_DESCONHECIDA")}`;
+        const DASHBOARD_HISTORY_LIMIT = 60;
+
+        const normalizeDashboardHistorySnapshot = (snapshot) => {
+            if (!snapshot || typeof snapshot !== "object") return null;
+            return {
+                ...snapshot,
+                id: String(snapshot.id || `history_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`),
+                turmaKey: String(snapshot.turmaKey || ""),
+                turma: String(snapshot.turma || ""),
+                capturedAt: String(snapshot.capturedAt || new Date().toISOString()),
+                trigger: String(snapshot.trigger || "leitura"),
+                class: snapshot.class && typeof snapshot.class === "object" ? snapshot.class : {},
+                students: snapshot.students && typeof snapshot.students === "object" ? snapshot.students : {}
+            };
+        };
+
+        const readDashboardHistoryLocal = (turma) => {
+            try {
+                const value = localStorage.getItem(getDashboardHistoryStorageKey(turma));
+                const parsed = value ? JSON.parse(value) : [];
+                return Array.isArray(parsed)
+                    ? parsed.map(normalizeDashboardHistorySnapshot).filter(Boolean).sort((a, b) => new Date(b.capturedAt) - new Date(a.capturedAt)).slice(0, DASHBOARD_HISTORY_LIMIT)
+                    : [];
+            } catch (error) {
+                console.error("Erro ao carregar histórico local", error);
+                return [];
+            }
+        };
+
+        const writeDashboardHistoryLocal = (turma, history) => {
+            try {
+                localStorage.setItem(getDashboardHistoryStorageKey(turma), JSON.stringify((history || []).slice(0, DASHBOARD_HISTORY_LIMIT)));
+            } catch (error) {
+                console.error("Erro ao salvar histórico local", error);
+            }
+        };
+
+        const buildDashboardHistorySnapshot = ({ data, activityTracking, naJustifications = {}, notebookNotes = [], trigger = "leitura" }) => {
+            if (!data || !data.turma) return null;
+            const studentMetrics = {};
+            let naPending = 0;
+            let activityPending = 0;
+            let activityTotal = 0;
+            let activityCompleted = 0;
+            let treatmentOpen = 0;
+            let treatmentClosed = 0;
+
+            (data.students || []).forEach(student => {
+                const activity = getActivityStudentSummary(activityTracking, student.name);
+                const na = getNAStudentSummary(data, student.name, naJustifications) || { count: 0 };
+                const notes = (notebookNotes || []).filter(note => note.scope === "class" || Number(note.studentId) === Number(student.id) || (note.studentIds || []).includes(Number(student.id)));
+                const closedNotes = notes.filter(note => getNotebookStatusMeta(note).closed).length;
+                const openNotes = notes.length - closedNotes;
+                const metric = {
+                    name: student.name,
+                    status: student.status || "Não informado",
+                    averageFreq: Number.isFinite(Number(student.averageFreq)) ? Number(student.averageFreq) : null,
+                    naPending: Number(na.count || 0),
+                    activityTotal: Number(activity && activity.total || 0),
+                    activityCompleted: Number(activity && activity.completed || 0),
+                    activityPending: Number(activity && (activity.not_completed + activity.blank + activity.requires_evaluation) || 0),
+                    activityNotCompleted: Number(activity && activity.not_completed || 0),
+                    activityBlank: Number(activity && activity.blank || 0),
+                    activityRequiresEvaluation: Number(activity && activity.requires_evaluation || 0),
+                    treatmentOpen: openNotes,
+                    treatmentClosed: closedNotes
+                };
+                studentMetrics[normalizeName(student.name)] = metric;
+                naPending += metric.naPending;
+                activityPending += metric.activityPending;
+                activityTotal += metric.activityTotal;
+                activityCompleted += metric.activityCompleted;
+                treatmentOpen += openNotes;
+                treatmentClosed += closedNotes;
+            });
+
+            return normalizeDashboardHistorySnapshot({
+                id: `history_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+                turmaKey: cleanNotebookKey(data.turma, "TURMA_DESCONHECIDA"),
+                turma: data.turma,
+                capturedAt: new Date().toISOString(),
+                trigger,
+                sourceName: activityTracking && activityTracking.sourceName ? activityTracking.sourceName : "Planilha de frequência",
+                class: {
+                    students: (data.students || []).length,
+                    activeStudents: (data.students || []).filter(student => !student.is_dropout && !student.is_process_dropout).length,
+                    naPending,
+                    activityTotal,
+                    activityCompleted,
+                    activityPending,
+                    treatmentOpen,
+                    treatmentClosed
+                },
+                students: studentMetrics
+            });
+        };
+
+        const loadDashboardHistory = async (turma) => {
+            const localHistory = readDashboardHistoryLocal(turma);
+            const db = await getNotebookFirestore();
+            if (!db) return { history: localHistory, source: "local" };
+            try {
+                const turmaKey = cleanNotebookKey(turma, "TURMA_DESCONHECIDA");
+                const snapshot = await db.collection("dashboard_history").where("turmaKey", "==", turmaKey).get();
+                const merged = new Map(localHistory.map(item => [String(item.id), item]));
+                snapshot.docs.forEach(doc => {
+                    const normalized = normalizeDashboardHistorySnapshot({ id: doc.id, ...doc.data() });
+                    if (normalized) merged.set(String(normalized.id), normalized);
+                });
+                const history = Array.from(merged.values()).sort((a, b) => new Date(b.capturedAt) - new Date(a.capturedAt)).slice(0, DASHBOARD_HISTORY_LIMIT);
+                writeDashboardHistoryLocal(turma, history);
+                return { history, source: "cloud" };
+            } catch (error) {
+                console.error("Erro ao carregar histórico do Firebase; usando dados locais", error);
+                return { history: localHistory, source: "local" };
+            }
+        };
+
+        const persistDashboardHistory = async (snapshot) => {
+            const normalized = normalizeDashboardHistorySnapshot(snapshot);
+            if (!normalized || !normalized.turma) return { source: "local" };
+            const localHistory = readDashboardHistoryLocal(normalized.turma);
+            const history = [normalized, ...localHistory.filter(item => String(item.id) !== String(normalized.id))].slice(0, DASHBOARD_HISTORY_LIMIT);
+            writeDashboardHistoryLocal(normalized.turma, history);
+            const db = await getNotebookFirestore();
+            if (!db) return { source: "local" };
+            try {
+                await db.collection("dashboard_history").doc(normalized.id).set({ ...normalized, recordedBy: getCurrentAuthenticatedEmail() }, { merge: true });
+                return { source: "cloud" };
+            } catch (error) {
+                console.error("Erro ao salvar histórico no Firebase; dados mantidos localmente", error);
                 return { source: "local" };
             }
         };
@@ -2931,7 +3168,7 @@
             const notesHTML = studentNotes.length > 0 ? `<div class="observation-list">${studentNotes.map(note => `<div class="observation"><strong>${escapeReportHTML(getNotebookSituationLabel(note))}</strong> <span class="pill">${escapeReportHTML(getNotebookStatusMeta(note).label)}</span><div>${escapeReportHTML(note.notes || "Sem texto")}</div><small>Instrutor: ${escapeReportHTML(note.instructorSource || note.instructorName || "Nao informado")} | Analista: ${escapeReportHTML(note.responsibleAnalyst || "Nao informado")} | Registro: ${escapeReportHTML(formatNotebookDate(note.date))}</small></div>`).join("")}</div>` : `<p class="muted">Nenhuma anotacao do caderno vinculada.</p>`;
 
             const activitySummary = getActivityStudentSummary(activityTracking, student.name);
-            const activityHTML = activitySummary && activitySummary.total > 0 ? `<div class="status-line"><strong>Fonte:</strong> ${escapeReportHTML(activityTracking.sourceName || "Upload atual")} (nao gravado na turma)<br><strong>Total:</strong> ${activitySummary.total} | <strong>Concluiu:</strong> ${activitySummary.completed} | <strong>NC:</strong> ${activitySummary.not_completed} | <strong>Em branco:</strong> ${activitySummary.blank} | <strong>Requer avaliacao:</strong> ${activitySummary.requires_evaluation}</div><ul>${activitySummary.entries.filter(entry => entry.status !== "completed").slice(0, 80).map(entry => `<li><strong>${escapeReportHTML(formatActivityStatusLabel(entry.status))}:</strong> ${escapeReportHTML(entry.label)}</li>`).join("") || `<li class="muted">Nenhuma pendencia de atividade.</li>`}</ul>` : `<p class="muted">Nenhum upload de atividades disponivel para este aluno.</p>`;
+            const activityHTML = activitySummary && activitySummary.total > 0 ? `<div class="status-line"><strong>Fonte:</strong> ${escapeReportHTML(activityTracking.sourceName || "Upload atual")} (nao gravado na turma)<br><strong>Total:</strong> ${activitySummary.total} | <strong>Concluiu:</strong> ${activitySummary.completed} | <strong>NC:</strong> ${activitySummary.not_completed} | <strong>Em branco:</strong> ${activitySummary.blank} | <strong>Requer avaliacao:</strong> ${activitySummary.requires_evaluation}</div><table><thead><tr><th>UC</th><th>Atividade</th><th>Situacao</th></tr></thead><tbody>${buildActivityStatusRows(activitySummary.entries) || `<tr><td colspan="3" class="muted">Nenhuma atividade identificada.</td></tr>`}</tbody></table>${activitySummary.entries.length > 120 ? `<p class="muted">Exibidas as primeiras 120 atividades.</p>` : ""}` : `<p class="muted">Nenhum upload de atividades disponivel para este aluno.</p>`;
 
             const sections = [];
             if (selectedOptions.studentContact) sections.push(section("Contato do aluno", studentContactHTML));
@@ -2944,7 +3181,9 @@
 
             const recipientsJSON = value => JSON.stringify(value).replace(/<\/script/gi, "<\\/script");
             const htmlContent = `<html lang="pt-BR"><head><meta charset="UTF-8"><title>${escapeReportHTML(reportSubject)}</title><style>body{font-family:Arial,sans-serif;margin:0;padding:0;color:#243447;background:#fff}.menu{background:#004587;color:#fff;padding:10px 16px;display:flex;justify-content:space-between;align-items:center;gap:10px;position:sticky;top:0;z-index:5}.menu strong{font-size:14px}.actions{display:flex;gap:7px;flex-wrap:wrap}.btn,.recipient{border:0;border-radius:4px;padding:8px 10px;font-size:11px;font-weight:bold}.btn{cursor:pointer;background:#F5821F;color:#fff}.recipient{color:#123;background:#fff}.content{max-width:980px;margin:0 auto;padding:24px}.header{text-align:center;border-bottom:3px solid #F5821F;padding-bottom:16px}.header img{width:82px}.header h1{color:#004587;font-size:21px;margin:8px 0}.header p{margin:4px;font-size:12px}.student{margin-top:18px;border:1px solid #d9e2ec;border-left:4px solid #F5821F;border-radius:7px;padding:16px}.student h3{margin:0;color:#004587;font-size:17px}.student-meta{font-size:12px;color:#64748b;margin-top:6px}.report-section{margin-top:16px;border-top:1px solid #e2e8f0;padding-top:10px}.report-section h2{font-size:14px;color:#004587;margin:0 0 8px;border-bottom:1px solid #dce7f0;padding-bottom:5px}.contact-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;font-size:12px}.contact-grid>div{background:#f8fafc;border:1px solid #e2e8f0;border-radius:5px;padding:9px}.status-line{background:#f8fafc;border-left:3px solid #F5821F;padding:9px;font-size:12px;margin-bottom:8px}.report-section p,.report-section li{font-size:12px;line-height:1.45}.report-section table{width:100%;border-collapse:collapse;font-size:11px;margin:7px 0}.report-section th,.report-section td{border:1px solid #d9e2ec;padding:6px;text-align:left}.report-section th{background:#eef5fb;color:#004587}.attention{background:#fff7ed;color:#9a3412}.ok{background:#f0fdf4;color:#166534}.observation{background:#f8fafc;border-left:3px solid #F5821F;padding:8px;margin:6px 0;font-size:12px}.observation small{display:block;color:#64748b;margin-top:4px}.pill{background:#eaf2fa;color:#004587;border-radius:4px;padding:2px 5px;font-size:10px}.muted{color:#64748b;font-style:italic}@media(max-width:700px){.menu{align-items:flex-start;flex-direction:column}.contact-grid{grid-template-columns:1fr}}@media print{.menu{display:none!important}.content{padding:0}}</style></head><body><div class="menu"><strong>Relatorio individual</strong><div class="actions"><select id="recipient" class="recipient"><option value="student">Enviar ao aluno</option><option value="supervisor">Enviar ao supervisor</option></select><button class="btn" onclick="sendEmail()">Enviar por Outlook</button><button class="btn" onclick="copyReport()">Copiar para e-mail</button><button class="btn" onclick="window.print()">Imprimir / PDF</button></div></div><main id="report-content" class="content"><div class="header"><img src="https://upload.wikimedia.org/wikipedia/commons/thumb/8/86/Senac_logo.svg/500px-Senac_logo.svg.png" alt="Senac"><h1>Relatorio de situacoes</h1><p><strong>Curso:</strong> ${escapeReportHTML(course)}</p><p><strong>Turma:</strong> ${escapeReportHTML(turma)} | <strong>Emitido em:</strong> ${dateStr}</p><p><strong>Instrutores:</strong> ${escapeReportHTML(instructorLabel)}</p></div><article class="student"><h3>${escapeReportHTML(student.name)}</h3><div class="student-meta">Contra turno: ${escapeReportHTML(student.contra_turno_desc || "Nao informado")} | Status: ${escapeReportHTML(student.status || "Nao informado")}</div>${sections.join("")}</article></main><script>const studentRecipients=${recipientsJSON(studentRecipients)};const supervisorRecipients=${recipientsJSON(supervisorRecipients)};const subject=${JSON.stringify(reportSubject).replace(/<\/script/gi, "<\\/script")};function copyReport(afterCopy){const content=document.getElementById('report-content');if(!content)return;const done=()=>{if(typeof afterCopy==='function')afterCopy();else alert('Relatorio copiado. Cole no Outlook com Ctrl+V para manter o layout.');};if(navigator.clipboard&&window.ClipboardItem){const item=new ClipboardItem({'text/html':new Blob([content.outerHTML],{type:'text/html'}),'text/plain':new Blob([content.innerText],{type:'text/plain'})});navigator.clipboard.write([item]).then(done).catch(()=>fallback(done));}else fallback(done);}function fallback(done){const range=document.createRange();range.selectNodeContents(document.getElementById('report-content'));const selection=window.getSelection();selection.removeAllRanges();selection.addRange(range);try{document.execCommand('copy');done();}finally{selection.removeAllRanges();}}function sendEmail(){const type=document.getElementById('recipient').value;const list=type==='supervisor'?supervisorRecipients:studentRecipients;const emails=[...new Set(list.map(item=>String(item.email||'').trim()).filter(Boolean))];if(emails.length===0){alert(type==='supervisor'?'Nenhum e-mail de supervisor foi informado.':'Nenhum e-mail de aluno foi informado.');return;}copyReport(()=>{alert('Relatorio copiado. Cole no corpo do Outlook com Ctrl+V para manter o layout.');window.location.href='mailto:'+emails.join(';')+'?subject='+encodeURIComponent(subject)+'&body='+encodeURIComponent(document.getElementById('report-content').innerText);});}${String.fromCharCode(60)}/script></body></html>`;
-            printWindow.document.write(htmlContent);
+            const individualOutlookPattern = "copyReport(()=>{alert('Relatorio copiado. Cole no corpo do Outlook com Ctrl+V para manter o layout.');window.location.href='mailto:'+emails.join(';')+'?subject='+encodeURIComponent(subject)+'&body='+encodeURIComponent(document.getElementById('report-content').innerText);});";
+            const individualOutlookReplacement = "const outlookWindow=window.open('about:blank','_blank');copyReport(()=>{const body=document.getElementById('report-content').innerText;const outlookUrl='https://outlook.office.com/mail/deeplink/compose?to='+encodeURIComponent(emails.join(';'))+'&subject='+encodeURIComponent(subject)+'&body='+encodeURIComponent(body);if(outlookWindow)outlookWindow.location.href=outlookUrl;else window.location.href=outlookUrl;});";
+            printWindow.document.write(htmlContent.replace(individualOutlookPattern, individualOutlookReplacement));
             printWindow.document.close();
         };
 
@@ -2999,7 +3238,7 @@
                     return `<tr class="${rowClass}"><td>${escapeReportHTML(ucName)}</td><td>${scoreLabel}</td><td>${escapeReportHTML(performance)}</td></tr>`;
                 }).join("") : `<tr><td colspan="3" class="muted">Sem dados de frequência/desempenho no intervalo.</td></tr>`;
                 const observationHTML = observations.length > 0 ? observations.slice(0, 40).map(observation => `<li><strong>${escapeReportHTML(observation.source || "Geral")}:</strong> ${escapeReportHTML(observation.text)}</li>`).join("") : `<li class="muted">Nenhuma observação registrada.</li>`;
-                const activityHTML = activityEntries.length > 0 ? `<div class="summary-box"><strong>${activityEntries.length} atividade(s) identificada(s)</strong><br>Concluiu: ${activityCounts.completed || 0} | Não concluiu: ${activityCounts.not_completed || 0} | Em branco: ${activityCounts.blank || 0} | Requer avaliação: ${activityCounts.requires_evaluation || 0}${activityAttention.length > 0 ? `<ul>${activityAttention.slice(0, 30).map(entry => `<li><strong>${escapeReportHTML(formatActivityStatusLabel(entry.status))}:</strong> ${escapeReportHTML(entry.label)}</li>`).join("")}</ul>` : ""}</div>` : `<div class="summary-box muted">Nenhuma atividade da planilha foi encontrada no intervalo.</div>`;
+                const activityHTML = activityEntries.length > 0 ? `<div class="summary-box"><strong>${activityEntries.length} atividade(s) identificada(s)</strong><br>Concluiu: ${activityCounts.completed || 0} | Não concluiu: ${activityCounts.not_completed || 0} | Em branco: ${activityCounts.blank || 0} | Requer avaliação: ${activityCounts.requires_evaluation || 0}</div><table class="activity-table"><thead><tr><th>UC</th><th>Atividade</th><th>Situação</th></tr></thead><tbody>${buildActivityStatusRows(activityEntries) || `<tr><td colspan="3" class="muted">Nenhuma atividade identificada.</td></tr>`}</tbody></table>${activityEntries.length > 120 ? `<div class="summary-box muted">Exibidas as primeiras 120 atividades do intervalo.</div>` : ""}` : `<div class="summary-box muted">Nenhuma atividade da planilha foi encontrada no intervalo.</div>`;
                 const naHTML = naEntries.length > 0 ? `<div class="summary-box danger-box"><strong>${naEntries.length} NA pendente(s) na chamada</strong><br>${naEntries.map(entry => `${escapeReportHTML(entry.uc)} - ${escapeReportHTML(entry.date)}`).join("; ")}</div>` : `<div class="summary-box muted">Nenhum NA pendente no intervalo.</div>`;
                 const notesHTML = studentNotes.length > 0 ? studentNotes.map(note => `<div class="notebook-note"><div><strong>${escapeReportHTML(getNotebookSituationLabel(note))}</strong> <span class="status-pill">${escapeReportHTML(getNotebookStatusMeta(note).label)}</span></div><div class="meta">Instrutor: ${escapeReportHTML(note.instructorSource || note.instructorName || "Não informado")} | Analista: ${escapeReportHTML(note.responsibleAnalyst || "Não informado")} | Registro: ${escapeReportHTML(formatNotebookDate(note.date))}</div>${getNotebookTreatmentDue(note) ? `<div class="meta">${escapeReportHTML(getNotebookTreatmentLabel(note))}</div>` : ""}${note.notes ? `<p>${escapeReportHTML(note.notes)}</p>` : ""}</div>`).join("") : `<div class="summary-box muted">Nenhuma anotação de caderno vinculada.</div>`;
 
@@ -3007,7 +3246,9 @@
             }).join("");
 
             const htmlContent = `<html lang="pt-BR"><head><meta charset="UTF-8"><title>${escapeReportHTML(reportSubject)}</title><style>body{font-family:Arial,sans-serif;padding:20px;color:#243447;background:#fff;margin:0}.report-menu{background:#004587;padding:10px 20px;display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;z-index:10;box-shadow:0 2px 5px rgba(0,0,0,.2)}.menu-title{color:#fff;font-weight:bold;font-size:14px}.menu-actions{display:flex;gap:8px;flex-wrap:wrap}.btn,.recipient-select{border:0;border-radius:4px;padding:8px 10px;font-size:12px;font-weight:bold}.btn{cursor:pointer;color:#fff;background:#F5821F}.recipient-select{color:#123}.report-header{text-align:center;margin:18px 0 22px}.report-header img{width:80px}.report-header h1{font-size:20px;color:#004587;margin:8px 0}.report-header h2{font-size:14px;color:#666;margin:4px}.student-card{border:1px solid #d9e2ec;border-left:4px solid #F5821F;border-radius:8px;padding:16px;margin:0 0 18px;break-inside:avoid}.header-row{display:flex;justify-content:space-between;gap:12px;border-bottom:2px solid #F5821F;padding-bottom:7px;margin-bottom:10px}.student-name{font-size:17px;font-weight:bold}.info-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px;margin-bottom:12px}.student-card h3{font-size:12px;color:#004587;border-bottom:1px solid #e6edf4;padding-bottom:4px;margin:14px 0 7px}.uc-table{width:100%;border-collapse:collapse;font-size:11px}.uc-table th,.uc-table td{border:1px solid #d9e2ec;padding:6px;text-align:left}.uc-table th{background:#eef5fb;color:#004587}.uc-table .attention{background:#fff7ed;color:#9a3412}.uc-table .danger{background:#fef2f2;color:#b91c1c}.summary-box{background:#f8fafc;border-left:3px solid #F5821F;padding:8px;font-size:11px;margin:6px 0}.danger-box{border-left-color:#dc2626;background:#fef2f2;color:#991b1b}.muted{color:#6b7280;font-style:italic}.student-card ul{font-size:11px;margin:5px 0 8px;padding-left:18px}.notebook-note{border:1px solid #d9e2ec;border-left:3px solid #004587;padding:8px;margin:6px 0;font-size:11px}.status-pill{display:inline-block;border-radius:4px;background:#eef5fb;color:#004587;padding:2px 5px;font-size:10px}.meta{color:#64748b;font-size:10px;margin-top:4px}@media(max-width:760px){.report-menu{align-items:flex-start;flex-direction:column;gap:8px}.info-grid{grid-template-columns:1fr}}@media print{.report-menu{display:none!important}}</style></head><body><div class="report-menu"><div class="menu-title">Relatório completo por UCs</div><div class="menu-actions"><select id="report-recipient" class="recipient-select"><option value="student">Enviar para estudante(s)</option><option value="supervisor">Enviar para supervisor(es)</option></select><button class="btn" onclick="sendReportEmail()">Enviar por Outlook</button><button class="btn" onclick="copyReport()">Copiar para e-mail</button><button class="btn" onclick="window.print()">Imprimir / PDF</button></div></div><div id="report-content"><div class="report-header"><img src="https://upload.wikimedia.org/wikipedia/commons/thumb/8/86/Senac_logo.svg/500px-Senac_logo.svg.png" alt="Senac"/><h1>Relatório completo da turma/aluno</h1><h2>${escapeReportHTML(course)}</h2><div><strong>Turma:</strong> ${escapeReportHTML(turma)} | <strong>Intervalo:</strong> ${escapeReportHTML(rangeLabel)} | <strong>Emitido em:</strong> ${dateStr}<br><strong>Instrutores:</strong> ${escapeReportHTML(tutor1)} / ${escapeReportHTML(tutor2)}</div></div>${studentHTML}</div><script>const studentRecipients=${JSON.stringify(studentRecipients)};const supervisorRecipients=${JSON.stringify(supervisorRecipients)};const subject=${JSON.stringify(reportSubject)};function copyReport(afterCopy){const content=document.getElementById('report-content');if(!content)return;const done=()=>{if(typeof afterCopy==='function')afterCopy();else alert('Relatório copiado. Cole no Outlook ou em outro documento.');};if(navigator.clipboard&&window.ClipboardItem){const item=new ClipboardItem({'text/html':new Blob([content.outerHTML],{type:'text/html'}),'text/plain':new Blob([content.innerText],{type:'text/plain'})});navigator.clipboard.write([item]).then(done).catch(()=>fallbackCopy(done));}else fallbackCopy(done);}function fallbackCopy(done){const range=document.createRange();range.selectNodeContents(document.getElementById('report-content'));const selection=window.getSelection();selection.removeAllRanges();selection.addRange(range);try{document.execCommand('copy');done();}finally{selection.removeAllRanges();}}function sendReportEmail(){const type=document.getElementById('report-recipient').value;const list=type==='supervisor'?supervisorRecipients:studentRecipients;const emails=[...new Set(list.map(item=>String(item.email||'').trim()).filter(Boolean))];if(emails.length===0){alert(type==='supervisor'?'Nenhum e-mail de supervisor foi informado.':'Nenhum e-mail de estudante foi informado.');return;}copyReport(()=>{alert('Relatório copiado. Cole no corpo do Outlook com Ctrl+V para manter o layout.');window.location.href='mailto:'+emails.join(';')+'?subject='+encodeURIComponent(subject)+'&body='+encodeURIComponent(document.getElementById('report-content').innerText);});}<\/script></body></html>`;
-            const completeHTML = htmlContent.replace(`${escapeReportHTML(tutor1)} / ${escapeReportHTML(tutor2)}`, escapeReportHTML(instructorLabel));
+            const rangeOutlookPattern = "copyReport(()=>{alert('Relatório copiado. Cole no corpo do Outlook com Ctrl+V para manter o layout.');window.location.href='mailto:'+emails.join(';')+'?subject='+encodeURIComponent(subject)+'&body='+encodeURIComponent(document.getElementById('report-content').innerText);});";
+            const rangeOutlookReplacement = "const outlookWindow=window.open('about:blank','_blank');copyReport(()=>{const body=document.getElementById('report-content').innerText;const outlookUrl='https://outlook.office.com/mail/deeplink/compose?to='+encodeURIComponent(emails.join(';'))+'&subject='+encodeURIComponent(subject)+'&body='+encodeURIComponent(body);if(outlookWindow)outlookWindow.location.href=outlookUrl;else window.location.href=outlookUrl;});";
+            const completeHTML = htmlContent.replace(rangeOutlookPattern, rangeOutlookReplacement).replace(`${escapeReportHTML(tutor1)} / ${escapeReportHTML(tutor2)}`, escapeReportHTML(instructorLabel));
             printWindow.document.write(completeHTML);
             printWindow.document.close();
         };
@@ -3103,10 +3344,12 @@
                             }
                             const subject = ${JSON.stringify(reportSubject)};
                             showAllActivityDetails();
+                            const outlookWindow = window.open('about:blank', '_blank');
                             copyReportVisual(() => {
                                 const body = document.getElementById('report-content')?.innerText || 'Relatório de Desempenho';
-                                alert('O relatório formatado foi copiado. No Outlook, cole no corpo do e-mail com Ctrl+V para manter o layout.');
-                                window.location.href = 'mailto:' + emails.join(';') + '?subject=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(body);
+                                const outlookUrl = 'https://outlook.office.com/mail/deeplink/compose?to=' + encodeURIComponent(emails.join(';')) + '&subject=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(body);
+                                if (outlookWindow) outlookWindow.location.href = outlookUrl;
+                                else window.location.href = outlookUrl;
                             });
                         }
                         function copyReportVisual(afterCopy) {
@@ -3270,6 +3513,9 @@
             const [showStudentReportModal, setShowStudentReportModal] = useState(false);
             const [studentReportMode, setStudentReportMode] = useState("complete");
             const [classNotebookNotes, setClassNotebookNotes] = useState([]);
+            const [dashboardHistory, setDashboardHistory] = useState([]);
+            const [historyStorageSource, setHistoryStorageSource] = useState("local");
+            const [showDashboardHistory, setShowDashboardHistory] = useState(false);
 
             // --- FILTROS E SELEÇÃO ---
             const [filter, setFilter] = useState('all'); 
@@ -3304,12 +3550,35 @@
                 return filterInstructorNamesForCurrentUser(detectedNames);
             }, [data, tutor1Name, tutor2Name]);
 
+            const captureDashboardHistory = async (dataSnapshot, activitySnapshot, justificationsSnapshot, trigger, notesSnapshot = classNotebookNotes) => {
+                const snapshot = buildDashboardHistorySnapshot({ data: dataSnapshot, activityTracking: activitySnapshot, naJustifications: justificationsSnapshot || {}, notebookNotes: notesSnapshot || [], trigger });
+                if (!snapshot) return;
+                setDashboardHistory(current => [snapshot, ...current.filter(item => String(item.id) !== String(snapshot.id))].slice(0, DASHBOARD_HISTORY_LIMIT));
+                const saved = await persistDashboardHistory(snapshot);
+                setHistoryStorageSource(saved.source);
+            };
+
             useEffect(() => {
                 if(data) {
                     if(data.tutor1) setTutor1Name(data.tutor1);
                     if(data.tutor2) setTutor2Name(data.tutor2);
                 }
             }, [data]);
+
+            useEffect(() => {
+                if (!data || !data.turma) {
+                    setDashboardHistory([]);
+                    setHistoryStorageSource("local");
+                    return undefined;
+                }
+                let isCurrent = true;
+                loadDashboardHistory(data.turma).then(loaded => {
+                    if (!isCurrent) return;
+                    setDashboardHistory(loaded.history || []);
+                    setHistoryStorageSource(loaded.source || "local");
+                }).catch(error => console.error("Erro ao carregar histórico da turma", error));
+                return () => { isCurrent = false; };
+            }, [data ? data.turma : ""]);
 
             useEffect(() => {
                 if (!data || !data.turma) {
@@ -3393,7 +3662,11 @@
                 Promise.all(activeInstructorNames.map(async instructorName => {
                     const loaded = await loadNotebookNotes(data.turma, instructorName);
                     return loaded.notes.map(note => ({ ...note, instructorSource: note.instructorName || instructorName }));
-                })).then(groups => setClassNotebookNotes(groups.flat().sort((a, b) => new Date(b.date) - new Date(a.date))))
+                })).then(groups => {
+                    const notes = groups.flat().sort((a, b) => new Date(b.date) - new Date(a.date));
+                    setClassNotebookNotes(notes);
+                    captureDashboardHistory(data, activityTracking, naJustifications, "tratativas", notes).catch(error => console.error("Erro ao registrar histórico das tratativas", error));
+                })
                     .catch(error => console.error("Erro ao atualizar sinalizações do caderno", error));
             };
 
@@ -3443,6 +3716,7 @@
                         setActivityTracking(null);
                         setReportSelection([]); 
                         setSelectedUC('all');
+                        captureDashboardHistory(processed, null, {}, "frequência").catch(error => console.error("Erro ao registrar histórico da frequência", error));
                         seedImportedStudentContacts(processed.turma, processed.students).catch(error => console.error("Erro ao sincronizar contatos importados", error));
                         if (processed.attendanceWarnings && processed.attendanceWarnings.length > 0) {
                             setTimeout(() => alert(summarizeAttendanceWarnings(processed.attendanceWarnings)), 100);
@@ -3516,19 +3790,19 @@
                         return;
                     }
                     setActivityTracking(tracking);
+                    captureDashboardHistory(data, tracking, naJustifications, "atividades").catch(error => console.error("Erro ao registrar histórico das atividades", error));
                 } catch (e) { alert("Erro ao ler o acompanhamento de atividades: " + e.message); }
             };
             const toggleNAJustification = async (entry) => {
                 if (!data || !data.turma || !entry || !entry.key) return;
                 const currentValue = naJustifications[entry.key];
                 if (currentValue) {
-                    setNaJustifications(previous => {
-                        const next = { ...previous };
-                        delete next[entry.key];
-                        writeNAJustificationsLocal(data.turma, next);
-                        return next;
-                    });
+                    const next = { ...naJustifications };
+                    delete next[entry.key];
+                    setNaJustifications(next);
+                    writeNAJustificationsLocal(data.turma, next);
                     await removeNAJustification(data.turma, entry.key);
+                    await captureDashboardHistory(data, activityTracking, next, "justificativa removida");
                     return;
                 }
                 const value = {
@@ -3537,12 +3811,11 @@
                         date: entry.date,
                         reason: String(naJustificationDrafts[entry.key] || "").trim()
                 };
-                setNaJustifications(previous => {
-                    const next = { ...previous, [entry.key]: value };
-                    writeNAJustificationsLocal(data.turma, next);
-                    return next;
-                });
+                const next = { ...naJustifications, [entry.key]: value };
+                setNaJustifications(next);
+                writeNAJustificationsLocal(data.turma, next);
                 await persistNAJustification(data.turma, entry.key, value);
+                await captureDashboardHistory(data, activityTracking, next, "justificativa registrada");
             };
             const saveNAJustificationReason = async (entry) => {
                 if (!data || !data.turma || !entry || !entry.key || !naJustifications[entry.key]) return;
@@ -3705,6 +3978,7 @@
 
                     {showNotebookReport && <NotebookNotesReport turma={data.turma} instructors={activeInstructorNames} onClose={() => setShowNotebookReport(false)} />}
                     {showUCIntervalReport && <UCIntervalReportModal data={data} activityTracking={activityTracking} naJustifications={naJustifications} notebookNotes={classNotebookNotes} onClose={() => setShowUCIntervalReport(false)} />}
+                    {showDashboardHistory && <DashboardHistoryModal data={data} history={dashboardHistory} onClose={() => setShowDashboardHistory(false)} />}
                     {showStudentReportModal && selectedStudentForModal && <StudentReportOptionsModal data={data} student={selectedStudentForModal} mode={studentReportMode} activityTracking={activityTracking} naJustifications={naJustifications} notebookNotes={instructorNotesForStudent} onClose={() => setShowStudentReportModal(false)} />}
 
                     {showAtaModal && (
@@ -3899,6 +4173,7 @@
                                 <label className="cursor-pointer bg-white border border-senac-orange text-senac-orange hover:bg-orange-50 px-4 py-2 rounded-lg flex items-center gap-2 shadow transition-all active:scale-95 text-sm font-medium min-h-[54px] min-w-[116px] max-w-[160px] justify-center whitespace-normal text-center leading-tight" title="Ler planilha de atividades"><IconUploadCloud className="w-4 h-4" /> Ler atividades <input type="file" className="hidden" accept=".xlsx,.xlsm,.xls" onChange={(e) => { handleActivityFile(e.target.files[0]); e.target.value = ''; }} /></label>
                                 <button onClick={() => setShowNotebookReport(true)} className="bg-white border border-senac-orange text-senac-orange hover:bg-orange-50 px-4 py-2 rounded-lg flex items-center gap-2 shadow transition-all active:scale-95 text-sm font-medium min-h-[54px] min-w-[116px] max-w-[160px] justify-center whitespace-normal text-center leading-tight"><IconBookOpen className="w-4 h-4" /> Relatório de Anotações</button>
                                 <button onClick={() => setShowUCIntervalReport(true)} className="bg-white border border-senac-blue text-senac-blue hover:bg-blue-50 px-4 py-2 rounded-lg flex items-center gap-2 shadow transition-all active:scale-95 text-sm font-medium min-h-[54px] min-w-[116px] max-w-[160px] justify-center whitespace-normal text-center leading-tight"><IconFileText className="w-4 h-4" /> Relatório por UCs</button>
+                                <button onClick={() => setShowDashboardHistory(true)} className="bg-white border border-senac-blue text-senac-blue hover:bg-blue-50 px-4 py-2 rounded-lg flex items-center gap-2 shadow transition-all active:scale-95 text-sm font-medium min-h-[54px] min-w-[116px] max-w-[160px] justify-center whitespace-normal text-center leading-tight" title={`Histórico ${historyStorageSource === "cloud" ? "compartilhado" : "local"}`}><IconBarChart2 className="w-4 h-4" /> Histórico</button>
                                 <button onClick={() => generateReport(reportSelection, data.students, data.turma, data.course, tutor1Name, tutor2Name, activityTracking, data, naJustifications)} className="bg-white border border-senac-blue text-senac-blue hover:bg-blue-50 px-4 py-2 rounded-lg flex items-center gap-2 shadow transition-all active:scale-95 text-sm font-medium min-h-[54px] min-w-[116px] max-w-[160px] justify-center whitespace-normal text-center leading-tight disabled:opacity-50 disabled:cursor-not-allowed" disabled={reportSelection.length === 0}><IconPrinter className="w-4 h-4" /> Gerar Relatório {reportSelection.length > 0 && `(${reportSelection.length})`}</button>
                                 <button onClick={() => setShowAtaModal(!showAtaModal)} className="bg-senac-blue hover:bg-blue-800 text-white px-4 py-2 rounded-lg flex items-center gap-2 shadow transition-all active:scale-95 text-sm font-medium min-h-[54px] min-w-[116px] max-w-[160px] justify-center whitespace-normal text-center leading-tight"><IconFileText className="w-4 h-4" /> Gerar ATA</button>
                             </div>
