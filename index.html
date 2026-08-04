@@ -525,7 +525,7 @@
         ];
 
         const NOTEBOOK_STORAGE_PREFIX = "instructor_notes_v3_";
-        const NOTEBOOK_ANALYST_OPTIONS = ["Bianca", "Bruna", "Mariana", "Michel"];
+        const NOTEBOOK_ANALYST_OPTIONS = ["Bianca", "Bruna Cunha", "Mariana", "Michel"];
         const NOTEBOOK_TREATMENT_STATUS_OPTIONS = [
             { value: "em_tratativa", label: "Em tratativa", className: "bg-blue-100 text-blue-800 border-blue-200", closed: false },
             { value: "concluida", label: "Tratativa concluída", className: "bg-green-100 text-green-800 border-green-200", closed: true },
@@ -556,6 +556,21 @@
             .replace(/\b(?:TUTOR(?:A)?|INSTRUTOR(?:A)?|DOCENTE)\b/gi, " ")
             .replace(/[._-]+/g, " "));
 
+        const canonicalizeInstructorName = (value) => {
+            const raw = String(value || "").trim();
+            if (normalizeInstructorIdentity(raw) === "BRUNA") return "Bruna Lorena";
+            return raw;
+        };
+
+        const getLegacyInstructorNames = (value) => normalizeInstructorIdentity(canonicalizeInstructorName(value)) === "BRUNA LORENA"
+            ? ["Bruna"]
+            : [];
+
+        const canonicalizeAnalystName = (value) => {
+            const raw = String(value || "").trim();
+            return normalizeName(raw) === "BRUNA" ? "Bruna Cunha" : raw;
+        };
+
         const getInstructorIdentityTokens = (value) => normalizeInstructorIdentity(value)
             .split(/\s+/)
             .filter(token => token.length > 1 && !["DA", "DE", "DO", "DAS", "DOS", "E"].includes(token));
@@ -576,7 +591,7 @@
             if (!instructorName || !accountEmail || !accountEmail.includes("@")) return false;
             const localTokens = getInstructorIdentityTokens(accountEmail.split("@")[0]);
             const displayTokens = getInstructorIdentityTokens(window.SENAC_CURRENT_USER && window.SENAC_CURRENT_USER.displayName);
-            const candidateTokens = getInstructorIdentityTokens(instructorName);
+            const candidateTokens = getInstructorIdentityTokens(canonicalizeInstructorName(instructorName));
             if (candidateTokens.length === 0 || candidateTokens.join(" ") === "NAO IDENTIFICADO") return false;
 
             const containsAll = (small, large) => small.length > 0 && small.every(token => large.includes(token));
@@ -589,7 +604,7 @@
 
         const filterInstructorNamesForCurrentUser = (instructorNames) => {
             const email = getCurrentAuthenticatedEmail();
-            const names = [...new Set((instructorNames || []).map(name => String(name || "").trim()).filter(Boolean))];
+            const names = [...new Set((instructorNames || []).map(canonicalizeInstructorName).filter(Boolean))];
             // Em modo local, sem Firebase/Auth, preserva o comportamento administrativo anterior.
             if (!email) return names;
             const matched = names.filter(name => instructorNameMatchesAccount(name, email));
@@ -600,7 +615,7 @@
             return inferredName ? [inferredName] : [];
         };
 
-        const makeNotebookStorageKey = (turma, instructorName) => `${NOTEBOOK_STORAGE_PREFIX}${cleanNotebookKey(turma, "TURMA_DESCONHECIDA")}_${cleanNotebookKey(instructorName, "INSTRUTOR")}`;
+        const makeNotebookStorageKey = (turma, instructorName) => `${NOTEBOOK_STORAGE_PREFIX}${cleanNotebookKey(turma, "TURMA_DESCONHECIDA")}_${cleanNotebookKey(canonicalizeInstructorName(instructorName), "INSTRUTOR")}`;
 
         const notebookDateInput = (value) => {
             if (!value) return "";
@@ -702,7 +717,8 @@
                 situationTypes: situations,
                 situationType: situations.join(", "),
                 treatmentStatus: NOTEBOOK_TREATMENT_STATUS_OPTIONS.some(option => option.value === note.treatmentStatus) ? note.treatmentStatus : "em_tratativa",
-                responsibleAnalyst: String(note.responsibleAnalyst || ""),
+                instructorName: canonicalizeInstructorName(note.instructorName),
+                responsibleAnalyst: canonicalizeAnalystName(note.responsibleAnalyst),
                 treatmentStartDate: notebookDateInput(note.treatmentStartDate || note.situationDate),
                 treatmentDays: Number.isInteger(Number(note.treatmentDays)) && Number(note.treatmentDays) > 0 ? Number(note.treatmentDays) : null,
                 treatmentDueDate: notebookDateInput(note.treatmentDueDate) || addNotebookDays(note.treatmentStartDate || note.situationDate || note.date, note.treatmentDays),
@@ -833,26 +849,28 @@
         };
 
         const loadNotebookNotes = async (turma, instructorName) => {
-            const storageKey = makeNotebookStorageKey(turma, instructorName);
-            const legacyKey = `instructor_notes_v2_${cleanNotebookKey(turma, "TURMA_DESCONHECIDA")}_${cleanNotebookKey(instructorName, "INSTRUTOR")}`;
+            const canonicalInstructorName = canonicalizeInstructorName(instructorName);
+            const storageKey = makeNotebookStorageKey(turma, canonicalInstructorName);
+            const instructorAliases = [...new Set([canonicalInstructorName, ...getLegacyInstructorNames(canonicalInstructorName)])];
+            const localKeys = instructorAliases.flatMap(name => [
+                `instructor_notes_v2_${cleanNotebookKey(turma, "TURMA_DESCONHECIDA")}_${cleanNotebookKey(name, "INSTRUTOR")}`,
+                `${NOTEBOOK_STORAGE_PREFIX}${cleanNotebookKey(turma, "TURMA_DESCONHECIDA")}_${cleanNotebookKey(name, "INSTRUTOR")}`
+            ]);
             const localMap = new Map();
-            [...readNotebookNotesLocal(legacyKey), ...readNotebookNotesLocal(storageKey)].forEach(note => localMap.set(String(note.id), note));
+            localKeys.flatMap(readNotebookNotesLocal).map(normalizeNotebookNote).filter(Boolean).forEach(note => localMap.set(String(note.id), note));
             const localNotes = Array.from(localMap.values()).sort((a, b) => new Date(b.date) - new Date(a.date));
-            if (localNotes.length > 0) {
-                writeNotebookNotesLocal(storageKey, localNotes);
-                try { localStorage.removeItem(legacyKey); } catch (error) { /* migração local não impede o uso */ }
-            }
+            if (localNotes.length > 0) writeNotebookNotesLocal(storageKey, localNotes);
             const db = await getNotebookFirestore();
             if (!db) return { notes: localNotes, source: "local" };
 
             try {
                 const turmaKey = cleanNotebookKey(turma, "TURMA_DESCONHECIDA");
-                const instructorKey = cleanNotebookKey(instructorName, "INSTRUTOR");
-                const snapshot = await db.collection("instructor_notes")
+                const instructorKeys = [...new Set(instructorAliases.map(name => cleanNotebookKey(name, "INSTRUTOR")))];
+                const snapshots = await Promise.all(instructorKeys.map(instructorKey => db.collection("instructor_notes")
                     .where("turmaKey", "==", turmaKey)
                     .where("instructorKey", "==", instructorKey)
-                    .get();
-                const cloudNotes = snapshot.docs.map(doc => normalizeNotebookNote({ id: doc.id, ...doc.data() })).filter(Boolean);
+                    .get()));
+                const cloudNotes = snapshots.flatMap(snapshot => snapshot.docs.map(doc => normalizeNotebookNote({ id: doc.id, ...doc.data() }))).filter(Boolean);
                 const merged = new Map(localNotes.map(note => [String(note.id), note]));
                 cloudNotes.forEach(note => merged.set(String(note.id), note));
                 const notes = Array.from(merged.values()).sort((a, b) => new Date(b.date) - new Date(a.date));
@@ -865,7 +883,8 @@
         };
 
         const persistNotebookNote = async (turma, instructorName, note) => {
-            const storageKey = makeNotebookStorageKey(turma, instructorName);
+            const canonicalInstructorName = canonicalizeInstructorName(instructorName);
+            const storageKey = makeNotebookStorageKey(turma, canonicalInstructorName);
             const notes = [normalizeNotebookNote(note), ...readNotebookNotesLocal(storageKey)].filter(Boolean);
             writeNotebookNotesLocal(storageKey, notes);
             const db = await getNotebookFirestore();
@@ -874,7 +893,7 @@
                 await db.collection("instructor_notes").doc(String(note.id)).set({
                     ...normalizeNotebookNote(note),
                     turmaKey: cleanNotebookKey(turma, "TURMA_DESCONHECIDA"),
-                    instructorKey: cleanNotebookKey(instructorName, "INSTRUTOR"),
+                    instructorKey: cleanNotebookKey(canonicalInstructorName, "INSTRUTOR"),
                     ownerEmail: getCurrentAuthenticatedEmail()
                 });
                 return { source: "cloud" };
@@ -885,14 +904,15 @@
         };
 
         const updateNotebookNote = async (turma, instructorName, note) => {
-            const storageKey = makeNotebookStorageKey(turma, instructorName);
+            const canonicalInstructorName = canonicalizeInstructorName(instructorName);
+            const storageKey = makeNotebookStorageKey(turma, canonicalInstructorName);
             const normalized = normalizeNotebookNote(note);
             const notes = readNotebookNotesLocal(storageKey).map(item => String(item.id) === String(normalized.id) ? normalized : item);
             writeNotebookNotesLocal(storageKey, notes);
             const db = await getNotebookFirestore();
             if (!db) return { source: "local" };
             try {
-                const payload = { ...normalized, turmaKey: cleanNotebookKey(turma, "TURMA_DESCONHECIDA"), instructorKey: cleanNotebookKey(instructorName, "INSTRUTOR"), ownerEmail: getCurrentAuthenticatedEmail() };
+                const payload = { ...normalized, turmaKey: cleanNotebookKey(turma, "TURMA_DESCONHECIDA"), instructorKey: normalized.instructorKey || cleanNotebookKey(canonicalInstructorName, "INSTRUTOR"), ownerEmail: getCurrentAuthenticatedEmail() };
                 delete payload.id;
                 delete payload.instructorSource;
                 await db.collection("instructor_notes").doc(String(normalized.id)).set(payload, { merge: true });
@@ -1830,6 +1850,11 @@
             return days.length > 0 ? days.join("/") : raw;
         };
 
+        const hasContraTurno = (student) => {
+            const value = normalizeText(student && student.contra_turno_desc);
+            return Boolean(value && value !== "0" && value !== "-" && value !== "NAO" && !value.includes("SEM CONTRA"));
+        };
+
         const classifyStudentSituation = (row, situationColIdx) => {
             const situationText = situationColIdx !== -1 ? normalizeText(row[situationColIdx]) : "";
             const fullText = rowToSearchText(row);
@@ -1957,7 +1982,13 @@
 
         const formatAttendanceWarning = (item) => {
             const status = item.type === "nao_realizada" ? "chamada não realizada" : "chamada incompleta";
-            return `${formatShortDate(item.date)}: ${status} — ${item.filled} de ${item.total} alunos preenchidos`;
+            const saturdayLabel = item.scope === "contraturno" ? " (sábado/contraturno)" : "";
+            const audience = item.scope === "contraturno" ? (item.total === 1 ? "aluno com contraturno" : "alunos com contraturno") : "alunos";
+            const completion = item.total === 1 ? "preenchido" : "preenchidos";
+            const pendingNames = item.scope === "contraturno" && Array.isArray(item.pendingStudents) && item.pendingStudents.length > 0
+                ? `; ${item.pendingStudents.length === 1 ? "pendente" : "pendentes"}: ${item.pendingStudents.join(", ")}`
+                : "";
+            return `${formatShortDate(item.date)}${saturdayLabel}: ${status} — ${item.filled} de ${item.total} ${audience} ${completion}${pendingNames}`;
         };
 
         const summarizeAttendanceWarnings = (warnings, maxItems = 18) => {
@@ -2228,7 +2259,7 @@
             today.setHours(0, 0, 0, 0);
             const activeStudents = (students || []).filter(s => !s.is_dropout && !s.is_process_dropout);
             const namesForValidation = activeStudents.length > 0 ? activeStudents : (students || []);
-            const knownStudents = new Set(namesForValidation.map(s => normalizeName(s.name)));
+            const knownStudents = new Map(namesForValidation.map(student => [normalizeName(student.name), student]));
             const warnings = [];
 
             workbook.SheetNames.forEach(sheetName => {
@@ -2245,7 +2276,8 @@
                     const studentName = String(row[header.nameCol] || "").trim();
                     const normalized = normalizeName(studentName);
                     if (!normalized || normalized.includes("TOTAL") || normalized.includes("MEDIA") || normalized.includes("APRENDIZES")) continue;
-                    if (knownStudents.size === 0 || knownStudents.has(normalized)) studentRows.push(row);
+                    const student = knownStudents.get(normalized);
+                    if (knownStudents.size === 0 || student) studentRows.push({ row, student, name: student && student.name || studentName });
                 }
 
                 if (studentRows.length < 3) return;
@@ -2254,11 +2286,15 @@
                     if (date > today) return;
 
                     const dayOfWeek = date.getDay();
-                    if (dayOfWeek === 0 || dayOfWeek === 6) return;
+                    if (dayOfWeek === 0) return;
 
-                    const filled = studentRows.filter(row => isAttendanceValueFilled(row[idx])).length;
-                    const total = studentRows.length;
-                    const fillRate = total > 0 ? filled / total : 0;
+                    const isSaturday = dayOfWeek === 6;
+                    const targetRows = isSaturday ? studentRows.filter(entry => hasContraTurno(entry.student)) : studentRows;
+                    if (targetRows.length === 0) return;
+
+                    const filled = targetRows.filter(entry => isAttendanceValueFilled(entry.row[idx])).length;
+                    const total = targetRows.length;
+                    const pendingStudents = targetRows.filter(entry => !isAttendanceValueFilled(entry.row[idx])).map(entry => entry.name);
 
                     if (filled < total) {
                         warnings.push({
@@ -2266,6 +2302,8 @@
                             date,
                             filled,
                             total,
+                            scope: isSaturday ? "contraturno" : "turma",
+                            pendingStudents,
                             type: filled === 0 ? "nao_realizada" : "incompleta"
                         });
                     }
@@ -2667,7 +2705,7 @@
 
                 const instructors = [];
                 ucMetadata.forEach(({ metadata }) => {
-                    const tutor = metadata && metadata.tutor ? String(metadata.tutor).trim() : "";
+                    const tutor = canonicalizeInstructorName(metadata && metadata.tutor);
                     if (!tutor || normalizeName(tutor) === normalizeName("Não Identificado")) return;
                     if (!instructors.some(existing => normalizeName(existing) === normalizeName(tutor))) instructors.push(tutor);
                     if (turma === "Turma não identificada" && metadata.turma) turma = metadata.turma;
@@ -2678,7 +2716,7 @@
                 if (instructors.length === 0) {
                     sheetNames.forEach(sheetName => {
                         const metadata = findMetadata(workbook.Sheets[sheetName]);
-                        const tutor = metadata && metadata.tutor ? String(metadata.tutor).trim() : "";
+                        const tutor = canonicalizeInstructorName(metadata && metadata.tutor);
                         if (tutor && normalizeName(tutor) !== normalizeName("Não Identificado") && !instructors.some(existing => normalizeName(existing) === normalizeName(tutor))) instructors.push(tutor);
                         if (turma === "Turma não identificada" && metadata.turma) turma = metadata.turma;
                         if ((!course || course.includes("não")) && metadata.curso) course = metadata.curso;
@@ -3632,7 +3670,7 @@
                     ? data.instructors
                     : [tutor1Name, tutor2Name];
                 const detectedNames = [...new Set(source
-                    .map(name => String(name || "").trim())
+                    .map(canonicalizeInstructorName)
                     .filter(name => name && normalizeName(name) !== normalizeName("Não Identificado")))];
                 return filterInstructorNamesForCurrentUser(detectedNames);
             }, [data, tutor1Name, tutor2Name]);
