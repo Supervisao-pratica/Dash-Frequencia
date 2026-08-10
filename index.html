@@ -179,15 +179,15 @@
             if (!student) return;
             const nameHasOrangeFont = isOrangeFontCell(cell);
             const nameHasOrangeFill = isOrangeFillCell(cell);
-            const pedagogicalKeyword = Boolean(isPedagogicalSheet && hasDropoutKeywordInRow(row));
+            const dropoutKeyword = Boolean(hasDropoutKeywordInRow(row));
             const pedagogicalRowFill = Boolean(isPedagogicalSheet && isOrangeRowFill(sheet, rowIndex, nameColIdx));
 
-            if (nameHasOrangeFill || pedagogicalKeyword || pedagogicalRowFill) {
+            if (nameHasOrangeFill || dropoutKeyword || pedagogicalRowFill) {
                 student.is_dropout = true;
                 student.is_process_dropout = false;
                 student.status = "Evadido/Desligado";
-                student.dropout_reason = pedagogicalKeyword
-                    ? "Situação evadido, desistente ou desligado na aba pedagógica"
+                student.dropout_reason = dropoutKeyword
+                    ? `Situação evadido, desistente ou desligado identificada na aba ${sheetName}`
                     : nameHasOrangeFill
                         ? `Celula do nome preenchida em laranja na aba ${sheetName}`
                         : `Linha pedagógica identificada em laranja na aba ${sheetName}`;
@@ -230,6 +230,8 @@
         const IconPaperclip = (props) => <svg {...props} xmlns="http://www.w3.org/TR/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>;
         const IconBookOpen = (props) => <svg {...props} xmlns="http://www.w3.org/TR/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>;
         const IconMail = (props) => <svg {...props} xmlns="http://www.w3.org/TR/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg>;
+        const IconPhone = (props) => <svg {...props} xmlns="http://www.w3.org/TR/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.79 19.79 0 0 1 2.12 4.18 2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.12.9.33 1.78.62 2.63a2 2 0 0 1-.45 2.11L8 9.73a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.85.29 1.73.5 2.63.62A2 2 0 0 1 22 16.92z"/></svg>;
+        const IconEye = (props) => <svg {...props} xmlns="http://www.w3.org/TR/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>;
 
         // --- DADOS DEMO ---
         const DEMO_DATA = {
@@ -525,7 +527,51 @@
         ];
 
         const NOTEBOOK_STORAGE_PREFIX = "instructor_notes_v3_";
-        const NOTEBOOK_ANALYST_OPTIONS = ["Bianca", "Bruna Cunha", "Mariana", "Michel"];
+        const NOTEBOOK_ANALYST_OPTIONS = ["Bianca", "Bruna Cunha", "Mariana", "Michel", "Juliana Severo"];
+        const ANALYST_NOTE_STORAGE_PREFIX = "analyst_notes_v1_";
+        const ANALYST_PROFILES = [
+            { name: "Bianca", tokens: ["BIANCA"] },
+            { name: "Bruna Cunha", tokens: ["BRUNA", "CUNHA"] },
+            { name: "Mariana", tokens: ["MARIANA"] },
+            { name: "Michel", tokens: ["MICHEL"] },
+            { name: "Juliana Severo", tokens: ["JULIANA", "SEVERO"] }
+        ];
+        const ANALYST_FOLLOWUP_TYPES = ["Avaliação", "Acompanhamento", "Ponto de atenção", "Elogio", "Plano de ação"];
+        const PDI_COMPETENCIES = [
+            { id: "planejamento", label: "Planejamento", action: "Estruturar prioridades, prazos e checkpoints das entregas." },
+            { id: "resultados", label: "Foco em Resultados", action: "Acompanhar indicadores e combinar metas objetivas para o período." },
+            { id: "visao_sistemica", label: "Visão Sistêmica", action: "Relacionar as decisões de sala aos processos e impactos institucionais." },
+            { id: "cliente", label: "Foco no Cliente", action: "Praticar escuta ativa e reduzir o tempo de retorno a alunos e empresas." },
+            { id: "comunicacao", label: "Comunicação", action: "Estruturar mensagens, alinhamentos e devolutivas com clareza." },
+            { id: "problemas", label: "Solução de Problemas", action: "Registrar causas, alternativas, riscos e decisões das situações tratadas." },
+            { id: "equipe", label: "Trabalho em Equipe", action: "Ampliar colaboração, compartilhamento de práticas e apoio entre pares." }
+        ];
+        const PDI_SCORE_OPTIONS = [
+            { value: 25, label: "Não atende" },
+            { value: 50, label: "Atende parcialmente" },
+            { value: 75, label: "Atende" },
+            { value: 100, label: "Atende com excelência" }
+        ];
+        const PDI_COMPETENCY_KEYWORDS = [
+            { id: "planejamento", keywords: ["PLANEJAMENTO", "PLANO", "PRAZO", "CRONOGRAMA", "ORGANIZACAO", "PRIORIDADE"] },
+            { id: "resultados", keywords: ["RESULTADO", "META", "ENTREGA", "INDICADOR", "PRODUTIVIDADE"] },
+            { id: "visao_sistemica", keywords: ["VISAO SISTEMICA", "PROCESSO", "INSTITUCIONAL", "INTEGRACAO"] },
+            { id: "cliente", keywords: ["CLIENTE", "ALUNO", "EMPRESA", "ATENDIMENTO", "SUPERVISOR"] },
+            { id: "comunicacao", keywords: ["COMUNICACAO", "FEEDBACK", "DEVOLUTIVA", "DIALOGO", "ESCUTA"] },
+            { id: "problemas", keywords: ["PROBLEMA", "SOLUCAO", "RISCO", "DECISAO", "CONFLITO"] },
+            { id: "equipe", keywords: ["EQUIPE", "COLABORACAO", "COOPERACAO", "PARCERIA", "APOIO"] }
+        ];
+
+        const inferAnalystPDI = (followupType, subject, notes) => {
+            const text = normalizeText(`${followupType || ""} ${subject || ""} ${notes || ""}`);
+            const competencyRule = PDI_COMPETENCY_KEYWORDS.find(rule => rule.keywords.some(keyword => text.includes(keyword)));
+            let score = null;
+            if (/NAO ATENDE|CRITICO|GRAVE/.test(text)) score = 25;
+            else if (/PARCIAL|DIFICULDADE|PONTO DE ATENCAO|PLANO DE ACAO/.test(text)) score = 50;
+            else if (/EXCELENCIA|EXCELENTE|DESTAQUE|ELOGIO/.test(text)) score = 100;
+            else if (normalizeText(followupType) === "AVALIACAO" || /ATENDE|ADEQUADO/.test(text)) score = 75;
+            return { competency: competencyRule ? competencyRule.id : "", score };
+        };
         const NOTEBOOK_TREATMENT_STATUS_OPTIONS = [
             { value: "em_tratativa", label: "Em tratativa", className: "bg-blue-100 text-blue-800 border-blue-200", closed: false },
             { value: "concluida", label: "Tratativa concluída", className: "bg-green-100 text-green-800 border-green-200", closed: true },
@@ -560,6 +606,21 @@
             const raw = String(value || "").trim();
             if (normalizeInstructorIdentity(raw) === "BRUNA") return "Bruna Lorena";
             return raw;
+        };
+
+        const isValidInstructorName = (value) => {
+            const raw = String(value || "").trim();
+            const normalized = normalizeName(raw.replace(/:$/, ""));
+            if (!normalized || normalized.length < 3 || /^\d+$/.test(normalized)) return false;
+            const invalidLabels = ["PERIODO", "SELECIONE", "DATA", "TIPO", "ASSUNTO", "COMPETENCIA", "AVALIACAO", "HORARIO", "CURSO", "TURMA", "INSTRUTOR", "INSTRUTORA", "TUTOR", "TUTORA", "DOCENTE", "APRENDIZES", "ALUNOS"];
+            return !invalidLabels.some(label => normalized === label || normalized.startsWith(`${label} `));
+        };
+
+        const getCurrentAnalystName = () => {
+            const identity = normalizeName(`${getCurrentAuthenticatedEmail().split("@")[0]} ${window.SENAC_CURRENT_USER && window.SENAC_CURRENT_USER.displayName || ""}`);
+            if (!identity) return "";
+            const profile = ANALYST_PROFILES.find(item => item.tokens.every(token => identity.includes(token)));
+            return profile ? profile.name : "";
         };
 
         const getLegacyInstructorNames = (value) => normalizeInstructorIdentity(canonicalizeInstructorName(value)) === "BRUNA LORENA"
@@ -938,13 +999,154 @@
             }
         };
 
+        const normalizeAnalystNote = (note) => {
+            if (!note || typeof note !== "object") return null;
+            const hasScore = note.score !== null && note.score !== undefined && note.score !== "";
+            const score = hasScore ? Number(note.score) : null;
+            return {
+                ...note,
+                id: String(note.id || `analyst_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`),
+                turmaKey: String(note.turmaKey || ""),
+                analystName: canonicalizeAnalystName(note.analystName),
+                analystKey: cleanNotebookKey(canonicalizeAnalystName(note.analystName), "ANALISTA"),
+                instructorName: canonicalizeInstructorName(note.instructorName),
+                instructorKey: cleanNotebookKey(canonicalizeInstructorName(note.instructorName), "INSTRUTOR"),
+                date: notebookDateInput(note.date || new Date()),
+                followupType: ANALYST_FOLLOWUP_TYPES.includes(note.followupType) ? note.followupType : "Acompanhamento",
+                competency: PDI_COMPETENCIES.some(item => item.id === note.competency) ? note.competency : "",
+                score: PDI_SCORE_OPTIONS.some(item => item.value === score) ? score : null,
+                subject: String(note.subject || "").trim(),
+                periodStart: notebookDateInput(note.periodStart),
+                periodEnd: notebookDateInput(note.periodEnd),
+                notes: String(note.notes || "").trim(),
+                visibleToInstructor: note.visibleToInstructor === true,
+                createdAt: String(note.createdAt || new Date().toISOString()),
+                ownerEmail: String(note.ownerEmail || getCurrentAuthenticatedEmail()).toLowerCase()
+            };
+        };
+
+        const getAnalystNotesStorageKey = (turma, analystName) => `${ANALYST_NOTE_STORAGE_PREFIX}${cleanNotebookKey(turma, "TURMA_DESCONHECIDA")}_${cleanNotebookKey(canonicalizeAnalystName(analystName), "ANALISTA")}`;
+
+        const readAnalystNotesLocal = (turma, analystName) => {
+            try {
+                const parsed = JSON.parse(localStorage.getItem(getAnalystNotesStorageKey(turma, analystName)) || "[]");
+                return Array.isArray(parsed) ? parsed.map(normalizeAnalystNote).filter(Boolean) : [];
+            } catch (error) {
+                return [];
+            }
+        };
+
+        const writeAnalystNotesLocal = (turma, analystName, notes) => {
+            try { localStorage.setItem(getAnalystNotesStorageKey(turma, analystName), JSON.stringify((notes || []).slice(0, 300))); }
+            catch (error) { console.error("Erro ao salvar o caderno do analista localmente", error); }
+        };
+
+        const loadAnalystNotes = async (turma, analystName) => {
+            const canonicalAnalyst = canonicalizeAnalystName(analystName);
+            const localNotes = readAnalystNotesLocal(turma, canonicalAnalyst);
+            const db = await getNotebookFirestore();
+            if (!db) return { notes: localNotes, source: "local" };
+            try {
+                const snapshot = await db.collection("analyst_notes")
+                    .where("turmaKey", "==", cleanNotebookKey(turma, "TURMA_DESCONHECIDA"))
+                    .where("ownerEmail", "==", getCurrentAuthenticatedEmail())
+                    .get();
+                const merged = new Map(localNotes.map(note => [note.id, note]));
+                snapshot.docs.map(doc => normalizeAnalystNote({ id: doc.id, ...doc.data() })).filter(Boolean).forEach(note => merged.set(note.id, note));
+                const notes = Array.from(merged.values()).sort((a, b) => String(b.date).localeCompare(String(a.date)) || String(b.createdAt).localeCompare(String(a.createdAt)));
+                writeAnalystNotesLocal(turma, canonicalAnalyst, notes);
+                return { notes, source: "cloud" };
+            } catch (error) {
+                console.error("Erro ao carregar o caderno do analista; usando dados locais", error);
+                return { notes: localNotes, source: "local" };
+            }
+        };
+
+        const persistAnalystNote = async (turma, analystName, note) => {
+            const canonicalAnalyst = canonicalizeAnalystName(analystName);
+            const normalized = normalizeAnalystNote({ ...note, turmaKey: cleanNotebookKey(turma, "TURMA_DESCONHECIDA"), analystName: canonicalAnalyst, ownerEmail: getCurrentAuthenticatedEmail() });
+            const notes = [normalized, ...readAnalystNotesLocal(turma, canonicalAnalyst).filter(item => item.id !== normalized.id)];
+            writeAnalystNotesLocal(turma, canonicalAnalyst, notes);
+            const db = await getNotebookFirestore();
+            if (!db) return { note: normalized, source: "local" };
+            try {
+                await db.collection("analyst_notes").doc(normalized.id).set(normalized, { merge: true });
+                return { note: normalized, source: "cloud" };
+            } catch (error) {
+                console.error("Erro ao salvar o caderno do analista; registro mantido localmente", error);
+                return { note: normalized, source: "local" };
+            }
+        };
+
+        const removeAnalystNote = async (turma, analystName, noteId) => {
+            const canonicalAnalyst = canonicalizeAnalystName(analystName);
+            writeAnalystNotesLocal(turma, canonicalAnalyst, readAnalystNotesLocal(turma, canonicalAnalyst).filter(note => note.id !== noteId));
+            const db = await getNotebookFirestore();
+            if (!db) return { source: "local" };
+            try {
+                await db.collection("analyst_notes").doc(String(noteId)).delete();
+                return { source: "cloud" };
+            } catch (error) {
+                console.error("Erro ao excluir anotação do analista", error);
+                return { source: "local" };
+            }
+        };
+
+        const readVisibleAnalystNotesLocal = (turma, instructorNames) => {
+            const turmaKey = cleanNotebookKey(turma, "TURMA_DESCONHECIDA");
+            const instructorKeys = new Set((instructorNames || []).map(name => cleanNotebookKey(canonicalizeInstructorName(name), "INSTRUTOR")));
+            const notes = [];
+            try {
+                for (let index = 0; index < localStorage.length; index++) {
+                    const key = localStorage.key(index);
+                    if (!key || !key.startsWith(`${ANALYST_NOTE_STORAGE_PREFIX}${turmaKey}_`)) continue;
+                    const parsed = JSON.parse(localStorage.getItem(key) || "[]");
+                    if (Array.isArray(parsed)) notes.push(...parsed.map(normalizeAnalystNote).filter(note => note && note.visibleToInstructor && instructorKeys.has(note.instructorKey)));
+                }
+            } catch (error) {}
+            return Array.from(new Map(notes.map(note => [note.id, note])).values());
+        };
+
+        const loadVisibleAnalystNotes = async (turma, instructorNames) => {
+            const localNotes = readVisibleAnalystNotesLocal(turma, instructorNames);
+            const instructorKeys = new Set((instructorNames || []).map(name => cleanNotebookKey(canonicalizeInstructorName(name), "INSTRUTOR")));
+            const db = await getNotebookFirestore();
+            if (!db || instructorKeys.size === 0) return localNotes;
+            try {
+                const snapshot = await db.collection("analyst_notes")
+                    .where("turmaKey", "==", cleanNotebookKey(turma, "TURMA_DESCONHECIDA"))
+                    .where("visibleToInstructor", "==", true)
+                    .get();
+                const merged = new Map(localNotes.map(note => [note.id, note]));
+                snapshot.docs.map(doc => normalizeAnalystNote({ id: doc.id, ...doc.data() })).filter(note => note && instructorKeys.has(note.instructorKey)).forEach(note => merged.set(note.id, note));
+                return Array.from(merged.values()).sort((a, b) => String(b.date).localeCompare(String(a.date)));
+            } catch (error) {
+                console.error("Erro ao carregar anotações visíveis do analista", error);
+                return localNotes;
+            }
+        };
+
+        const buildInstructorPDI = (notes) => {
+            const latestByCompetency = new Map();
+            [...(notes || [])].sort((a, b) => String(b.date).localeCompare(String(a.date)) || String(b.createdAt).localeCompare(String(a.createdAt))).forEach(note => {
+                if (note.competency && note.score !== null && Number.isFinite(Number(note.score)) && !latestByCompetency.has(note.competency)) latestByCompetency.set(note.competency, note);
+            });
+            const evaluations = PDI_COMPETENCIES.map(competency => ({ ...competency, note: latestByCompetency.get(competency.id) })).filter(item => item.note);
+            const average = evaluations.length > 0 ? Math.round(evaluations.reduce((total, item) => total + Number(item.note.score || 0), 0) / evaluations.length) : null;
+            return {
+                average,
+                strengths: evaluations.filter(item => item.note.score >= 75),
+                opportunities: evaluations.filter(item => item.note.score < 75)
+            };
+        };
+
         const getNotebookSituationLabel = (note) => {
             const types = Array.isArray(note.situationTypes) && note.situationTypes.length > 0 ? note.situationTypes : (note.situationType ? [note.situationType] : []);
             return types.length > 0 ? types.join(", ") : "Anotação Geral";
         };
 
         // --- COMPONENTE CADERNO DO INSTRUTOR (V77 - TURMA E MÚLTIPLAS SITUAÇÕES) ---
-        const InstructorNotebook = ({ instructorName, turma, students, onClose, onNotesChanged }) => {
+        const InstructorNotebook = ({ instructorName, turma, students, analystNotes = [], onClose, onNotesChanged }) => {
             const [targetScope, setTargetScope] = useState("student");
             const [selectedStudentId, setSelectedStudentId] = useState("");
             const [notes, setNotes] = useState("");
@@ -1122,6 +1324,19 @@
                                 {saveNotice && <div className="mt-3 rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-xs text-green-800 flex items-start gap-2"><IconCheckCircle className="w-4 h-4 shrink-0 mt-0.5" /> <span>{saveNotice}</span></div>}
                             </div>
 
+                            {analystNotes.length > 0 && <div className="mb-4 rounded-xl border border-blue-200 bg-blue-50 p-4">
+                                <div className="mb-2 flex items-center gap-2 text-sm font-bold text-blue-900"><IconEye className="h-4 w-4" /> Acompanhamentos compartilhados pela análise</div>
+                                <div className="space-y-2">{analystNotes.map(note => {
+                                    const competency = PDI_COMPETENCIES.find(item => item.id === note.competency);
+                                    return <div key={note.id} className="rounded-lg border border-blue-100 bg-white p-3 text-xs">
+                                        <div className="flex flex-wrap items-center gap-2"><strong className="text-senac-blue">{note.subject || note.followupType}</strong>{competency && <span className="rounded bg-blue-50 px-2 py-0.5 text-blue-700">{competency.label}</span>}{note.score !== null && <span className="font-bold text-gray-600">{note.score}%</span>}</div>
+                                        <div className="mt-1 text-gray-500">{note.followupType} | {formatNotebookDate(note.date)} | {note.analystName}</div>
+                                        {(note.periodStart || note.periodEnd) && <div className="mt-1 text-gray-500">Período: {note.periodStart ? formatNotebookDate(note.periodStart) : "Início não informado"} a {note.periodEnd ? formatNotebookDate(note.periodEnd) : "Em aberto"}</div>}
+                                        {note.notes && <p className="mt-2 whitespace-pre-wrap text-gray-700">{note.notes}</p>}
+                                    </div>;
+                                })}</div>
+                            </div>}
+
                             <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm mb-4">
                                 <label className="block text-xs font-bold text-gray-500 uppercase mb-2">Alcance da anotação</label>
                                 <div className="grid grid-cols-2 gap-2 mb-3" role="radiogroup" aria-label="Alcance da anotação">
@@ -1280,6 +1495,203 @@
                         <div className="bg-white p-4 border-t border-gray-200 flex justify-end shrink-0">
                             <button onClick={onClose} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg font-bold text-sm">Fechar</button>
                         </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const AnalystNotebook = ({ analystName, turma, instructors, onClose, onChanged }) => {
+            const instructorOptions = useMemo(() => [...new Set((instructors || []).map(canonicalizeInstructorName).filter(Boolean))], [instructors]);
+            const [selectedInstructor, setSelectedInstructor] = useState(() => instructorOptions[0] || "");
+            const [date, setDate] = useState(() => notebookDateInput(new Date()));
+            const [followupType, setFollowupType] = useState("Acompanhamento");
+            const [competency, setCompetency] = useState("planejamento");
+            const [score, setScore] = useState(75);
+            const [notes, setNotes] = useState("");
+            const [visibleToInstructor, setVisibleToInstructor] = useState(false);
+            const [allNotes, setAllNotes] = useState([]);
+            const [storageSource, setStorageSource] = useState("local");
+            const [isSaving, setIsSaving] = useState(false);
+
+            useEffect(() => {
+                let current = true;
+                loadAnalystNotes(turma, analystName).then(loaded => {
+                    if (!current) return;
+                    setAllNotes(loaded.notes || []);
+                    setStorageSource(loaded.source || "local");
+                });
+                return () => { current = false; };
+            }, [turma, analystName]);
+
+            useEffect(() => {
+                if (!selectedInstructor && instructorOptions[0]) setSelectedInstructor(instructorOptions[0]);
+            }, [selectedInstructor, instructorOptions]);
+
+            const instructorNotes = useMemo(() => allNotes.filter(note => normalizeName(note.instructorName) === normalizeName(selectedInstructor)).sort((a, b) => String(a.date).localeCompare(String(b.date))), [allNotes, selectedInstructor]);
+            const pdi = useMemo(() => buildInstructorPDI(instructorNotes), [instructorNotes]);
+            const graphHistory = useMemo(() => instructorNotes.filter(note => Number.isFinite(Number(note.score))).map(note => ({ ...note, capturedAt: `${note.date}T12:00:00` })), [instructorNotes]);
+
+            const save = async () => {
+                if (!selectedInstructor || !notes.trim()) { alert("Selecione o instrutor e descreva o acompanhamento."); return; }
+                setIsSaving(true);
+                const result = await persistAnalystNote(turma, analystName, { instructorName: selectedInstructor, date, followupType, competency, score: Number(score), notes, visibleToInstructor });
+                setAllNotes(current => [result.note, ...current.filter(item => item.id !== result.note.id)]);
+                setStorageSource(result.source);
+                setNotes("");
+                setVisibleToInstructor(false);
+                setIsSaving(false);
+                if (typeof onChanged === "function") onChanged();
+            };
+
+            const remove = async (noteId) => {
+                if (!confirm("Excluir este acompanhamento do instrutor?")) return;
+                setAllNotes(current => current.filter(note => note.id !== noteId));
+                const result = await removeAnalystNote(turma, analystName, noteId);
+                setStorageSource(result.source);
+                if (typeof onChanged === "function") onChanged();
+            };
+
+            const printPDI = () => {
+                const reportWindow = window.open("", "_blank");
+                if (!reportWindow) { alert("Não foi possível abrir o PDI. Verifique o bloqueio de pop-ups."); return; }
+                const strengths = pdi.strengths.map(item => `<li><strong>${escapeReportHTML(item.label)}:</strong> ${escapeReportHTML(item.note.notes)}</li>`).join("") || "<li>Nenhum ponto forte avaliado.</li>";
+                const opportunities = pdi.opportunities.map(item => `<li><strong>${escapeReportHTML(item.label)}:</strong> ${escapeReportHTML(item.note.notes)}<br><em>Ação sugerida: ${escapeReportHTML(item.action)}</em></li>`).join("") || "<li>Nenhuma oportunidade registrada.</li>";
+                reportWindow.document.write(`<html lang="pt-BR"><head><meta charset="UTF-8"><title>PDI - ${escapeReportHTML(selectedInstructor)}</title><style>body{font-family:Arial,sans-serif;color:#243447;margin:32px}h1{color:#004587;border-bottom:3px solid #f5821f;padding-bottom:10px}h2{font-size:15px;color:#004587;margin-top:22px}li{margin:8px 0;line-height:1.45}.score{background:#eef5fb;border-left:4px solid #f5821f;padding:12px;font-weight:bold}@media print{button{display:none}}</style></head><body><button onclick="window.print()">Imprimir / PDF</button><h1>Plano de Desenvolvimento Individual</h1><p><strong>Instrutor:</strong> ${escapeReportHTML(selectedInstructor)}<br><strong>Turma:</strong> ${escapeReportHTML(turma)}<br><strong>Analista:</strong> ${escapeReportHTML(analystName)}</p><div class="score">Indicador atual: ${pdi.average === null ? "Sem avaliação" : `${pdi.average}%`}</div><h2>Pontos fortes</h2><ul>${strengths}</ul><h2>Oportunidades e ações</h2><ul>${opportunities}</ul></body></html>`);
+                reportWindow.document.close();
+            };
+
+            return <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm" onClick={event => { if (event.target === event.currentTarget) onClose(); }}><div className="flex max-h-[94vh] w-full max-w-6xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl"><div className="flex shrink-0 items-center justify-between bg-senac-blue p-4 text-white"><div><h2 className="flex items-center gap-2 text-xl font-bold"><IconBarChart2 className="h-6 w-6" /> Caderno do Analista</h2><p className="mt-1 text-xs text-blue-100">Acompanhamento de instrutores e construção do PDI | {analystName}</p></div><button onClick={onClose} className="rounded-full p-1 hover:bg-white/20"><IconXCircle className="h-6 w-6" /></button></div><div className="grid flex-1 grid-cols-1 overflow-y-auto bg-gray-50 lg:grid-cols-[390px_1fr]"><div className="border-r border-gray-200 bg-white p-5"><label className="block text-xs font-bold uppercase text-gray-500">Instrutor acompanhado</label><select value={selectedInstructor} onChange={event => setSelectedInstructor(event.target.value)} className="mt-2 w-full rounded-md border border-gray-300 p-2 text-sm"><option value="">Selecione</option>{instructorOptions.map(name => <option key={name} value={name}>{name}</option>)}</select><div className="mt-4 grid grid-cols-2 gap-3"><label className="text-xs font-bold text-gray-600">Data<input type="date" value={date} onChange={event => setDate(event.target.value)} className="mt-1 w-full rounded-md border border-gray-300 p-2 font-normal" /></label><label className="text-xs font-bold text-gray-600">Tipo<select value={followupType} onChange={event => setFollowupType(event.target.value)} className="mt-1 w-full rounded-md border border-gray-300 p-2 font-normal">{ANALYST_FOLLOWUP_TYPES.map(type => <option key={type}>{type}</option>)}</select></label></div><label className="mt-4 block text-xs font-bold text-gray-600">Competência<select value={competency} onChange={event => setCompetency(event.target.value)} className="mt-1 w-full rounded-md border border-gray-300 p-2 font-normal">{PDI_COMPETENCIES.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label><label className="mt-4 block text-xs font-bold text-gray-600">Avaliação<select value={score} onChange={event => setScore(Number(event.target.value))} className="mt-1 w-full rounded-md border border-gray-300 p-2 font-normal">{PDI_SCORE_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label} ({option.value}%)</option>)}</select></label><label className="mt-4 block text-xs font-bold text-gray-600">Registro<textarea value={notes} onChange={event => setNotes(event.target.value)} className="mt-1 h-28 w-full resize-none rounded-md border border-gray-300 p-3 font-normal" placeholder="Descreva fatos, feedbacks, evidências e encaminhamentos." /></label><label className="mt-4 flex cursor-pointer items-start gap-2 rounded-lg border border-blue-200 bg-blue-50 p-3 text-xs text-blue-900"><input type="checkbox" checked={visibleToInstructor} onChange={event => setVisibleToInstructor(event.target.checked)} className="mt-0.5 rounded text-senac-blue" /><span><strong className="block">Permitir visualização pelo instrutor</strong>Desmarcado, o registro fica restrito ao analista responsável.</span></label><button onClick={save} disabled={isSaving || !selectedInstructor || !notes.trim()} className="mt-4 flex w-full items-center justify-center gap-2 rounded-md bg-senac-blue px-4 py-2.5 text-sm font-bold text-white disabled:opacity-50"><IconSave className="h-4 w-4" /> {isSaving ? "Salvando..." : "Salvar acompanhamento"}</button><p className="mt-2 text-center text-[10px] text-gray-400">{storageSource === "cloud" ? "Sincronizado com o Firebase" : "Salvo neste dispositivo"}</p></div><div className="space-y-4 p-5"><div className="grid grid-cols-2 gap-3 md:grid-cols-4"><div className="rounded-lg border border-gray-200 bg-white p-3"><div className="text-[10px] font-bold uppercase text-gray-400">Registros</div><div className="mt-1 text-2xl font-bold text-senac-blue">{instructorNotes.length}</div></div><div className="rounded-lg border border-gray-200 bg-white p-3"><div className="text-[10px] font-bold uppercase text-gray-400">Indicador PDI</div><div className="mt-1 text-2xl font-bold text-senac-orange">{pdi.average === null ? "--" : `${pdi.average}%`}</div></div><div className="rounded-lg border border-gray-200 bg-white p-3"><div className="text-[10px] font-bold uppercase text-gray-400">Pontos fortes</div><div className="mt-1 text-2xl font-bold text-green-700">{pdi.strengths.length}</div></div><div className="rounded-lg border border-gray-200 bg-white p-3"><div className="text-[10px] font-bold uppercase text-gray-400">Oportunidades</div><div className="mt-1 text-2xl font-bold text-red-700">{pdi.opportunities.length}</div></div></div><HistoryBars title="Evolução das avaliações do instrutor" history={graphHistory} getValue={item => item.score} color="#004587" /><div className="grid grid-cols-1 gap-4 xl:grid-cols-2"><div className="rounded-lg border border-gray-200 bg-white p-4"><div className="mb-3 flex items-center justify-between"><h3 className="text-sm font-bold text-gray-800">PDI consolidado</h3><button onClick={printPDI} disabled={!selectedInstructor} className="rounded border border-senac-blue px-2 py-1 text-xs font-bold text-senac-blue disabled:opacity-40">Emitir PDI</button></div><h4 className="text-xs font-bold uppercase text-green-700">Pontos fortes</h4>{pdi.strengths.length > 0 ? <ul className="mt-2 space-y-2 text-xs text-gray-700">{pdi.strengths.map(item => <li key={item.id}><strong>{item.label}:</strong> {item.note.notes}</li>)}</ul> : <p className="mt-2 text-xs text-gray-400">Sem avaliações positivas registradas.</p>}<h4 className="mt-4 text-xs font-bold uppercase text-red-700">Oportunidades e ações</h4>{pdi.opportunities.length > 0 ? <ul className="mt-2 space-y-3 text-xs text-gray-700">{pdi.opportunities.map(item => <li key={item.id}><strong>{item.label}:</strong> {item.note.notes}<span className="mt-1 block rounded bg-orange-50 p-2 text-orange-800">Ação sugerida: {item.action}</span></li>)}</ul> : <p className="mt-2 text-xs text-gray-400">Sem oportunidades registradas.</p>}</div><div className="rounded-lg border border-gray-200 bg-white p-4"><h3 className="mb-3 text-sm font-bold text-gray-800">Histórico do acompanhamento</h3><div className="max-h-[440px] space-y-2 overflow-y-auto">{instructorNotes.length === 0 ? <p className="py-8 text-center text-xs text-gray-400">Nenhum acompanhamento para este instrutor.</p> : [...instructorNotes].reverse().map(note => { const competence = PDI_COMPETENCIES.find(item => item.id === note.competency); return <div key={note.id} className="relative rounded-lg border border-gray-200 p-3 text-xs"><button onClick={() => remove(note.id)} className="absolute right-2 top-2 text-gray-300 hover:text-red-600"><IconTrash2 className="h-4 w-4" /></button><div className="flex flex-wrap items-center gap-2 pr-6"><span className="font-bold text-senac-blue">{competence ? competence.label : note.competency}</span><span className="rounded bg-gray-100 px-2 py-0.5 font-bold text-gray-600">{note.score}%</span>{note.visibleToInstructor ? <span className="rounded bg-green-100 px-2 py-0.5 text-green-800">Visível ao instrutor</span> : <span className="rounded bg-gray-100 px-2 py-0.5 text-gray-600">Restrito</span>}</div><div className="mt-1 text-gray-400">{formatNotebookDate(note.date)} | {note.followupType}</div><p className="mt-2 whitespace-pre-wrap text-gray-700">{note.notes}</p></div>; })}</div></div></div></div></div><div className="flex shrink-0 justify-end border-t border-gray-200 bg-white p-4"><button onClick={onClose} className="rounded-md border border-gray-300 px-4 py-2 text-sm font-bold text-gray-600">Fechar</button></div></div></div>;
+        };
+
+        const AnalystNotebookEnhanced = ({ analystName, turma, instructors, onClose, onChanged }) => {
+            const instructorOptions = useMemo(() => [...new Set((instructors || []).map(canonicalizeInstructorName).filter(isValidInstructorName))], [instructors]);
+            const [selectedInstructor, setSelectedInstructor] = useState(() => instructorOptions[0] || "");
+            const [periodStart, setPeriodStart] = useState("");
+            const [periodEnd, setPeriodEnd] = useState("");
+            const [date, setDate] = useState(() => notebookDateInput(new Date()));
+            const [followupType, setFollowupType] = useState("Acompanhamento");
+            const [subject, setSubject] = useState("");
+            const [notes, setNotes] = useState("");
+            const [manualPDI, setManualPDI] = useState(false);
+            const [manualCompetency, setManualCompetency] = useState("");
+            const [manualScore, setManualScore] = useState("");
+            const [visibleToInstructor, setVisibleToInstructor] = useState(false);
+            const [allNotes, setAllNotes] = useState([]);
+            const [storageSource, setStorageSource] = useState("local");
+            const [isSaving, setIsSaving] = useState(false);
+
+            useEffect(() => {
+                let current = true;
+                loadAnalystNotes(turma, analystName).then(loaded => {
+                    if (!current) return;
+                    setAllNotes(loaded.notes || []);
+                    setStorageSource(loaded.source || "local");
+                });
+                return () => { current = false; };
+            }, [turma, analystName]);
+
+            useEffect(() => {
+                if (!selectedInstructor && instructorOptions[0]) setSelectedInstructor(instructorOptions[0]);
+            }, [selectedInstructor, instructorOptions]);
+
+            const suggestion = useMemo(() => inferAnalystPDI(followupType, subject, notes), [followupType, subject, notes]);
+            const effectiveCompetency = manualPDI ? manualCompetency : suggestion.competency;
+            const effectiveScore = manualPDI ? (manualScore === "" ? null : Number(manualScore)) : suggestion.score;
+            const instructorNotes = useMemo(() => allNotes
+                .filter(note => normalizeName(note.instructorName) === normalizeName(selectedInstructor))
+                .sort((a, b) => String(a.date).localeCompare(String(b.date))), [allNotes, selectedInstructor]);
+            const pdi = useMemo(() => buildInstructorPDI(instructorNotes), [instructorNotes]);
+            const graphHistory = useMemo(() => instructorNotes
+                .filter(note => note.score !== null && Number.isFinite(Number(note.score)))
+                .map(note => ({ ...note, capturedAt: `${note.date}T12:00:00` })), [instructorNotes]);
+
+            const enableManualPDI = () => {
+                setManualCompetency(suggestion.competency || "");
+                setManualScore(suggestion.score === null ? "" : String(suggestion.score));
+                setManualPDI(true);
+            };
+
+            const save = async () => {
+                if (!selectedInstructor || (!subject.trim() && !notes.trim())) {
+                    alert("Selecione o instrutor e informe o assunto ou o registro do acompanhamento.");
+                    return;
+                }
+                setIsSaving(true);
+                try {
+                    const result = await persistAnalystNote(turma, analystName, {
+                        instructorName: selectedInstructor,
+                        periodStart,
+                        periodEnd,
+                        date,
+                        followupType,
+                        subject,
+                        notes,
+                        competency: effectiveCompetency || "",
+                        score: effectiveScore,
+                        visibleToInstructor
+                    });
+                    setAllNotes(current => [result.note, ...current.filter(item => item.id !== result.note.id)]);
+                    setStorageSource(result.source);
+                    setSubject("");
+                    setNotes("");
+                    setVisibleToInstructor(false);
+                    setManualPDI(false);
+                    setManualCompetency("");
+                    setManualScore("");
+                    if (typeof onChanged === "function") onChanged();
+                } finally {
+                    setIsSaving(false);
+                }
+            };
+
+            const remove = async (noteId) => {
+                if (!confirm("Excluir este acompanhamento do instrutor?")) return;
+                setAllNotes(current => current.filter(note => note.id !== noteId));
+                const result = await removeAnalystNote(turma, analystName, noteId);
+                setStorageSource(result.source);
+                if (typeof onChanged === "function") onChanged();
+            };
+
+            const printPDI = () => {
+                const reportWindow = window.open("", "_blank");
+                if (!reportWindow) { alert("Não foi possível abrir o PDI. Verifique o bloqueio de pop-ups."); return; }
+                const strengths = pdi.strengths.map(item => `<li><strong>${escapeReportHTML(item.label)}:</strong> ${escapeReportHTML(item.note.subject || item.note.notes)}</li>`).join("") || "<li>Nenhum ponto forte avaliado.</li>";
+                const opportunities = pdi.opportunities.map(item => `<li><strong>${escapeReportHTML(item.label)}:</strong> ${escapeReportHTML(item.note.subject || item.note.notes)}<br><em>Ação sugerida: ${escapeReportHTML(item.action)}</em></li>`).join("") || "<li>Nenhuma oportunidade registrada.</li>";
+                reportWindow.document.write(`<html lang="pt-BR"><head><meta charset="UTF-8"><title>PDI - ${escapeReportHTML(selectedInstructor)}</title><style>body{font-family:Aptos,Arial,sans-serif;color:#243447;margin:32px}h1{color:#004587;border-bottom:3px solid #f5821f;padding-bottom:10px}h2{font-size:15px;color:#004587;margin-top:22px}li{margin:8px 0;line-height:1.45}.score{background:#eef5fb;border-left:4px solid #f5821f;padding:12px;font-weight:bold}@media print{button{display:none}}</style></head><body><button onclick="window.print()">Imprimir / PDF</button><h1>Plano de Desenvolvimento Individual</h1><p><strong>Instrutor:</strong> ${escapeReportHTML(selectedInstructor)}<br><strong>Turma:</strong> ${escapeReportHTML(turma)}<br><strong>Analista:</strong> ${escapeReportHTML(analystName)}</p><div class="score">Indicador atual: ${pdi.average === null ? "Sem avaliação" : `${pdi.average}%`}</div><h2>Pontos fortes</h2><ul>${strengths}</ul><h2>Oportunidades e ações</h2><ul>${opportunities}</ul></body></html>`);
+                reportWindow.document.close();
+            };
+
+            const competenceLabel = value => (PDI_COMPETENCIES.find(item => item.id === value) || {}).label || "Sem competência avaliativa";
+            const scoreLabel = value => value === null ? "Sem avaliação" : `${(PDI_SCORE_OPTIONS.find(item => item.value === Number(value)) || {}).label || "Avaliação"} (${value}%)`;
+            const periodLabel = note => note.periodStart || note.periodEnd
+                ? `${note.periodStart ? formatNotebookDate(note.periodStart) : "Início não informado"} a ${note.periodEnd ? formatNotebookDate(note.periodEnd) : "Em aberto"}`
+                : "Período não informado";
+
+            return (
+                <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm" onClick={event => { if (event.target === event.currentTarget) onClose(); }}>
+                    <div className="flex max-h-[94vh] w-full max-w-6xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl">
+                        <div className="flex shrink-0 items-center justify-between bg-senac-blue p-4 text-white"><div><h2 className="flex items-center gap-2 text-xl font-bold"><IconBarChart2 className="h-6 w-6" /> Caderno do Analista</h2><p className="mt-1 text-xs text-blue-100">Acompanhamento de instrutores e construção do PDI | {analystName}</p></div><button onClick={onClose} className="rounded-full p-1 hover:bg-white/20"><IconXCircle className="h-6 w-6" /></button></div>
+                        <div className="grid flex-1 grid-cols-1 overflow-y-auto bg-gray-50 lg:grid-cols-[410px_1fr]">
+                            <div className="border-r border-gray-200 bg-white p-5">
+                                <label className="block text-xs font-bold uppercase text-gray-500">Instrutor acompanhado<select value={selectedInstructor} onChange={event => setSelectedInstructor(event.target.value)} className="mt-2 w-full rounded-md border border-gray-300 p-2 text-sm font-normal"><option value="">Selecione</option>{instructorOptions.map(name => <option key={name} value={name}>{name}</option>)}</select></label>
+                                <div className="mt-4"><div className="mb-2 text-xs font-bold uppercase text-gray-500">Período de acompanhamento</div><div className="grid grid-cols-2 gap-3"><label className="text-xs font-bold text-gray-600">Início<input type="date" value={periodStart} onChange={event => setPeriodStart(event.target.value)} className="mt-1 w-full rounded-md border border-gray-300 p-2 font-normal" /></label><label className="text-xs font-bold text-gray-600">Fim<input type="date" min={periodStart || undefined} value={periodEnd} onChange={event => setPeriodEnd(event.target.value)} className="mt-1 w-full rounded-md border border-gray-300 p-2 font-normal" /></label></div></div>
+                                <div className="mt-4 grid grid-cols-2 gap-3"><label className="text-xs font-bold text-gray-600">Data do registro<input type="date" value={date} onChange={event => setDate(event.target.value)} className="mt-1 w-full rounded-md border border-gray-300 p-2 font-normal" /></label><label className="text-xs font-bold text-gray-600">Tipo a ser tratado<select value={followupType} onChange={event => { setFollowupType(event.target.value); setManualPDI(false); }} className="mt-1 w-full rounded-md border border-gray-300 p-2 font-normal">{ANALYST_FOLLOWUP_TYPES.map(type => <option key={type}>{type}</option>)}</select></label></div>
+                                <label className="mt-4 block text-xs font-bold text-gray-600">Assunto<input value={subject} onChange={event => { setSubject(event.target.value); if (!manualPDI) setManualPDI(false); }} className="mt-1 w-full rounded-md border border-gray-300 p-2 font-normal" placeholder="Ex.: comunicação com a turma, planejamento ou entrega" /></label>
+                                <label className="mt-4 block text-xs font-bold text-gray-600">Registro<textarea value={notes} onChange={event => setNotes(event.target.value)} className="mt-1 h-24 w-full resize-none rounded-md border border-gray-300 p-3 font-normal" placeholder="Descreva fatos, feedbacks, evidências e encaminhamentos." /></label>
+                                <div className="mt-4 rounded-lg border border-orange-200 bg-orange-50 p-3 text-xs">
+                                    <div className="flex items-center justify-between gap-2"><strong className="text-orange-900">Classificação PDI</strong>{manualPDI ? <button type="button" onClick={() => setManualPDI(false)} className="font-bold text-senac-blue hover:underline">Usar sugestão automática</button> : <button type="button" onClick={enableManualPDI} className="font-bold text-senac-blue hover:underline">Ajustar manualmente</button>}</div>
+                                    {!manualPDI ? <div className="mt-2 text-gray-700"><div><strong>Competência:</strong> {competenceLabel(suggestion.competency)}</div><div className="mt-1"><strong>Avaliação:</strong> {scoreLabel(suggestion.score)}</div><p className="mt-2 text-[10px] text-gray-500">A sugestão considera o tipo, o assunto e o texto registrado. Sem evidência avaliativa, o acompanhamento fica sem nota.</p></div> : <div className="mt-3 grid grid-cols-1 gap-2"><label className="font-bold text-gray-600">Competência<select value={manualCompetency} onChange={event => setManualCompetency(event.target.value)} className="mt-1 w-full rounded border border-gray-300 bg-white p-2 font-normal"><option value="">Não se aplica</option>{PDI_COMPETENCIES.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label><label className="font-bold text-gray-600">Avaliação<select value={manualScore} onChange={event => setManualScore(event.target.value)} className="mt-1 w-full rounded border border-gray-300 bg-white p-2 font-normal"><option value="">Não se aplica</option>{PDI_SCORE_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label} ({option.value}%)</option>)}</select></label></div>}
+                                </div>
+                                <label className="mt-4 flex cursor-pointer items-start gap-2 rounded-lg border border-blue-200 bg-blue-50 p-3 text-xs text-blue-900"><input type="checkbox" checked={visibleToInstructor} onChange={event => setVisibleToInstructor(event.target.checked)} className="mt-0.5 rounded text-senac-blue" /><span><strong className="block">Permitir visualização pelo instrutor</strong>Desmarcado, o registro fica restrito ao analista responsável.</span></label>
+                                <button onClick={save} disabled={isSaving || !selectedInstructor || (!subject.trim() && !notes.trim())} className="mt-4 flex w-full items-center justify-center gap-2 rounded-md bg-senac-blue px-4 py-2.5 text-sm font-bold text-white disabled:opacity-50"><IconSave className="h-4 w-4" /> {isSaving ? "Salvando..." : "Salvar acompanhamento"}</button><p className="mt-2 text-center text-[10px] text-gray-400">{storageSource === "cloud" ? "Sincronizado com o Firebase" : "Salvo neste dispositivo"}</p>
+                            </div>
+                            <div className="space-y-4 p-5">
+                                <div className="grid grid-cols-2 gap-3 md:grid-cols-4"><div className="rounded-lg border border-gray-200 bg-white p-3"><div className="text-[10px] font-bold uppercase text-gray-400">Registros</div><div className="mt-1 text-2xl font-bold text-senac-blue">{instructorNotes.length}</div></div><div className="rounded-lg border border-gray-200 bg-white p-3"><div className="text-[10px] font-bold uppercase text-gray-400">Indicador PDI</div><div className="mt-1 text-2xl font-bold text-senac-orange">{pdi.average === null ? "--" : `${pdi.average}%`}</div></div><div className="rounded-lg border border-gray-200 bg-white p-3"><div className="text-[10px] font-bold uppercase text-gray-400">Pontos fortes</div><div className="mt-1 text-2xl font-bold text-green-700">{pdi.strengths.length}</div></div><div className="rounded-lg border border-gray-200 bg-white p-3"><div className="text-[10px] font-bold uppercase text-gray-400">Oportunidades</div><div className="mt-1 text-2xl font-bold text-red-700">{pdi.opportunities.length}</div></div></div>
+                                <HistoryBars title="Evolução das avaliações do instrutor" history={graphHistory} getValue={item => item.score} color="#004587" />
+                                <div className="grid grid-cols-1 gap-4 xl:grid-cols-2"><div className="rounded-lg border border-gray-200 bg-white p-4"><div className="mb-3 flex items-center justify-between"><h3 className="text-sm font-bold text-gray-800">PDI consolidado</h3><button onClick={printPDI} disabled={pdi.average === null} className="rounded border border-senac-blue px-2 py-1 text-xs font-bold text-senac-blue disabled:opacity-40">Emitir PDI</button></div><h4 className="text-xs font-bold uppercase text-green-700">Pontos fortes</h4>{pdi.strengths.length ? <ul className="mt-2 space-y-2 text-xs text-gray-700">{pdi.strengths.map(item => <li key={item.id}><strong>{item.label}:</strong> {item.note.subject || item.note.notes}</li>)}</ul> : <p className="mt-2 text-xs text-gray-400">Sem avaliações positivas registradas.</p>}<h4 className="mt-4 text-xs font-bold uppercase text-red-700">Oportunidades e ações</h4>{pdi.opportunities.length ? <ul className="mt-2 space-y-3 text-xs text-gray-700">{pdi.opportunities.map(item => <li key={item.id}><strong>{item.label}:</strong> {item.note.subject || item.note.notes}<span className="mt-1 block rounded bg-orange-50 p-2 text-orange-800">Ação sugerida: {item.action}</span></li>)}</ul> : <p className="mt-2 text-xs text-gray-400">Sem oportunidades registradas.</p>}</div><div className="rounded-lg border border-gray-200 bg-white p-4"><h3 className="mb-3 text-sm font-bold text-gray-800">Histórico do acompanhamento</h3><div className="max-h-[440px] space-y-2 overflow-y-auto">{instructorNotes.length === 0 ? <p className="py-8 text-center text-xs text-gray-400">Nenhum acompanhamento para este instrutor.</p> : [...instructorNotes].reverse().map(note => <div key={note.id} className="relative rounded-lg border border-gray-200 p-3 text-xs"><button onClick={() => remove(note.id)} className="absolute right-2 top-2 text-gray-300 hover:text-red-600"><IconTrash2 className="h-4 w-4" /></button><div className="flex flex-wrap items-center gap-2 pr-6"><span className="font-bold text-senac-blue">{note.subject || note.followupType}</span>{note.competency && <span className="rounded bg-blue-50 px-2 py-0.5 text-blue-700">{competenceLabel(note.competency)}</span>}{note.score !== null && <span className="rounded bg-gray-100 px-2 py-0.5 font-bold text-gray-600">{note.score}%</span>}{note.visibleToInstructor ? <span className="rounded bg-green-100 px-2 py-0.5 text-green-800">Visível ao instrutor</span> : <span className="rounded bg-gray-100 px-2 py-0.5 text-gray-600">Restrito</span>}</div><div className="mt-1 text-gray-400">{formatNotebookDate(note.date)} | {note.followupType} | {periodLabel(note)}</div>{note.notes && <p className="mt-2 whitespace-pre-wrap text-gray-700">{note.notes}</p>}</div>)}</div></div></div>
+                            </div>
+                        </div>
+                        <div className="flex shrink-0 justify-end border-t border-gray-200 bg-white p-4"><button onClick={onClose} className="rounded-md border border-gray-300 px-4 py-2 text-sm font-bold text-gray-600">Fechar</button></div>
                     </div>
                 </div>
             );
@@ -1453,6 +1865,8 @@
             const [scope, setScope] = useState("class");
             const [selectedIds, setSelectedIds] = useState([]);
             const [search, setSearch] = useState("");
+            const [statusFilter, setStatusFilter] = useState("all");
+            const [reportOptions, setReportOptions] = useState({ academic: true, activities: true, attendance: true, observations: true, notebook: true });
 
             useEffect(() => {
                 if (ucOptions.length > 0) {
@@ -1461,14 +1875,20 @@
                 }
             }, [ucOptions]);
 
-            const visibleStudents = (data && data.students || []).filter(student => normalizeText(student.name).includes(normalizeText(search)));
+            const matchesStatus = (student) => statusFilter === "all"
+                || (statusFilter === "attention" && !student.is_dropout && !student.is_process_dropout && (student.needs_recuperacao || student.needs_conselho))
+                || (statusFilter === "active" && !student.is_dropout && !student.is_process_dropout)
+                || (statusFilter === "process" && student.is_process_dropout)
+                || (statusFilter === "dropout" && student.is_dropout);
+            const scopedStudents = (data && data.students || []).filter(matchesStatus);
+            const visibleStudents = scopedStudents.filter(student => normalizeText(`${student.name} ${student.orionCode || ""}`).includes(normalizeText(search)));
             const toggleStudent = (id) => setSelectedIds(current => current.includes(id) ? current.filter(item => item !== id) : [...current, id]);
             const selectVisible = () => setSelectedIds(current => {
                 const visibleIds = visibleStudents.map(student => student.id);
                 const allSelected = visibleIds.length > 0 && visibleIds.every(id => current.includes(id));
                 return allSelected ? current.filter(id => !visibleIds.includes(id)) : [...new Set([...current, ...visibleIds])];
             });
-            const reportIds = scope === "class" ? (data && data.students || []).map(student => student.id) : selectedIds;
+            const reportIds = scope === "class" ? scopedStudents.map(student => student.id) : selectedIds.filter(id => scopedStudents.some(student => student.id === id));
 
             const generate = () => generateRangeReport({
                 selectedStudentIds: reportIds,
@@ -1483,7 +1903,8 @@
                 naJustifications,
                 notebookNotes,
                 fromUC,
-                toUC
+                toUC,
+                options: reportOptions
             });
 
             return (
@@ -1497,13 +1918,18 @@
                                 <p className="text-[11px] text-gray-500 mt-2">O relatório incluirá todas as UCs entre a inicial e a final, mesmo que sejam escolhidas em ordem inversa.</p>
                             </div>
                             <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm mb-4">
+                                <label className="block text-xs font-bold text-gray-500 uppercase mb-2">Filtros do relatório</label>
+                                <select value={statusFilter} onChange={event => setStatusFilter(event.target.value)} className="mb-3 w-full rounded border border-gray-300 p-2 text-sm"><option value="all">Todas as situações</option><option value="active">Alunos ativos</option><option value="attention">Somente pontos de atenção</option><option value="process">Em processo de desligamento</option><option value="dropout">Evadidos/desligados</option></select>
+                                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">{[["academic", "Frequência e desempenho"], ["activities", "Atividades"], ["attendance", "Chamada e NA"], ["observations", "Observações"], ["notebook", "Caderno do instrutor"]].map(([key, label]) => <label key={key} className="flex cursor-pointer items-center gap-2 rounded border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-700"><input type="checkbox" checked={Boolean(reportOptions[key])} onChange={() => setReportOptions(current => ({ ...current, [key]: !current[key] }))} className="rounded text-senac-blue" />{label}</label>)}</div>
+                            </div>
+                            <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm mb-4">
                                 <label className="block text-xs font-bold text-gray-500 uppercase mb-2">Alcance do relatório</label>
                                 <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Alcance do relatório"><button type="button" onClick={() => setScope("class")} className={`py-3 rounded-lg text-sm font-bold border ${scope === "class" ? "bg-orange-50 text-senac-orange border-senac-orange ring-2 ring-orange-100" : "bg-gray-50 text-gray-500 border-gray-200"}`}><IconUsers className="w-4 h-4 inline-block mr-1" /> Turma inteira</button><button type="button" onClick={() => setScope("students")} className={`py-3 rounded-lg text-sm font-bold border ${scope === "students" ? "bg-blue-50 text-senac-blue border-senac-blue ring-2 ring-blue-100" : "bg-gray-50 text-gray-500 border-gray-200"}`}><IconUser className="w-4 h-4 inline-block mr-1" /> Alunos selecionados</button></div>
-                                {scope === "class" ? <div className="mt-3 rounded-lg bg-orange-50 border border-orange-200 px-3 py-2 text-xs text-orange-800">Serão incluídos os {data.students.length} alunos da turma.</div> : <div className="mt-3"><div className="flex flex-wrap justify-between items-center gap-2 mb-2"><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar aluno" className="p-2 border border-gray-300 rounded text-xs flex-1 min-w-[180px]" /><button type="button" onClick={selectVisible} className="px-3 py-2 border border-senac-blue text-senac-blue rounded text-xs font-bold">Selecionar visíveis</button></div><div className="max-h-56 overflow-y-auto border border-gray-200 rounded-lg bg-gray-50 p-2 space-y-1">{visibleStudents.map(student => <label key={student.id} className="flex items-center gap-2 rounded px-2 py-1.5 text-xs hover:bg-white cursor-pointer"><input type="checkbox" checked={selectedIds.includes(student.id)} onChange={() => toggleStudent(student.id)} className="rounded text-senac-blue" /><span>{student.name}</span></label>)}{visibleStudents.length === 0 && <div className="p-4 text-center text-xs text-gray-500">Nenhum aluno encontrado.</div>}</div><div className="text-xs text-gray-500 mt-2">{selectedIds.length} aluno(s) selecionado(s).</div></div>}
+                                {scope === "class" ? <div className="mt-3 rounded-lg bg-orange-50 border border-orange-200 px-3 py-2 text-xs text-orange-800">Serão incluídos {scopedStudents.length} aluno(s), conforme o filtro de situação.</div> : <div className="mt-3"><div className="flex flex-wrap justify-between items-center gap-2 mb-2"><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar aluno ou Órion" className="p-2 border border-gray-300 rounded text-xs flex-1 min-w-[180px]" /><button type="button" onClick={selectVisible} className="px-3 py-2 border border-senac-blue text-senac-blue rounded text-xs font-bold">Selecionar visíveis</button></div><div className="max-h-56 overflow-y-auto border border-gray-200 rounded-lg bg-gray-50 p-2 space-y-1">{visibleStudents.map(student => <label key={student.id} className="flex items-center gap-2 rounded px-2 py-1.5 text-xs hover:bg-white cursor-pointer"><input type="checkbox" checked={selectedIds.includes(student.id)} onChange={() => toggleStudent(student.id)} className="rounded text-senac-blue" /><span>{student.name}{student.orionCode ? ` | Órion ${student.orionCode}` : ""}</span></label>)}{visibleStudents.length === 0 && <div className="p-4 text-center text-xs text-gray-500">Nenhum aluno encontrado.</div>}</div><div className="text-xs text-gray-500 mt-2">{reportIds.length} aluno(s) selecionado(s) dentro do filtro.</div></div>}
                             </div>
                             <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-3 text-xs text-blue-900"><strong>O relatório reunirá:</strong> frequência média e detalhada por UC, desempenho, baixa frequência, recuperação, observações, NA pendentes, atividades, situações cadastrais e anotações do caderno.</div>
                         </div>
-                        <div className="bg-white p-4 border-t border-gray-200 flex justify-between items-center gap-3"><span className="text-xs text-gray-500">{reportIds.length} aluno(s) no relatório</span><div className="flex gap-2"><button onClick={onClose} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg font-bold text-sm">Cancelar</button><button onClick={generate} disabled={!fromUC || !toUC || reportIds.length === 0} className="px-5 py-2 bg-senac-blue text-white rounded-lg font-bold text-sm disabled:opacity-50"><IconPrinter className="w-4 h-4 inline-block mr-1" /> Emitir relatório</button></div></div>
+                        <div className="bg-white p-4 border-t border-gray-200 flex justify-between items-center gap-3"><span className="text-xs text-gray-500">{reportIds.length} aluno(s) no relatório</span><div className="flex gap-2"><button onClick={onClose} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg font-bold text-sm">Cancelar</button><button onClick={generate} disabled={!fromUC || !toUC || reportIds.length === 0 || !Object.values(reportOptions).some(Boolean)} className="px-5 py-2 bg-senac-blue text-white rounded-lg font-bold text-sm disabled:opacity-50"><IconPrinter className="w-4 h-4 inline-block mr-1" /> Emitir relatório</button></div></div>
                     </div>
                 </div>
             );
@@ -1542,6 +1968,7 @@
             const latest = orderedHistory[orderedHistory.length - 1];
             const latestClass = latest && latest.class ? latest.class : {};
             const latestStudent = studentHistory.length > 0 ? studentHistory[studentHistory.length - 1].metric : null;
+            const latestActivityUCs = Object.entries(latestClass.activityByUC || {}).sort((a, b) => (getUCNumber(a[0]) || 999) - (getUCNumber(b[0]) || 999));
 
             const printHistoryReport = () => {
                 const rows = orderedHistory.map(snapshot => {
@@ -1563,7 +1990,8 @@
                             {orderedHistory.length === 0 ? <div className="rounded-xl border-2 border-dashed border-gray-200 bg-white p-12 text-center text-sm text-gray-500">Ainda não há histórico. Faça uma leitura da frequência ou carregue uma planilha de atividades.</div> : <>
                                 <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4"><div className="rounded-lg border border-gray-200 bg-white p-3"><div className="text-[10px] font-bold uppercase text-gray-400">Leituras</div><div className="mt-1 text-2xl font-bold text-senac-blue">{orderedHistory.length}</div></div><div className="rounded-lg border border-gray-200 bg-white p-3"><div className="text-[10px] font-bold uppercase text-gray-400">NA atuais</div><div className="mt-1 text-2xl font-bold text-red-700">{latestClass.naPending || 0}</div></div><div className="rounded-lg border border-gray-200 bg-white p-3"><div className="text-[10px] font-bold uppercase text-gray-400">Atividades pendentes</div><div className="mt-1 text-2xl font-bold text-orange-700">{latestClass.activityPending || 0}</div></div><div className="rounded-lg border border-gray-200 bg-white p-3"><div className="text-[10px] font-bold uppercase text-gray-400">Tratativas abertas</div><div className="mt-1 text-2xl font-bold text-blue-700">{latestClass.treatmentOpen || 0}</div></div></div>
                                 <div className="mb-4 grid grid-cols-1 gap-4 lg:grid-cols-3"><HistoryBars title="NA pendentes da turma" history={orderedHistory} getValue={snapshot => snapshot.class && snapshot.class.naPending} color="#dc2626" /><HistoryBars title="Atividades pendentes da turma" history={orderedHistory} getValue={snapshot => snapshot.class && snapshot.class.activityPending} color="#f5821f" /><HistoryBars title="Tratativas abertas da turma" history={orderedHistory} getValue={snapshot => snapshot.class && snapshot.class.treatmentOpen} color="#2563eb" /></div>
-                                <div className="rounded-xl border border-gray-200 bg-white p-4"><div className="mb-4 flex flex-wrap items-center justify-between gap-3"><div><h3 className="text-sm font-bold text-gray-700">Evolução por aluno</h3><p className="mt-1 text-xs text-gray-500">Selecione um aluno para consultar o histórico individual.</p></div><select value={selectedStudent ? selectedStudent.key : ""} onChange={event => setSelectedStudentKey(event.target.value)} className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-senac-blue">{studentOptions.map(student => <option key={student.key} value={student.key}>{student.name}</option>)}</select></div>{latestStudent && <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4"><div className="rounded-lg bg-red-50 p-3 text-center"><div className="text-[10px] font-bold uppercase text-red-700">NA</div><div className="text-xl font-bold text-red-800">{latestStudent.naPending}</div></div><div className="rounded-lg bg-orange-50 p-3 text-center"><div className="text-[10px] font-bold uppercase text-orange-700">Atividades pendentes</div><div className="text-xl font-bold text-orange-800">{latestStudent.activityPending}</div></div><div className="rounded-lg bg-blue-50 p-3 text-center"><div className="text-[10px] font-bold uppercase text-blue-700">Tratativas abertas</div><div className="text-xl font-bold text-blue-800">{latestStudent.treatmentOpen}</div></div><div className="rounded-lg bg-gray-50 p-3 text-center"><div className="text-[10px] font-bold uppercase text-gray-500">Status</div><div className="mt-1 truncate text-sm font-bold text-gray-700">{latestStudent.status}</div></div></div>}{studentHistory.length > 0 && <div className="grid grid-cols-1 gap-4 lg:grid-cols-3"><HistoryBars title="NA do aluno" history={studentHistory.map(item => item.snapshot)} getValue={snapshot => snapshot.students[selectedStudent.key] && snapshot.students[selectedStudent.key].naPending} color="#dc2626" /><HistoryBars title="Atividades pendentes do aluno" history={studentHistory.map(item => item.snapshot)} getValue={snapshot => snapshot.students[selectedStudent.key] && snapshot.students[selectedStudent.key].activityPending} color="#f5821f" /><HistoryBars title="Tratativas abertas do aluno" history={studentHistory.map(item => item.snapshot)} getValue={snapshot => snapshot.students[selectedStudent.key] && snapshot.students[selectedStudent.key].treatmentOpen} color="#2563eb" /></div>}<div className="mt-5 overflow-x-auto"><table className="w-full min-w-[720px] border-collapse text-xs"><thead><tr className="bg-gray-50 text-left text-gray-500"><th className="border border-gray-200 px-3 py-2">Data</th><th className="border border-gray-200 px-3 py-2">Origem</th><th className="border border-gray-200 px-3 py-2">NA turma</th><th className="border border-gray-200 px-3 py-2">Ativ. turma</th><th className="border border-gray-200 px-3 py-2">NA aluno</th><th className="border border-gray-200 px-3 py-2">Ativ. aluno</th><th className="border border-gray-200 px-3 py-2">Status</th></tr></thead><tbody>{orderedHistory.slice().reverse().map(snapshot => { const metric = selectedStudent && snapshot.students ? snapshot.students[selectedStudent.key] : null; return <tr key={snapshot.id}><td className="border border-gray-200 px-3 py-2">{formatHistoryDate(snapshot.capturedAt)}</td><td className="border border-gray-200 px-3 py-2">{snapshot.trigger}</td><td className="border border-gray-200 px-3 py-2 font-bold text-red-700">{snapshot.class && snapshot.class.naPending || 0}</td><td className="border border-gray-200 px-3 py-2 font-bold text-orange-700">{snapshot.class && snapshot.class.activityPending || 0}</td><td className="border border-gray-200 px-3 py-2">{metric ? metric.naPending : "-"}</td><td className="border border-gray-200 px-3 py-2">{metric ? metric.activityPending : "-"}</td><td className="border border-gray-200 px-3 py-2">{metric ? metric.status : "-"}</td></tr>; })}</tbody></table></div></div>
+                                {latestActivityUCs.length > 0 && <div className="mb-4 rounded-xl border border-gray-200 bg-white p-4"><div className="mb-3 flex flex-wrap items-center justify-between gap-2"><h3 className="text-sm font-bold text-gray-700">Última leitura de atividades por UC</h3><span className="text-[10px] text-gray-500">{(latestClass.activitySources || []).length} planilha(s) no conjunto atual</span></div><div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">{latestActivityUCs.map(([uc, values]) => <div key={uc} className="rounded border border-gray-200 bg-gray-50 p-3 text-xs"><div className="font-bold text-senac-blue">{uc}</div><div className="mt-1 text-gray-600">{values.completed || 0} concluída(s) | <strong className="text-orange-700">{values.pending || 0} pendente(s)</strong></div></div>)}</div></div>}
+                                <div className="rounded-xl border border-gray-200 bg-white p-4"><div className="mb-4 flex flex-wrap items-center justify-between gap-3"><div><h3 className="text-sm font-bold text-gray-700">Evolução por aluno</h3><p className="mt-1 text-xs text-gray-500">Selecione um aluno para consultar o histórico individual.</p></div><select value={selectedStudent ? selectedStudent.key : ""} onChange={event => setSelectedStudentKey(event.target.value)} className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-senac-blue">{studentOptions.map(student => <option key={student.key} value={student.key}>{student.name}</option>)}</select></div>{latestStudent && <><div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4"><div className="rounded-lg bg-red-50 p-3 text-center"><div className="text-[10px] font-bold uppercase text-red-700">NA</div><div className="text-xl font-bold text-red-800">{latestStudent.naPending}</div></div><div className="rounded-lg bg-orange-50 p-3 text-center"><div className="text-[10px] font-bold uppercase text-orange-700">Atividades pendentes</div><div className="text-xl font-bold text-orange-800">{latestStudent.activityPending}</div></div><div className="rounded-lg bg-blue-50 p-3 text-center"><div className="text-[10px] font-bold uppercase text-blue-700">Tratativas abertas</div><div className="text-xl font-bold text-blue-800">{latestStudent.treatmentOpen}</div></div><div className="rounded-lg bg-gray-50 p-3 text-center"><div className="text-[10px] font-bold uppercase text-gray-500">Status</div><div className="mt-1 truncate text-sm font-bold text-gray-700">{latestStudent.status}</div></div></div>{Object.keys(latestStudent.activityByUC || {}).length > 0 && <div className="mb-4 flex flex-wrap gap-2">{Object.entries(latestStudent.activityByUC).map(([uc, values]) => <span key={uc} className="rounded bg-orange-50 px-2 py-1 text-[10px] font-bold text-orange-800">{uc}: {values.pending || 0} pendente(s)</span>)}</div>}</>}{studentHistory.length > 0 && <div className="grid grid-cols-1 gap-4 lg:grid-cols-3"><HistoryBars title="NA do aluno" history={studentHistory.map(item => item.snapshot)} getValue={snapshot => snapshot.students[selectedStudent.key] && snapshot.students[selectedStudent.key].naPending} color="#dc2626" /><HistoryBars title="Atividades pendentes do aluno" history={studentHistory.map(item => item.snapshot)} getValue={snapshot => snapshot.students[selectedStudent.key] && snapshot.students[selectedStudent.key].activityPending} color="#f5821f" /><HistoryBars title="Tratativas abertas do aluno" history={studentHistory.map(item => item.snapshot)} getValue={snapshot => snapshot.students[selectedStudent.key] && snapshot.students[selectedStudent.key].treatmentOpen} color="#2563eb" /></div>}<div className="mt-5 overflow-x-auto"><table className="w-full min-w-[720px] border-collapse text-xs"><thead><tr className="bg-gray-50 text-left text-gray-500"><th className="border border-gray-200 px-3 py-2">Data</th><th className="border border-gray-200 px-3 py-2">Origem</th><th className="border border-gray-200 px-3 py-2">NA turma</th><th className="border border-gray-200 px-3 py-2">Ativ. turma</th><th className="border border-gray-200 px-3 py-2">NA aluno</th><th className="border border-gray-200 px-3 py-2">Ativ. aluno</th><th className="border border-gray-200 px-3 py-2">Status</th></tr></thead><tbody>{orderedHistory.slice().reverse().map(snapshot => { const metric = selectedStudent && snapshot.students ? snapshot.students[selectedStudent.key] : null; return <tr key={snapshot.id}><td className="border border-gray-200 px-3 py-2">{formatHistoryDate(snapshot.capturedAt)}</td><td className="border border-gray-200 px-3 py-2">{snapshot.trigger}</td><td className="border border-gray-200 px-3 py-2 font-bold text-red-700">{snapshot.class && snapshot.class.naPending || 0}</td><td className="border border-gray-200 px-3 py-2 font-bold text-orange-700">{snapshot.class && snapshot.class.activityPending || 0}</td><td className="border border-gray-200 px-3 py-2">{metric ? metric.naPending : "-"}</td><td className="border border-gray-200 px-3 py-2">{metric ? metric.activityPending : "-"}</td><td className="border border-gray-200 px-3 py-2">{metric ? metric.status : "-"}</td></tr>; })}</tbody></table></div></div>
                             </>}
                         </div>
                         <div className="flex shrink-0 justify-end gap-2 border-t border-gray-200 bg-white p-4"><button onClick={onClose} className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-bold text-gray-600 hover:bg-gray-50">Fechar</button><button onClick={printHistoryReport} disabled={orderedHistory.length === 0} className="rounded-lg bg-senac-blue px-5 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-50"><IconPrinter className="mr-1 inline-block h-4 w-4" /> Imprimir / PDF</button></div>
@@ -1826,7 +2254,10 @@
             "PENDENTE DESLIGAMENTO", "DESLIGAMENTO EM ANDAMENTO"
         ];
 
-        const hasDropoutKeywordInRow = (row) => hasAnyKeyword(rowToSearchText(row), STUDENT_DROPOUT_KEYWORDS);
+        const hasDropoutKeywordInRow = (row) => {
+            const text = rowToSearchText(row);
+            return !hasAnyKeyword(text, STUDENT_PROCESS_KEYWORDS) && hasAnyKeyword(text, STUDENT_DROPOUT_KEYWORDS);
+        };
 
         const NOT_DEVELOPED_KEYWORDS = [
             "NAO DESENVOLVEU", "NAO DESENVOLVIDO", "REPROVADO", "INSUFICIENTE"
@@ -2205,6 +2636,43 @@
             return { sourceName, sheets, students: activityStudents, totals, attentionStudents, defaultUC: workbookDefaultUC };
         };
 
+        const getActivityUploadKey = (tracking) => {
+            const uc = getUCNumber(tracking && tracking.defaultUC);
+            return uc !== null ? `UC${uc}` : normalizeText(tracking && tracking.sourceName || "PLANILHA");
+        };
+
+        const mergeActivityTrackings = (currentTracking, newTrackings) => {
+            const uploads = new Map();
+            const currentUploads = currentTracking && Array.isArray(currentTracking.uploads) ? currentTracking.uploads : (currentTracking ? [currentTracking] : []);
+            [...currentUploads, ...(newTrackings || [])].filter(Boolean).forEach(tracking => uploads.set(getActivityUploadKey(tracking), tracking));
+            const mergedUploads = Array.from(uploads.values());
+            const totals = { completed: 0, not_completed: 0, blank: 0, requires_evaluation: 0, activity_not_attended: 0, indicator_not_attended: 0, indicator_partial: 0, indicator_attended: 0, competence_not_developed: 0, competence_developed: 0, competence_not_attended: 0, competence_attended: 0, activities: 0 };
+            const students = {};
+            const sheets = [];
+
+            mergedUploads.forEach(upload => {
+                Object.keys(totals).forEach(key => { totals[key] += Number(upload.totals && upload.totals[key] || 0); });
+                (upload.sheets || []).forEach(sheet => sheets.push({ ...sheet, sourceName: upload.sourceName }));
+                Object.entries(upload.students || {}).forEach(([studentKey, summary]) => {
+                    if (!students[studentKey]) students[studentKey] = { name: summary.name, total: 0, entries: [] };
+                    const target = students[studentKey];
+                    Object.keys(totals).filter(key => key !== "activities").forEach(key => { target[key] = Number(target[key] || 0) + Number(summary[key] || 0); });
+                    target.total += Number(summary.total || 0);
+                    target.entries.push(...(summary.entries || []).map(entry => ({ ...entry, sourceName: upload.sourceName })));
+                });
+            });
+
+            return {
+                sourceName: mergedUploads.map(upload => upload.sourceName).filter(Boolean).join(" | "),
+                uploads: mergedUploads,
+                sheets,
+                students,
+                totals,
+                attentionStudents: Object.values(students).filter(student => getActivityAttentionCount(student) > 0).length,
+                defaultUC: mergedUploads.length === 1 ? mergedUploads[0].defaultUC : ""
+            };
+        };
+
         const getActivityStudentSummary = (tracking, studentName) => tracking && tracking.students ? tracking.students[normalizeName(studentName)] || null : null;
 
         const ACTIVITY_STATUS_LABELS = {
@@ -2252,6 +2720,19 @@
         }[status] || "");
 
         const buildActivityStatusRows = (entries, limit = 120) => (entries || []).slice(0, limit).map(entry => `<tr class="${getActivityStatusReportClass(entry.status)}"><td>${escapeReportHTML(entry.uc || entry.sheet || "")}</td><td>${escapeReportHTML(entry.kindLabel || "Atividade avaliada")}</td><td>${escapeReportHTML(entry.label || "Atividade")}</td><td><strong>${escapeReportHTML(formatActivityStatusLabel(entry.status))}</strong></td></tr>`).join("");
+
+        const summarizeActivitiesByUC = (summary) => (summary && summary.entries || []).reduce((result, entry) => {
+            const uc = entry.uc || entry.sheet || "Sem UC";
+            if (!result[uc]) result[uc] = { total: 0, completed: 0, pending: 0, notCompleted: 0, blank: 0, requiresEvaluation: 0 };
+            const item = result[uc];
+            item.total++;
+            if (entry.status === "completed") item.completed++;
+            if (isActivityAttentionStatus(entry.status)) item.pending++;
+            if (entry.status === "not_completed") item.notCompleted++;
+            if (entry.status === "blank") item.blank++;
+            if (entry.status === "requires_evaluation") item.requiresEvaluation++;
+            return result;
+        }, {});
 
         const analyzeAttendanceWarnings = (workbook, students) => {
             const XLSX = window.XLSX;
@@ -2543,6 +3024,7 @@
                 const openNotes = notes.length - closedNotes;
                 const metric = {
                     name: student.name,
+                    orionCode: String(student.orionCode || ""),
                     status: student.status || "Não informado",
                     averageFreq: Number.isFinite(Number(student.averageFreq)) ? Number(student.averageFreq) : null,
                     naPending: Number(na.count || 0),
@@ -2552,6 +3034,7 @@
                     activityNotCompleted: Number(activity && activity.not_completed || 0),
                     activityBlank: Number(activity && activity.blank || 0),
                     activityRequiresEvaluation: Number(activity && activity.requires_evaluation || 0),
+                    activityByUC: summarizeActivitiesByUC(activity),
                     treatmentOpen: openNotes,
                     treatmentClosed: closedNotes
                 };
@@ -2578,6 +3061,14 @@
                     activityTotal,
                     activityCompleted,
                     activityPending,
+                    activityByUC: Object.values(studentMetrics).reduce((result, metric) => {
+                        Object.entries(metric.activityByUC || {}).forEach(([uc, values]) => {
+                            if (!result[uc]) result[uc] = { total: 0, completed: 0, pending: 0, notCompleted: 0, blank: 0, requiresEvaluation: 0 };
+                            Object.keys(result[uc]).forEach(key => { result[uc][key] += Number(values[key] || 0); });
+                        });
+                        return result;
+                    }, {}),
+                    activitySources: activityTracking && Array.isArray(activityTracking.uploads) ? activityTracking.uploads.map(upload => upload.sourceName) : (activityTracking && activityTracking.sourceName ? [activityTracking.sourceName] : []),
                     treatmentOpen,
                     treatmentClosed
                 },
@@ -2638,6 +3129,13 @@
             supervisorPhone: cleanContactValue(contact.supervisorPhone),
             supervisorEmail: cleanContactValue(contact.supervisorEmail)
         });
+
+        const getWhatsAppUrl = (phone) => {
+            const firstPhone = String(phone || "").split(/[\/;|]/)[0].replace(/\D/g, "");
+            if (firstPhone.length < 10) return "";
+            const number = firstPhone.startsWith("55") ? firstPhone : `55${firstPhone}`;
+            return `https://wa.me/${number}`;
+        };
 
         const parseGeneralDataContacts = (workbook) => {
             const sheetName = (workbook.SheetNames || []).find(name => compactGeneralHeader(name) === "DADOSGERAIS");
@@ -2706,7 +3204,7 @@
                 const instructors = [];
                 ucMetadata.forEach(({ metadata }) => {
                     const tutor = canonicalizeInstructorName(metadata && metadata.tutor);
-                    if (!tutor || normalizeName(tutor) === normalizeName("Não Identificado")) return;
+                    if (!isValidInstructorName(tutor) || normalizeName(tutor) === normalizeName("Não Identificado")) return;
                     if (!instructors.some(existing => normalizeName(existing) === normalizeName(tutor))) instructors.push(tutor);
                     if (turma === "Turma não identificada" && metadata.turma) turma = metadata.turma;
                     if ((!course || course.includes("não")) && metadata.curso) course = metadata.curso;
@@ -2717,7 +3215,7 @@
                     sheetNames.forEach(sheetName => {
                         const metadata = findMetadata(workbook.Sheets[sheetName]);
                         const tutor = canonicalizeInstructorName(metadata && metadata.tutor);
-                        if (tutor && normalizeName(tutor) !== normalizeName("Não Identificado") && !instructors.some(existing => normalizeName(existing) === normalizeName(tutor))) instructors.push(tutor);
+                        if (isValidInstructorName(tutor) && normalizeName(tutor) !== normalizeName("Não Identificado") && !instructors.some(existing => normalizeName(existing) === normalizeName(tutor))) instructors.push(tutor);
                         if (turma === "Turma não identificada" && metadata.turma) turma = metadata.turma;
                         if ((!course || course.includes("não")) && metadata.curso) course = metadata.curso;
                     });
@@ -2798,6 +3296,7 @@
                 let ensinoMedioColIdx = -1;
                 let nameColIdx = -1;
                 let situationColIdx = -1;
+                let orionColIdx = -1;
                 
                 for(let idx = 0; idx < Math.max(headerRow.length, nextRow1.length); idx++) {
                     const l1 = normalizeText(headerRow[idx]);
@@ -2809,6 +3308,7 @@
                     if ((fullHeader.includes("ENSINO") && fullHeader.includes("MEDIO")) || fullHeader.includes("CONTRATURNO") || fullHeader.includes("CONTRA TURNO")) ensinoMedioColIdx = idx;
                     if (fullHeader.includes("NOME") && nameColIdx === -1) nameColIdx = idx;
                     if ((fullHeader.includes("SITUACAO") || fullHeader.includes("STATUS") || fullHeader.includes("RESULTADO")) && situationColIdx === -1) situationColIdx = idx;
+                    if (fullHeader.includes("ORION") && orionColIdx === -1) orionColIdx = idx;
                 }
 
                 if (nameColIdx === -1) nameColIdx = 2; 
@@ -2844,6 +3344,7 @@
                     const studentRec = {
                         id: i, 
                         name: name, 
+                        orionCode: orionColIdx !== -1 ? String(row[orionColIdx] || "").trim() : "",
                         averageFreq: 0.0, 
                         status: "Desenvolveu", 
                         low_freq_ucs: [], failed_perf_ucs: [], 
@@ -3305,15 +3806,16 @@
             if (selectedOptions.activities) sections.push(section("Atividades do upload atual", activityHTML, "activity-section"));
 
             const recipientsJSON = value => JSON.stringify(value).replace(/<\/script/gi, "<\\/script");
-            const htmlContent = `<html lang="pt-BR"><head><meta charset="UTF-8"><title>${escapeReportHTML(reportSubject)}</title><style>body{font-family:Arial,sans-serif;margin:0;padding:0;color:#243447;background:#fff}.menu{background:#004587;color:#fff;padding:10px 16px;display:flex;justify-content:space-between;align-items:center;gap:10px;position:sticky;top:0;z-index:5}.menu strong{font-size:14px}.actions{display:flex;gap:7px;flex-wrap:wrap}.btn,.recipient{border:0;border-radius:4px;padding:8px 10px;font-size:11px;font-weight:bold}.btn{cursor:pointer;background:#F5821F;color:#fff}.recipient{color:#123;background:#fff}.content{max-width:980px;margin:0 auto;padding:24px}.header{text-align:center;border-bottom:3px solid #F5821F;padding-bottom:16px}.header img{width:82px}.header h1{color:#004587;font-size:21px;margin:8px 0}.header p{margin:4px;font-size:12px}.student{margin-top:18px;border:1px solid #d9e2ec;border-left:4px solid #F5821F;border-radius:7px;padding:16px}.student h3{margin:0;color:#004587;font-size:17px}.student-meta{font-size:12px;color:#64748b;margin-top:6px}.report-section{margin-top:16px;border-top:1px solid #e2e8f0;padding-top:10px}.report-section h2{font-size:14px;color:#004587;margin:0 0 8px;border-bottom:1px solid #dce7f0;padding-bottom:5px}.contact-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;font-size:12px}.contact-grid>div{background:#f8fafc;border:1px solid #e2e8f0;border-radius:5px;padding:9px}.status-line{background:#f8fafc;border-left:3px solid #F5821F;padding:9px;font-size:12px;margin-bottom:8px}.report-section p,.report-section li{font-size:12px;line-height:1.45}.report-section table{width:100%;border-collapse:collapse;font-size:11px;margin:7px 0}.report-section th,.report-section td{border:1px solid #d9e2ec;padding:6px;text-align:left}.report-section th{background:#eef5fb;color:#004587}.attention{background:#fff7ed;color:#9a3412}.ok{background:#f0fdf4;color:#166534}.observation{background:#f8fafc;border-left:3px solid #F5821F;padding:8px;margin:6px 0;font-size:12px}.observation small{display:block;color:#64748b;margin-top:4px}.pill{background:#eaf2fa;color:#004587;border-radius:4px;padding:2px 5px;font-size:10px}.muted{color:#64748b;font-style:italic}@media(max-width:700px){.menu{align-items:flex-start;flex-direction:column}.contact-grid{grid-template-columns:1fr}}@media print{.menu{display:none!important}.content{padding:0}}</style></head><body><div class="menu"><strong>Relatório individual</strong><div class="actions"><select id="recipient" class="recipient"><option value="student">Enviar ao aluno</option><option value="supervisor">Enviar ao supervisor</option></select><button class="btn" onclick="sendEmail()">Enviar por Outlook</button><button class="btn" onclick="copyReport()">Copiar para e-mail</button><button class="btn" onclick="window.print()">Imprimir / PDF</button></div></div><main id="report-content" class="content"><div class="header"><img src="https://upload.wikimedia.org/wikipedia/commons/thumb/8/86/Senac_logo.svg/500px-Senac_logo.svg.png" alt="Senac"><h1>Relatório de situações</h1><p><strong>Curso:</strong> ${escapeReportHTML(course)}</p><p><strong>Turma:</strong> ${escapeReportHTML(turma)} | <strong>Emitido em:</strong> ${dateStr}</p><p><strong>Instrutores:</strong> ${escapeReportHTML(instructorLabel)}</p></div><article class="student"><h3>${escapeReportHTML(student.name)}</h3><div class="student-meta">Contra turno: ${escapeReportHTML(student.contra_turno_desc || "Não informado")} | Status: ${escapeReportHTML(student.status || "Não informado")}</div>${sections.join("")}</article></main><script>const studentRecipients=${recipientsJSON(studentRecipients)};const supervisorRecipients=${recipientsJSON(supervisorRecipients)};const subject=${JSON.stringify(reportSubject).replace(/<\/script/gi, "<\\/script")};function copyReport(afterCopy){const content=document.getElementById('report-content');if(!content)return;const done=()=>{if(typeof afterCopy==='function')afterCopy();else alert('Relatório copiado. Cole no Outlook com Ctrl+V para manter o layout.');};if(navigator.clipboard&&window.ClipboardItem){const item=new ClipboardItem({'text/html':new Blob([content.outerHTML],{type:'text/html'}),'text/plain':new Blob([content.innerText],{type:'text/plain'})});navigator.clipboard.write([item]).then(done).catch(()=>fallback(done));}else fallback(done);}function fallback(done){const range=document.createRange();range.selectNodeContents(document.getElementById('report-content'));const selection=window.getSelection();selection.removeAllRanges();selection.addRange(range);try{document.execCommand('copy');done();}finally{selection.removeAllRanges();}}function sendEmail(){const type=document.getElementById('recipient').value;const list=type==='supervisor'?supervisorRecipients:studentRecipients;const emails=[...new Set(list.map(item=>String(item.email||'').trim()).filter(Boolean))];if(emails.length===0){alert(type==='supervisor'?'Nenhum e-mail de supervisor foi informado.':'Nenhum e-mail de aluno foi informado.');return;}copyReport(()=>{alert('Relatório copiado. Cole no corpo do Outlook com Ctrl+V para manter o layout.');window.location.href='mailto:'+emails.join(';')+'?subject='+encodeURIComponent(subject)+'&body='+encodeURIComponent(document.getElementById('report-content').innerText);});}${String.fromCharCode(60)}/script></body></html>`;
+            const htmlContent = `<html lang="pt-BR"><head><meta charset="UTF-8"><title>${escapeReportHTML(reportSubject)}</title><style>body{font-family:Arial,sans-serif;margin:0;padding:0;color:#243447;background:#fff}.menu{background:#004587;color:#fff;padding:10px 16px;display:flex;justify-content:space-between;align-items:center;gap:10px;position:sticky;top:0;z-index:5}.menu strong{font-size:14px}.actions{display:flex;gap:7px;flex-wrap:wrap}.btn,.recipient{border:0;border-radius:4px;padding:8px 10px;font-size:11px;font-weight:bold}.btn{cursor:pointer;background:#F5821F;color:#fff}.recipient{color:#123;background:#fff}.content{max-width:980px;margin:0 auto;padding:24px}.header{text-align:center;border-bottom:3px solid #F5821F;padding-bottom:16px}.header img{width:82px}.header h1{color:#004587;font-size:21px;margin:8px 0}.header p{margin:4px;font-size:12px}.student{margin-top:18px;border:1px solid #d9e2ec;border-left:4px solid #F5821F;border-radius:7px;padding:16px}.student h3{margin:0;color:#004587;font-size:17px}.student-meta{font-size:12px;color:#64748b;margin-top:6px}.report-section{margin-top:16px;border-top:1px solid #e2e8f0;padding-top:10px}.report-section h2{font-size:14px;color:#004587;margin:0 0 8px;border-bottom:1px solid #dce7f0;padding-bottom:5px}.contact-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;font-size:12px}.contact-grid>div{background:#f8fafc;border:1px solid #e2e8f0;border-radius:5px;padding:9px}.status-line{background:#f8fafc;border-left:3px solid #F5821F;padding:9px;font-size:12px;margin-bottom:8px}.report-section p,.report-section li{font-size:12px;line-height:1.45}.report-section table{width:100%;border-collapse:collapse;font-size:11px;margin:7px 0}.report-section th,.report-section td{border:1px solid #d9e2ec;padding:6px;text-align:left}.report-section th{background:#eef5fb;color:#004587}.attention{background:#fff7ed;color:#9a3412}.ok{background:#f0fdf4;color:#166534}.observation{background:#f8fafc;border-left:3px solid #F5821F;padding:8px;margin:6px 0;font-size:12px}.observation small{display:block;color:#64748b;margin-top:4px}.pill{background:#eaf2fa;color:#004587;border-radius:4px;padding:2px 5px;font-size:10px}.muted{color:#64748b;font-style:italic}@media(max-width:700px){.menu{align-items:flex-start;flex-direction:column}.contact-grid{grid-template-columns:1fr}}@media print{.menu{display:none!important}.content{padding:0}}</style></head><body><div class="menu"><strong>Relatório individual</strong><div class="actions"><select id="recipient" class="recipient"><option value="student">Enviar ao aluno</option><option value="supervisor">Enviar ao supervisor</option></select><button class="btn" onclick="sendEmail()">Enviar por Outlook</button><button class="btn" onclick="copyReport()">Copiar para e-mail</button><button class="btn" onclick="window.print()">Imprimir / PDF</button></div></div><main id="report-content" class="content"><div class="header"><img src="https://upload.wikimedia.org/wikipedia/commons/thumb/8/86/Senac_logo.svg/500px-Senac_logo.svg.png" alt="Senac"><h1>Relatório de situações</h1><p><strong>Curso:</strong> ${escapeReportHTML(course)}</p><p><strong>Turma:</strong> ${escapeReportHTML(turma)} | <strong>Emitido em:</strong> ${dateStr}</p><p><strong>Instrutores:</strong> ${escapeReportHTML(instructorLabel)}</p></div><article class="student"><h3>${escapeReportHTML(student.name)}</h3><div class="student-meta">${student.orionCode ? `Órion: ${escapeReportHTML(student.orionCode)} | ` : ""}Contra turno: ${escapeReportHTML(student.contra_turno_desc || "Não informado")} | Status: ${escapeReportHTML(student.status || "Não informado")}</div>${sections.join("")}</article></main><script>const studentRecipients=${recipientsJSON(studentRecipients)};const supervisorRecipients=${recipientsJSON(supervisorRecipients)};const subject=${JSON.stringify(reportSubject).replace(/<\/script/gi, "<\\/script")};function copyReport(afterCopy){const content=document.getElementById('report-content');if(!content)return;const done=()=>{if(typeof afterCopy==='function')afterCopy();else alert('Relatório copiado. Cole no Outlook com Ctrl+V para manter o layout.');};if(navigator.clipboard&&window.ClipboardItem){const item=new ClipboardItem({'text/html':new Blob([content.outerHTML],{type:'text/html'}),'text/plain':new Blob([content.innerText],{type:'text/plain'})});navigator.clipboard.write([item]).then(done).catch(()=>fallback(done));}else fallback(done);}function fallback(done){const range=document.createRange();range.selectNodeContents(document.getElementById('report-content'));const selection=window.getSelection();selection.removeAllRanges();selection.addRange(range);try{document.execCommand('copy');done();}finally{selection.removeAllRanges();}}function sendEmail(){const type=document.getElementById('recipient').value;const list=type==='supervisor'?supervisorRecipients:studentRecipients;const emails=[...new Set(list.map(item=>String(item.email||'').trim()).filter(Boolean))];if(emails.length===0){alert(type==='supervisor'?'Nenhum e-mail de supervisor foi informado.':'Nenhum e-mail de aluno foi informado.');return;}copyReport(()=>{alert('Relatório copiado. Cole no corpo do Outlook com Ctrl+V para manter o layout.');window.location.href='mailto:'+emails.join(';')+'?subject='+encodeURIComponent(subject)+'&body='+encodeURIComponent(document.getElementById('report-content').innerText);});}${String.fromCharCode(60)}/script></body></html>`;
             const individualOutlookPattern = "copyReport(()=>{alert('Relatório copiado. Cole no corpo do Outlook com Ctrl+V para manter o layout.');window.location.href='mailto:'+emails.join(';')+'?subject='+encodeURIComponent(subject)+'&body='+encodeURIComponent(document.getElementById('report-content').innerText);});";
             const individualOutlookReplacement = "const outlookWindow=window.open('about:blank','_blank');copyReport(()=>{const body=document.getElementById('report-content').innerText;const outlookUrl='https://outlook.office.com/mail/deeplink/compose?to='+encodeURIComponent(emails.join(';'))+'&subject='+encodeURIComponent(subject)+'&body='+encodeURIComponent(body);if(outlookWindow)outlookWindow.location.href=outlookUrl;else window.location.href=outlookUrl;});";
             printWindow.document.write(htmlContent.replace(individualOutlookPattern, individualOutlookReplacement));
             printWindow.document.close();
         };
 
-        const generateRangeReport = ({ selectedStudentIds, students, turma, course, instructors, tutor1, tutor2, activityTracking, reportData, naJustifications, notebookNotes, fromUC, toUC }) => {
+        const generateRangeReport = ({ selectedStudentIds, students, turma, course, instructors, tutor1, tutor2, activityTracking, reportData, naJustifications, notebookNotes, fromUC, toUC, options = {} }) => {
             const interval = normalizeUCInterval(fromUC, toUC);
+            const include = { academic: true, activities: true, attendance: true, observations: true, notebook: true, ...options };
             const selected = students.filter(student => selectedStudentIds.includes(student.id));
             if (!interval || selected.length === 0) {
                 alert("Selecione a UC inicial, a UC final e pelo menos um aluno ou a turma inteira.");
@@ -3367,7 +3869,7 @@
                 const naHTML = naEntries.length > 0 ? `<div class="summary-box danger-box"><strong>${naEntries.length} NA pendente(s) na chamada</strong><br>${naEntries.map(entry => `${escapeReportHTML(entry.uc)} - ${escapeReportHTML(entry.date)}`).join("; ")}</div>` : `<div class="summary-box muted">Nenhum NA pendente no intervalo.</div>`;
                 const notesHTML = studentNotes.length > 0 ? studentNotes.map(note => `<div class="notebook-note"><div><strong>${escapeReportHTML(getNotebookSituationLabel(note))}</strong> <span class="status-pill">${escapeReportHTML(getNotebookStatusMeta(note).label)}</span></div><div class="meta">Instrutor: ${escapeReportHTML(note.instructorSource || note.instructorName || "Não informado")} | Analista: ${escapeReportHTML(note.responsibleAnalyst || "Não informado")} | Registro: ${escapeReportHTML(formatNotebookDate(note.date))}</div>${getNotebookTreatmentDue(note) ? `<div class="meta">${escapeReportHTML(getNotebookTreatmentLabel(note))}</div>` : ""}${note.notes ? `<p>${escapeReportHTML(note.notes)}</p>` : ""}</div>`).join("") : `<div class="summary-box muted">Nenhuma anotação de caderno vinculada.</div>`;
 
-                return `<article class="student-card"><div class="header-row"><span class="student-name">${escapeReportHTML(student.name)}</span><span style="color:${statusColor};font-weight:bold">${escapeReportHTML(student.status)}</span></div><div class="info-grid"><div><strong>Frequência média no intervalo:</strong> ${average}%</div><div><strong>Contra Turno:</strong> ${escapeReportHTML(student.contra_turno_desc)}</div><div><strong>UCs com baixa frequência:</strong> ${escapeReportHTML(lowFrequency.join(", ") || "Nenhuma")}</div><div><strong>UCs com desempenho pendente:</strong> ${escapeReportHTML(performanceIssues.join(", ") || "Nenhuma")}</div></div><h3>Frequência e desempenho por UC</h3><table class="uc-table"><thead><tr><th>UC</th><th>Frequência</th><th>Desempenho</th></tr></thead><tbody>${ucRows}</tbody></table><h3>Atividades no intervalo</h3>${activityHTML}<h3>Chamada e NA</h3>${naHTML}<h3>Observações e situações</h3><ul>${observationHTML}</ul><h3>Anotações do caderno</h3>${notesHTML}</article>`;
+                return `<article class="student-card"><div class="header-row"><span class="student-name">${escapeReportHTML(student.name)}</span><span style="color:${statusColor};font-weight:bold">${escapeReportHTML(student.status)}</span></div><div class="info-grid">${student.orionCode ? `<div><strong>Código Órion:</strong> ${escapeReportHTML(student.orionCode)}</div>` : ""}<div><strong>Frequência média no intervalo:</strong> ${average}%</div><div><strong>Contra Turno:</strong> ${escapeReportHTML(student.contra_turno_desc)}</div><div><strong>UCs com baixa frequência:</strong> ${escapeReportHTML(lowFrequency.join(", ") || "Nenhuma")}</div><div><strong>UCs com desempenho pendente:</strong> ${escapeReportHTML(performanceIssues.join(", ") || "Nenhuma")}</div></div>${include.academic ? `<h3>Frequência e desempenho por UC</h3><table class="uc-table"><thead><tr><th>UC</th><th>Frequência</th><th>Desempenho</th></tr></thead><tbody>${ucRows}</tbody></table>` : ""}${include.activities ? `<h3>Atividades no intervalo</h3>${activityHTML}` : ""}${include.attendance ? `<h3>Chamada e NA</h3>${naHTML}` : ""}${include.observations ? `<h3>Observações e situações</h3><ul>${observationHTML}</ul>` : ""}${include.notebook ? `<h3>Anotações do caderno</h3>${notesHTML}` : ""}</article>`;
             }).join("");
 
             const htmlContent = `<html lang="pt-BR"><head><meta charset="UTF-8"><title>${escapeReportHTML(reportSubject)}</title><style>body{font-family:Arial,sans-serif;padding:20px;color:#243447;background:#fff;margin:0}.report-menu{background:#004587;padding:10px 20px;display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;z-index:10;box-shadow:0 2px 5px rgba(0,0,0,.2)}.menu-title{color:#fff;font-weight:bold;font-size:14px}.menu-actions{display:flex;gap:8px;flex-wrap:wrap}.btn,.recipient-select{border:0;border-radius:4px;padding:8px 10px;font-size:12px;font-weight:bold}.btn{cursor:pointer;color:#fff;background:#F5821F}.recipient-select{color:#123}.report-header{text-align:center;margin:18px 0 22px}.report-header img{width:80px}.report-header h1{font-size:20px;color:#004587;margin:8px 0}.report-header h2{font-size:14px;color:#666;margin:4px}.student-card{border:1px solid #d9e2ec;border-left:4px solid #F5821F;border-radius:8px;padding:16px;margin:0 0 18px;break-inside:avoid}.header-row{display:flex;justify-content:space-between;gap:12px;border-bottom:2px solid #F5821F;padding-bottom:7px;margin-bottom:10px}.student-name{font-size:17px;font-weight:bold}.info-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px;margin-bottom:12px}.student-card h3{font-size:12px;color:#004587;border-bottom:1px solid #e6edf4;padding-bottom:4px;margin:14px 0 7px}.uc-table{width:100%;border-collapse:collapse;font-size:11px}.uc-table th,.uc-table td{border:1px solid #d9e2ec;padding:6px;text-align:left}.uc-table th{background:#eef5fb;color:#004587}.uc-table .attention{background:#fff7ed;color:#9a3412}.uc-table .danger{background:#fef2f2;color:#b91c1c}.summary-box{background:#f8fafc;border-left:3px solid #F5821F;padding:8px;font-size:11px;margin:6px 0}.danger-box{border-left-color:#dc2626;background:#fef2f2;color:#991b1b}.muted{color:#6b7280;font-style:italic}.student-card ul{font-size:11px;margin:5px 0 8px;padding-left:18px}.notebook-note{border:1px solid #d9e2ec;border-left:3px solid #004587;padding:8px;margin:6px 0;font-size:11px}.status-pill{display:inline-block;border-radius:4px;background:#eef5fb;color:#004587;padding:2px 5px;font-size:10px}.meta{color:#64748b;font-size:10px;margin-top:4px}@media(max-width:760px){.report-menu{align-items:flex-start;flex-direction:column;gap:8px}.info-grid{grid-template-columns:1fr}}@media print{.report-menu{display:none!important}}</style></head><body><div class="report-menu"><div class="menu-title">Relatório completo por UCs</div><div class="menu-actions"><select id="report-recipient" class="recipient-select"><option value="student">Enviar para estudante(s)</option><option value="supervisor">Enviar para supervisor(es)</option></select><button class="btn" onclick="sendReportEmail()">Enviar por Outlook</button><button class="btn" onclick="copyReport()">Copiar para e-mail</button><button class="btn" onclick="window.print()">Imprimir / PDF</button></div></div><div id="report-content"><div class="report-header"><img src="https://upload.wikimedia.org/wikipedia/commons/thumb/8/86/Senac_logo.svg/500px-Senac_logo.svg.png" alt="Senac"/><h1>Relatório completo da turma/aluno</h1><h2>${escapeReportHTML(course)}</h2><div><strong>Turma:</strong> ${escapeReportHTML(turma)} | <strong>Intervalo:</strong> ${escapeReportHTML(rangeLabel)} | <strong>Emitido em:</strong> ${dateStr}<br><strong>Instrutores:</strong> ${escapeReportHTML(tutor1)} / ${escapeReportHTML(tutor2)}</div></div>${studentHTML}</div><script>const studentRecipients=${JSON.stringify(studentRecipients)};const supervisorRecipients=${JSON.stringify(supervisorRecipients)};const subject=${JSON.stringify(reportSubject)};function copyReport(afterCopy){const content=document.getElementById('report-content');if(!content)return;const done=()=>{if(typeof afterCopy==='function')afterCopy();else alert('Relatório copiado. Cole no Outlook ou em outro documento.');};if(navigator.clipboard&&window.ClipboardItem){const item=new ClipboardItem({'text/html':new Blob([content.outerHTML],{type:'text/html'}),'text/plain':new Blob([content.innerText],{type:'text/plain'})});navigator.clipboard.write([item]).then(done).catch(()=>fallbackCopy(done));}else fallbackCopy(done);}function fallbackCopy(done){const range=document.createRange();range.selectNodeContents(document.getElementById('report-content'));const selection=window.getSelection();selection.removeAllRanges();selection.addRange(range);try{document.execCommand('copy');done();}finally{selection.removeAllRanges();}}function sendReportEmail(){const type=document.getElementById('report-recipient').value;const list=type==='supervisor'?supervisorRecipients:studentRecipients;const emails=[...new Set(list.map(item=>String(item.email||'').trim()).filter(Boolean))];if(emails.length===0){alert(type==='supervisor'?'Nenhum e-mail de supervisor foi informado.':'Nenhum e-mail de estudante foi informado.');return;}copyReport(()=>{alert('Relatório copiado. Cole no corpo do Outlook com Ctrl+V para manter o layout.');window.location.href='mailto:'+emails.join(';')+'?subject='+encodeURIComponent(subject)+'&body='+encodeURIComponent(document.getElementById('report-content').innerText);});}<\/script></body></html>`;
@@ -3439,7 +3941,7 @@
                             : '';
                         return '<div class="student-card">' +
                             '<div class="header-row"><span class="student-name">' + s.name + '</span><span style="' + statusColor + '; font-weight:bold;">' + s.status + '</span></div>' +
-                            '<div class="info-grid"><div><strong>Frequência Global:</strong> ' + s.averageFreq + '%</div><div><strong>Contra Turno:</strong> ' + s.contra_turno_desc + '</div></div>' +
+                            '<div class="info-grid">' + (s.orionCode ? '<div><strong>Código Órion:</strong> ' + s.orionCode + '</div>' : '') + '<div><strong>Frequência Global:</strong> ' + s.averageFreq + '%</div><div><strong>Contra Turno:</strong> ' + s.contra_turno_desc + '</div></div>' +
                             (s.low_freq_ucs.length > 0 ? '<div style="font-size:12px; color:#ca8a04;">⚠️ Baixa Frequência: ' + s.low_freq_ucs.join(", ") + '</div>' : '') +
                             (s.failed_perf_ucs.length > 0 ? '<div style="font-size:12px; color:#dc2626;">❌ Desempenho: ' + s.failed_perf_ucs.join(", ") + '</div>' : '') +
                             mainObsHtml + naHtml + activityHtml + '</div>';
@@ -3633,6 +4135,8 @@
 
             // Novo Estado V72 - Instrutor Selecionado para Notas
             const [selectedInstructorForNotes, setSelectedInstructorForNotes] = useState(null);
+            const [showAnalystNotebook, setShowAnalystNotebook] = useState(false);
+            const [visibleAnalystNotes, setVisibleAnalystNotes] = useState([]);
             const [showNotebookReport, setShowNotebookReport] = useState(false);
             const [showUCIntervalReport, setShowUCIntervalReport] = useState(false);
             const [showStudentReportModal, setShowStudentReportModal] = useState(false);
@@ -3665,15 +4169,17 @@
 
             const ataContentRef = useRef(null);
 
-            const activeInstructorNames = useMemo(() => {
+            const currentAnalystName = useMemo(() => getCurrentAnalystName(), []);
+            const detectedInstructorNames = useMemo(() => {
                 const source = data && Array.isArray(data.instructors)
                     ? data.instructors
                     : [tutor1Name, tutor2Name];
-                const detectedNames = [...new Set(source
+                return [...new Set(source
                     .map(canonicalizeInstructorName)
-                    .filter(name => name && normalizeName(name) !== normalizeName("Não Identificado")))];
-                return filterInstructorNamesForCurrentUser(detectedNames);
+                    .filter(name => isValidInstructorName(name) && normalizeName(name) !== normalizeName("Não Identificado")))];
             }, [data, tutor1Name, tutor2Name]);
+            const activeInstructorNames = useMemo(() => currentAnalystName ? [] : filterInstructorNamesForCurrentUser(detectedInstructorNames), [detectedInstructorNames, currentAnalystName]);
+            const notebookInstructorNames = useMemo(() => currentAnalystName ? detectedInstructorNames : activeInstructorNames, [currentAnalystName, detectedInstructorNames, activeInstructorNames]);
 
             const captureDashboardHistory = async (dataSnapshot, activitySnapshot, justificationsSnapshot, trigger, notesSnapshot = classNotebookNotes) => {
                 const snapshot = buildDashboardHistorySnapshot({ data: dataSnapshot, activityTracking: activitySnapshot, naJustifications: justificationsSnapshot || {}, notebookNotes: notesSnapshot || [], trigger });
@@ -3704,6 +4210,15 @@
                 }).catch(error => console.error("Erro ao carregar histórico da turma", error));
                 return () => { isCurrent = false; };
             }, [data ? data.turma : ""]);
+
+            const refreshVisibleAnalystNotes = async () => {
+                if (!data || !data.turma || activeInstructorNames.length === 0) { setVisibleAnalystNotes([]); return; }
+                setVisibleAnalystNotes(await loadVisibleAnalystNotes(data.turma, activeInstructorNames));
+            };
+
+            useEffect(() => {
+                refreshVisibleAnalystNotes().catch(error => console.error("Erro ao carregar acompanhamentos visíveis", error));
+            }, [data ? data.turma : "", activeInstructorNames.join("|")]);
 
             useEffect(() => {
                 if (!data || !data.turma) {
@@ -3761,7 +4276,7 @@
             // Carrega notas locais ou do Firestore e inclui também registros feitos para a turma inteira.
             useEffect(() => {
                 if (selectedStudentForModal && data) {
-                    const instructors = activeInstructorNames;
+                    const instructors = notebookInstructorNames;
                     let isCurrent = true;
                     Promise.all(instructors.map(async instName => {
                         const loaded = await loadNotebookNotes(data.turma, instName);
@@ -3777,14 +4292,14 @@
                 } else {
                     setInstructorNotesForStudent([]);
                 }
-            }, [selectedStudentForModal, data, activeInstructorNames]);
+            }, [selectedStudentForModal, data, notebookInstructorNames]);
 
             const refreshClassNotebookNotes = () => {
-                if (!data || activeInstructorNames.length === 0) {
+                if (!data || notebookInstructorNames.length === 0) {
                     setClassNotebookNotes([]);
                     return;
                 }
-                Promise.all(activeInstructorNames.map(async instructorName => {
+                Promise.all(notebookInstructorNames.map(async instructorName => {
                     const loaded = await loadNotebookNotes(data.turma, instructorName);
                     return loaded.notes.map(note => ({ ...note, instructorSource: note.instructorName || instructorName }));
                 })).then(groups => {
@@ -3807,7 +4322,7 @@
 
             useEffect(() => {
                 refreshClassNotebookNotes();
-            }, [data ? data.turma : "", activeInstructorNames.join("|")]);
+            }, [data ? data.turma : "", notebookInstructorNames.join("|")]);
 
 
             useEffect(() => {
@@ -3900,22 +4415,22 @@
                     setContactSaving(false);
                 }
             };
-            const handleActivityFile = async (file) => {
-                if (!file || !data) return;
+            const handleActivityFiles = async (files) => {
+                const selectedFiles = Array.from(files || []).filter(Boolean);
+                if (selectedFiles.length === 0 || !data) return;
                 const uploadSequence = ++activityUploadSequence.current;
-                setActivityTracking(null);
                 try {
-                    const buffer = await file.arrayBuffer();
-                    const tracking = processActivityWorkbook(buffer, data.students, file.name);
+                    const trackings = await Promise.all(selectedFiles.map(async file => processActivityWorkbook(await file.arrayBuffer(), data.students, file.name)));
                     if (uploadSequence !== activityUploadSequence.current) return;
-                    const hasMatchedStudents = tracking && Object.keys(tracking.students || {}).length > 0;
-                    if (!tracking || tracking.sheets.length === 0 || !hasMatchedStudents) {
-                        setActivityTracking(null);
+                    const validTrackings = trackings.filter(tracking => tracking && tracking.sheets.length > 0 && Object.keys(tracking.students || {}).length > 0);
+                    if (validTrackings.length === 0) {
                         alert("Não foi encontrada uma estrutura de atividades com nomes de alunos e colunas de acompanhamento.");
                         return;
                     }
+                    const tracking = mergeActivityTrackings(activityTracking, validTrackings);
                     setActivityTracking(tracking);
-                    captureDashboardHistory(data, tracking, naJustifications, "atividades").catch(error => console.error("Erro ao registrar histórico das atividades", error));
+                    captureDashboardHistory(data, tracking, naJustifications, `atividades (${validTrackings.length} arquivo(s))`).catch(error => console.error("Erro ao registrar histórico das atividades", error));
+                    if (validTrackings.length !== selectedFiles.length) alert(`${validTrackings.length} de ${selectedFiles.length} planilha(s) foram lidas. Os arquivos sem estrutura reconhecida foram ignorados.`);
                 } catch (e) { alert("Erro ao ler o acompanhamento de atividades: " + e.message); }
             };
             const toggleNAJustification = async (entry) => {
@@ -4024,7 +4539,7 @@
             const filteredStudents = useMemo(() => {
                 if (!data) return [];
                 return data.students.filter(s => {
-                    const matchesSearch = s.name.toLowerCase().includes(searchTerm.toLowerCase());
+                    const matchesSearch = normalizeText(`${s.name} ${s.orionCode || ""}`).includes(normalizeText(searchTerm));
                     if (!matchesSearch) return false;
                     const scopeStatus = getStudentScopeStatus(s, selectedUC);
                     if (filter === 'developed') return scopeStatus === 'developed';
@@ -4096,12 +4611,15 @@
                             instructorName={selectedInstructorForNotes} 
                             turma={data.turma} 
                             students={data.students}
+                            analystNotes={visibleAnalystNotes.filter(note => normalizeName(note.instructorName) === normalizeName(selectedInstructorForNotes))}
                             onNotesChanged={refreshClassNotebookNotes}
                             onClose={() => setSelectedInstructorForNotes(null)} 
                         />
                     )}
 
-                    {showNotebookReport && <NotebookNotesReport turma={data.turma} instructors={activeInstructorNames} onClose={() => setShowNotebookReport(false)} />}
+                    {showAnalystNotebook && currentAnalystName && <AnalystNotebookEnhanced analystName={currentAnalystName} turma={data.turma} instructors={detectedInstructorNames} onChanged={refreshVisibleAnalystNotes} onClose={() => setShowAnalystNotebook(false)} />}
+
+                    {showNotebookReport && <NotebookNotesReport turma={data.turma} instructors={notebookInstructorNames} onClose={() => setShowNotebookReport(false)} />}
                     {showUCIntervalReport && <UCIntervalReportModal data={data} activityTracking={activityTracking} naJustifications={naJustifications} notebookNotes={classNotebookNotes} onClose={() => setShowUCIntervalReport(false)} />}
                     {showDashboardHistory && <DashboardHistoryModal data={data} history={dashboardHistory} onClose={() => setShowDashboardHistory(false)} />}
                     {showStudentReportModal && selectedStudentForModal && <StudentReportOptionsModal data={data} student={selectedStudentForModal} mode={studentReportMode} activityTracking={activityTracking} naJustifications={naJustifications} notebookNotes={instructorNotesForStudent} onClose={() => setShowStudentReportModal(false)} />}
@@ -4151,11 +4669,11 @@
                         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in" onClick={(e) => {if(e.target===e.currentTarget) setSelectedStudentForModal(null)}}>
                             <div className="bg-white w-full max-w-3xl rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
                                 <div className="bg-senac-blue p-6 text-white flex justify-between items-start shrink-0">
-                                    <div><h2 className="text-2xl font-bold leading-tight">{selectedStudentForModal.name}</h2><div className="flex items-center gap-3 mt-2 text-blue-100 text-sm"><span className="bg-white/20 px-2 py-0.5 rounded flex items-center gap-1"><IconCalendar className="w-3 h-3"/> {selectedStudentForModal.contra_turno_desc}</span><span className="bg-white/20 px-2 py-0.5 rounded font-bold">{selectedStudentForModal.averageFreq}% Freq.</span></div></div>
+                                    <div><h2 className="text-2xl font-bold leading-tight">{selectedStudentForModal.name}</h2><div className="flex flex-wrap items-center gap-3 mt-2 text-blue-100 text-sm"><span className="bg-white/20 px-2 py-0.5 rounded flex items-center gap-1"><IconCalendar className="w-3 h-3"/> {selectedStudentForModal.contra_turno_desc}</span><span className="bg-white/20 px-2 py-0.5 rounded font-bold">{selectedStudentForModal.averageFreq}% Freq.</span>{selectedStudentForModal.orionCode && <span className="bg-white/20 px-2 py-0.5 rounded font-bold">Órion: {selectedStudentForModal.orionCode}</span>}</div></div>
                                     <button onClick={() => setSelectedStudentForModal(null)} className="p-1 hover:bg-white/20 rounded-full"><IconXCircle className="w-8 h-8"/></button>
                                 </div>
                                 <div className="p-8 overflow-y-auto">
-                                    <div className="mb-5 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2"><span className="text-xs text-blue-800">Relatórios individuais por situação.</span><div className="flex flex-wrap gap-2"><button type="button" onClick={() => { setStudentReportMode("complete"); setShowStudentReportModal(true); }} className="px-3 py-2 rounded-md bg-senac-blue text-white text-xs font-bold hover:bg-blue-800 flex items-center gap-2"><IconFileText className="w-4 h-4" /> Emitir relatório</button><button type="button" disabled={!activityTracking} onClick={() => { setStudentReportMode("activities"); setShowStudentReportModal(true); }} title={activityTracking ? "Emitir relatório do upload atual de atividades" : "Carregue uma planilha em Ler atividades primeiro"} className="px-3 py-2 rounded-md bg-senac-orange text-white text-xs font-bold hover:bg-orange-600 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"><IconBarChart2 className="w-4 h-4" /> Relatório de atividades</button></div></div>
+                                    <div className="mb-5 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2"><span className="text-xs text-blue-800">Escolha em um só lugar quais informações incluir.</span><button type="button" onClick={() => { setStudentReportMode("complete"); setShowStudentReportModal(true); }} className="px-3 py-2 rounded-md bg-senac-blue text-white text-xs font-bold hover:bg-blue-800 flex items-center gap-2"><IconFileText className="w-4 h-4" /> Emitir relatório</button></div>
                                     <div className="mb-6 flex justify-between items-center"><h3 className="text-sm font-bold text-gray-400 uppercase tracking-wider">Situação Atual</h3><label className="flex items-center gap-2 text-xs bg-purple-50 px-2 py-1 rounded border border-purple-200 cursor-pointer hover:bg-purple-100"><input type="checkbox" checked={selectedStudentForModal.is_process_dropout} onChange={() => toggleProcessDropout(selectedStudentForModal.id)} className="rounded text-purple-600 focus:ring-purple-500" /> Marcar como "Em Processo de Desligamento"</label></div>
                                     <div className="flex gap-2 mb-6">{selectedStudentForModal.is_dropout ? (<div className="bg-orange-100 text-orange-800 px-4 py-2 rounded-lg font-bold flex items-center gap-2"><IconLogOut className="w-5 h-5"/> {selectedStudentForModal.dropout_reason || "Evadido"}</div>) : selectedStudentForModal.is_process_dropout ? (<div className="bg-purple-100 text-purple-800 px-4 py-2 rounded-lg font-bold flex items-center gap-2"><IconClock className="w-5 h-5"/> Em Processo de Desligamento</div>) : (<>{selectedStudentForModal.needs_recuperacao && <div className="bg-red-100 text-red-800 px-4 py-2 rounded-lg font-bold flex items-center gap-2"><IconXCircle className="w-5 h-5"/> Recuperação Necessária</div>}{selectedStudentForModal.needs_conselho && !selectedStudentForModal.needs_recuperacao && <div className="bg-yellow-100 text-yellow-800 px-4 py-2 rounded-lg font-bold flex items-center gap-2"><IconAlertTriangle className="w-5 h-5"/> Conselho de Classe</div>}{!selectedStudentForModal.needs_recuperacao && !selectedStudentForModal.needs_conselho && <div className="bg-green-100 text-green-800 px-4 py-2 rounded-lg font-bold flex items-center gap-2"><IconCheckCircle className="w-5 h-5"/> Desenvolvimento Pleno na Aba Pedagógico</div>}</>)}</div>
 
@@ -4166,10 +4684,10 @@
                                         </div>
                                         <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-3">
                                             <label className="text-xs font-bold text-gray-600">Nome do aluno<input type="text" value={contactDraft.studentContactName} onChange={event => setContactDraft(previous => ({ ...previous, studentContactName: event.target.value }))} className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm font-normal outline-none focus:border-blue-500" /></label>
-                                            <label className="text-xs font-bold text-gray-600">Telefone do aluno<input type="text" value={contactDraft.studentPhone} onChange={event => setContactDraft(previous => ({ ...previous, studentPhone: event.target.value }))} className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm font-normal outline-none focus:border-blue-500" /></label>
+                                            <div className="text-xs font-bold text-gray-600">Telefone do aluno<div className="mt-1 flex gap-2"><input type="text" value={contactDraft.studentPhone} onChange={event => setContactDraft(previous => ({ ...previous, studentPhone: event.target.value }))} className="min-w-0 flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm font-normal outline-none focus:border-blue-500" />{getWhatsAppUrl(contactDraft.studentPhone) && <a href={getWhatsAppUrl(contactDraft.studentPhone)} target="_blank" rel="noopener noreferrer" title="Abrir conversa no WhatsApp" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-green-600 text-white hover:bg-green-700"><IconPhone className="h-4 w-4" /></a>}</div></div>
                                             <label className="text-xs font-bold text-gray-600">E-mail do aluno<input type="text" value={contactDraft.studentEmail} onChange={event => setContactDraft(previous => ({ ...previous, studentEmail: event.target.value }))} className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm font-normal outline-none focus:border-blue-500" /></label>
                                             <label className="text-xs font-bold text-gray-600">Nome do supervisor<input type="text" value={contactDraft.supervisorName} onChange={event => setContactDraft(previous => ({ ...previous, supervisorName: event.target.value }))} className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm font-normal outline-none focus:border-blue-500" /></label>
-                                            <label className="text-xs font-bold text-gray-600">Telefone do supervisor<input type="text" value={contactDraft.supervisorPhone} onChange={event => setContactDraft(previous => ({ ...previous, supervisorPhone: event.target.value }))} className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm font-normal outline-none focus:border-blue-500" /></label>
+                                            <div className="text-xs font-bold text-gray-600">Telefone do supervisor<div className="mt-1 flex gap-2"><input type="text" value={contactDraft.supervisorPhone} onChange={event => setContactDraft(previous => ({ ...previous, supervisorPhone: event.target.value }))} className="min-w-0 flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm font-normal outline-none focus:border-blue-500" />{getWhatsAppUrl(contactDraft.supervisorPhone) && <a href={getWhatsAppUrl(contactDraft.supervisorPhone)} target="_blank" rel="noopener noreferrer" title="Abrir conversa no WhatsApp" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-green-600 text-white hover:bg-green-700"><IconPhone className="h-4 w-4" /></a>}</div></div>
                                             <label className="text-xs font-bold text-gray-600">E-mail do supervisor<input type="text" value={contactDraft.supervisorEmail} onChange={event => setContactDraft(previous => ({ ...previous, supervisorEmail: event.target.value }))} className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm font-normal outline-none focus:border-blue-500" /></label>
                                         </div>
                                         <div className="px-4 pb-4 flex flex-wrap items-center justify-between gap-3"><span className="text-xs text-gray-500">Os dados podem ser corrigidos e ficam disponíveis para os usuários autorizados.</span><div className="flex items-center gap-3"><span className="text-xs text-green-700">{contactMessage}</span><button onClick={saveStudentContact} disabled={contactSaving} className="px-4 py-2 rounded-md bg-senac-blue hover:bg-blue-800 disabled:opacity-60 text-white text-xs font-bold">{contactSaving ? "Salvando..." : "Salvar dados"}</button></div></div>
@@ -4297,7 +4815,7 @@
                             <div className="flex min-w-0 items-start gap-3 xl:w-[390px] xl:shrink-0"><img src="https://upload.wikimedia.org/wikipedia/commons/thumb/8/86/Senac_logo.svg/500px-Senac_logo.svg.png" className="h-12 w-auto shrink-0 object-contain" /><div className="min-w-0 flex-1"><h1 className="text-lg md:text-xl font-bold text-senac-blue leading-tight">Gestão de Frequência - Relatório e ATA</h1><div className="mt-1 max-w-full break-words text-xs font-bold text-senac-orange uppercase leading-tight">{data.course}</div><div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs"><span className="font-medium text-gray-500">Turma: {data.turma}</span><button onClick={() => { setData(null); setActivityTracking(null); }} className="inline-flex shrink-0 items-center gap-1 rounded-full bg-blue-50 px-2 py-1 text-senac-blue transition-colors hover:underline"><IconRefreshCw className="w-3 h-3" /> Trocar</button><span className="text-gray-300">|</span><span className="max-w-full break-all text-gray-500">Usuário: {getCurrentAuthenticatedEmail() || "Acesso Livre"}</span><button onClick={() => {if(confirm("Reiniciar sistema?")) window.location.reload()}} className="inline-flex shrink-0 items-center gap-1 rounded-md border border-red-200 bg-red-50 px-2 py-1 font-semibold text-red-600 hover:bg-red-100"><IconLogOut className="w-3 h-3"/> Sair</button></div></div></div>
                             <div className="w-full min-w-0 flex-1 flex flex-wrap items-stretch justify-start gap-2 xl:justify-end">
                                 <label className="cursor-pointer bg-white border border-senac-blue text-senac-blue hover:bg-blue-50 px-4 py-2 rounded-lg flex items-center gap-2 shadow transition-all active:scale-95 text-sm font-medium min-h-[54px] min-w-[116px] max-w-[160px] justify-center whitespace-normal text-center leading-tight" title="Ler a aba DADOS GERAIS"><IconUploadCloud className="w-4 h-4" /> Dados Gerais <input type="file" className="hidden" accept=".xlsx,.xlsm,.xls" onChange={(e) => { handleGeneralDataFile(e.target.files[0]); e.target.value = ''; }} /></label>
-                                <label className="cursor-pointer bg-white border border-senac-orange text-senac-orange hover:bg-orange-50 px-4 py-2 rounded-lg flex items-center gap-2 shadow transition-all active:scale-95 text-sm font-medium min-h-[54px] min-w-[116px] max-w-[160px] justify-center whitespace-normal text-center leading-tight" title="Ler planilha de atividades"><IconUploadCloud className="w-4 h-4" /> Ler atividades <input type="file" className="hidden" accept=".xlsx,.xlsm,.xls" onChange={(e) => { handleActivityFile(e.target.files[0]); e.target.value = ''; }} /></label>
+                                <label className="cursor-pointer bg-white border border-senac-orange text-senac-orange hover:bg-orange-50 px-4 py-2 rounded-lg flex items-center gap-2 shadow transition-all active:scale-95 text-sm font-medium min-h-[54px] min-w-[116px] max-w-[160px] justify-center whitespace-normal text-center leading-tight" title="Ler uma ou várias planilhas de atividades por UC"><IconUploadCloud className="w-4 h-4" /> Ler atividades{activityTracking && activityTracking.uploads ? ` (${activityTracking.uploads.length})` : ""} <input type="file" multiple className="hidden" accept=".xlsx,.xlsm,.xls" onChange={(e) => { handleActivityFiles(e.target.files); e.target.value = ''; }} /></label>
                                 <button onClick={() => setShowNotebookReport(true)} className="bg-white border border-senac-orange text-senac-orange hover:bg-orange-50 px-4 py-2 rounded-lg flex items-center gap-2 shadow transition-all active:scale-95 text-sm font-medium min-h-[54px] min-w-[116px] max-w-[160px] justify-center whitespace-normal text-center leading-tight"><IconBookOpen className="w-4 h-4" /> Relatório de Anotações</button>
                                 <button onClick={() => setShowUCIntervalReport(true)} className="bg-white border border-senac-blue text-senac-blue hover:bg-blue-50 px-4 py-2 rounded-lg flex items-center gap-2 shadow transition-all active:scale-95 text-sm font-medium min-h-[54px] min-w-[116px] max-w-[160px] justify-center whitespace-normal text-center leading-tight"><IconFileText className="w-4 h-4" /> Relatório por UCs</button>
                                 <button onClick={() => setShowDashboardHistory(true)} className="bg-white border border-senac-blue text-senac-blue hover:bg-blue-50 px-4 py-2 rounded-lg flex items-center gap-2 shadow transition-all active:scale-95 text-sm font-medium min-h-[54px] min-w-[116px] max-w-[160px] justify-center whitespace-normal text-center leading-tight" title={`Histórico ${historyStorageSource === "cloud" ? "compartilhado" : "local"}`}><IconBarChart2 className="w-4 h-4" /> Histórico</button>
@@ -4307,18 +4825,17 @@
                         </div>
                         <div className="bg-white border-t border-gray-100">
                             <div className="max-w-7xl mx-auto px-4 py-2 flex flex-wrap items-center gap-x-5 gap-y-1 text-xs text-gray-600">
-                                <span className="flex items-center gap-2 font-bold whitespace-nowrap text-senac-orange"><IconUser className="w-3.5 h-3.5" /> Instrutores (Clique para anotar):</span>
-                                {activeInstructorNames.map((instructorName, index) => <React.Fragment key={`${instructorName}-${index}`}>
-                                    {index > 0 && <span className="text-gray-300">|</span>}
-                                    <button
-                                        onClick={() => setSelectedInstructorForNotes(instructorName)}
-                                        className="whitespace-nowrap font-medium hover:bg-blue-50 px-2 py-0.5 rounded transition-colors text-blue-700 flex items-center gap-1"
-                                        title="Abrir Caderno do Instrutor"
-                                    >
-                                        {instructorName} <IconEdit3 className="w-3 h-3 opacity-50"/>
-                                    </button>
-                                </React.Fragment>)}
-                                {activeInstructorNames.length === 0 && <span className="text-gray-500 italic">Nenhum caderno associado ao e-mail autenticado.</span>}
+                                {currentAnalystName ? <>
+                                    <span className="flex items-center gap-2 font-bold whitespace-nowrap text-senac-orange"><IconUser className="w-3.5 h-3.5" /> Analista (clique para acompanhar):</span>
+                                    <button onClick={() => setShowAnalystNotebook(true)} className="flex items-center gap-1 rounded px-2 py-0.5 font-medium text-blue-700 transition-colors hover:bg-blue-50" title="Abrir Caderno do Analista">{currentAnalystName} <IconEdit3 className="h-3 w-3 opacity-50" /></button>
+                                </> : <>
+                                    <span className="flex items-center gap-2 font-bold whitespace-nowrap text-senac-orange"><IconUser className="w-3.5 h-3.5" /> Instrutores (clique para anotar):</span>
+                                    {activeInstructorNames.map((instructorName, index) => <React.Fragment key={`${instructorName}-${index}`}>
+                                        {index > 0 && <span className="text-gray-300">|</span>}
+                                        <button onClick={() => setSelectedInstructorForNotes(instructorName)} className="whitespace-nowrap font-medium hover:bg-blue-50 px-2 py-0.5 rounded transition-colors text-blue-700 flex items-center gap-1" title="Abrir Caderno do Instrutor">{instructorName} <IconEdit3 className="w-3 h-3 opacity-50"/></button>
+                                    </React.Fragment>)}
+                                    {activeInstructorNames.length === 0 && <span className="text-gray-500 italic">Nenhum caderno associado ao e-mail autenticado.</span>}
+                                </>}
                             </div>
                         </div>
                     </header>
@@ -4397,7 +4914,7 @@
                                 <button onClick={() => setFilter('process')} className={`px-4 py-2 rounded-lg text-xs font-bold whitespace-nowrap ${filter === 'process' ? 'bg-purple-600 text-white shadow-md' : 'text-purple-600 hover:bg-purple-50'}`}>Em Processo ({stats.process})</button>
                                 <button onClick={() => setFilter('dropout')} className={`px-4 py-2 rounded-lg text-xs font-bold whitespace-nowrap ${filter === 'dropout' ? 'bg-orange-500 text-white shadow-md' : 'text-orange-500 hover:bg-orange-50'}`}>Evasão ({stats.dropout})</button>
                             </div>
-                            <div className="relative w-full md:w-64 mr-2"><IconSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" /><input type="text" placeholder="Buscar aluno..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-2 rounded-lg bg-gray-50 border-none focus:ring-2 focus:ring-senac-blue text-sm transition-all" /></div>
+                            <div className="relative w-full md:w-72 mr-2"><IconSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" /><input type="text" placeholder="Buscar aluno ou código Órion..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-2 rounded-lg bg-gray-50 border-none focus:ring-2 focus:ring-senac-blue text-sm transition-all" /></div>
                         </div>
 
                         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
@@ -4442,7 +4959,7 @@
                                     <div key={student.id} className={`bg-white rounded-xl shadow-sm border ${borderColor} hover:shadow-md relative group ${isDropout ? 'bg-orange-50/30' : isProcess ? 'bg-purple-50/30' : ''}`}>
                                         <div className="absolute top-4 left-3 z-10" onClick={(e) => e.stopPropagation()}><input type="checkbox" checked={isSelected} onChange={() => toggleStudentSelection(student.id)} className="w-5 h-5 rounded border-gray-300 text-senac-blue focus:ring-senac-blue cursor-pointer" /></div>
                                         <div className="p-5 pl-10 cursor-pointer" onClick={() => setSelectedStudentForModal(student)}>
-                                            <div className="flex justify-between items-start mb-3 gap-2"><h3 className="font-bold text-gray-800 text-sm leading-snug">{student.name}</h3><div className="flex items-center gap-2">{studentNotebookNotes.length > 0 && (<div className="text-senac-orange" title={`Há ${studentNotebookNotes.length} anotação(ões) no caderno`}><IconBookOpen className="w-4 h-4" /></div>)}{(student.conselho_text || (student.comments || []).length > 0 || (student.all_observations || []).length > 0) && (<div className="text-senac-blue" title="Obs"><IconMessageSquare className="w-4 h-4" /></div>)}<div className="flex-shrink-0">{statusBadge}</div></div></div>
+                                            <div className="flex justify-between items-start mb-3 gap-2"><div><h3 className="font-bold text-gray-800 text-sm leading-snug">{student.name}</h3>{student.orionCode && <div className="mt-1 text-[10px] font-bold text-senac-blue">Órion: {student.orionCode}</div>}</div><div className="flex items-center gap-2">{studentNotebookNotes.length > 0 && (<div className="text-senac-orange" title={`Há ${studentNotebookNotes.length} anotação(ões) no caderno`}><IconBookOpen className="w-4 h-4" /></div>)}{(student.conselho_text || (student.comments || []).length > 0 || (student.all_observations || []).length > 0) && (<div className="text-senac-blue" title="Obs"><IconMessageSquare className="w-4 h-4" /></div>)}<div className="flex-shrink-0">{statusBadge}</div></div></div>
                                             <div className="flex justify-between items-end mb-1"><span className="text-xs text-gray-400 font-medium uppercase tracking-wider">{selectedUC === 'all' ? 'Frequência Global' : `Frequência ${selectedUC}`}</span><span className={`text-lg font-bold ${displayFreq !== "N/A" && parseFloat(displayFreq) < 75 ? 'text-yellow-600' : 'text-gray-700'}`}>{displayFreq}%</span></div>
                                             <ProgressBar value={displayFreq === "N/A" ? 0 : displayFreq} />
                                             {activitySummary && activitySummary.total > 0 && (
@@ -4465,7 +4982,7 @@
                                             )}
                                             {studentNotebookNotes.length > 0 && <div className="mt-2 pt-2 border-t border-orange-100 flex items-center justify-between gap-2 text-[10px] font-bold"><span className="bg-orange-100 text-orange-700 px-2 py-1 rounded">Caderno: {studentNotebookNotes.length} registro(s)</span><span className="text-orange-700">Abrir quadro</span></div>}
                                             <div className="flex items-center gap-2 text-[11px] text-gray-500 mt-3 pt-2 border-t border-gray-50"><IconCalendar className="w-3 h-3 text-gray-400" /><span>Contra Turno: <span className={`font-semibold ${student.contra_turno_desc !== "Sem Contra Turno" ? 'text-senac-blue' : 'text-gray-400'}`}>{student.contra_turno_desc}</span></span></div>
-                                            {(student.studentEmail || student.studentPhone || student.supervisorEmail || student.supervisorPhone) && <div className="mt-2 pt-2 border-t border-blue-50 text-[10px] text-gray-500 space-y-0.5"><div className="flex items-center gap-1"><IconMail className="w-3 h-3 text-senac-blue"/><span className="truncate">Aluno: {student.studentEmail || student.studentPhone || 'Contato não informado'}</span></div><div className="flex items-center gap-1"><IconUser className="w-3 h-3 text-senac-orange"/><span className="truncate">Supervisor: {student.supervisorName || student.supervisorEmail || student.supervisorPhone || 'Contato não informado'}</span></div></div>}
+                                            {(student.studentEmail || student.studentPhone || student.supervisorEmail || student.supervisorPhone) && <div className="mt-2 pt-2 border-t border-blue-50 text-[10px] text-gray-500 space-y-1"><div className="flex items-center gap-1"><IconMail className="w-3 h-3 text-senac-blue"/><span className="min-w-0 flex-1 truncate">Aluno: {student.studentEmail || student.studentPhone || 'Contato não informado'}</span>{getWhatsAppUrl(student.studentPhone) && <a href={getWhatsAppUrl(student.studentPhone)} target="_blank" rel="noopener noreferrer" onClick={event => event.stopPropagation()} title="WhatsApp do aluno" className="rounded bg-green-600 p-1 text-white"><IconPhone className="h-3 w-3" /></a>}</div><div className="flex items-center gap-1"><IconUser className="w-3 h-3 text-senac-orange"/><span className="min-w-0 flex-1 truncate">Supervisor: {student.supervisorName || student.supervisorEmail || student.supervisorPhone || 'Contato não informado'}</span>{getWhatsAppUrl(student.supervisorPhone) && <a href={getWhatsAppUrl(student.supervisorPhone)} target="_blank" rel="noopener noreferrer" onClick={event => event.stopPropagation()} title="WhatsApp do supervisor" className="rounded bg-green-600 p-1 text-white"><IconPhone className="h-3 w-3" /></a>}</div></div>}
                                         </div>
                                     </div>
                                 );
