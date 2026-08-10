@@ -2409,7 +2409,22 @@
             return null;
         };
 
-        const formatShortDate = (date) => date.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+        const toDashboardDate = (value) => {
+            if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
+            if (value && typeof value.toDate === "function") {
+                const converted = value.toDate();
+                return converted instanceof Date && !Number.isNaN(converted.getTime()) ? converted : null;
+            }
+            if (typeof value !== "string" && typeof value !== "number") return null;
+            const converted = new Date(value);
+            return Number.isNaN(converted.getTime()) ? null : converted;
+        };
+
+        const formatShortDate = (value) => {
+            const date = toDashboardDate(value);
+            if (!date) return String(value || "--/--");
+            return date.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', timeZone: 'America/Sao_Paulo' });
+        };
 
         const formatAttendanceWarning = (item) => {
             const status = item.type === "nao_realizada" ? "chamada não realizada" : "chamada incompleta";
@@ -3135,6 +3150,213 @@
             if (firstPhone.length < 10) return "";
             const number = firstPhone.startsWith("55") ? firstPhone : `55${firstPhone}`;
             return `https://wa.me/${number}`;
+        };
+
+        const SAVED_CLASSES_INDEX_KEY = "saved_classes_v1_index";
+        const SAVED_CLASS_DATA_PREFIX = "saved_class_v1_";
+        const getSavedClassKey = (turma) => cleanNotebookKey(turma, "TURMA_DESCONHECIDA");
+        const cleanForStorage = (value) => JSON.parse(JSON.stringify(value, (key, item) => item === undefined ? null : item));
+        const savedArray = (value) => Array.isArray(value) ? value : [];
+        const savedRecord = (value) => value && typeof value === "object" && !Array.isArray(value) ? value : {};
+
+        const normalizeSavedStudent = (student, index) => {
+            const source = savedRecord(student);
+            const ucScores = Object.fromEntries(Object.entries(savedRecord(source.uc_scores)).filter(([, value]) => value && typeof value === "object" && !Array.isArray(value)));
+            return {
+                ...source,
+                id: source.id === null || source.id === undefined || source.id === "" ? index + 1 : source.id,
+                name: String(source.name || `Aluno ${index + 1}`),
+                status: String(source.status || "Não informado"),
+                averageFreq: source.averageFreq === null || source.averageFreq === undefined ? 0 : source.averageFreq,
+                contra_turno_desc: String(source.contra_turno_desc || "Sem Contra Turno"),
+                comments: savedArray(source.comments),
+                all_observations: savedArray(source.all_observations),
+                low_freq_ucs: savedArray(source.low_freq_ucs),
+                failed_perf_ucs: savedArray(source.failed_perf_ucs),
+                uc_scores: ucScores,
+                is_dropout: Boolean(source.is_dropout),
+                is_process_dropout: Boolean(source.is_process_dropout),
+                needs_recuperacao: Boolean(source.needs_recuperacao),
+                needs_conselho: Boolean(source.needs_conselho)
+            };
+        };
+
+        const normalizeSavedClassData = (storedData) => {
+            const source = savedRecord(storedData);
+            const rawNAStudents = savedRecord(savedRecord(source.naAlerts).students);
+            const naStudents = Object.fromEntries(Object.entries(rawNAStudents).map(([key, alert]) => {
+                const normalizedAlert = savedRecord(alert);
+                return [key, {
+                    ...normalizedAlert,
+                    name: String(normalizedAlert.name || "Aluno"),
+                    entries: savedArray(normalizedAlert.entries)
+                }];
+            }));
+            const attendanceWarnings = savedArray(source.attendanceWarnings).map(item => {
+                const warning = savedRecord(item);
+                return {
+                    ...warning,
+                    date: toDashboardDate(warning.date) || warning.date || null,
+                    pendingStudents: savedArray(warning.pendingStudents)
+                };
+            });
+            return {
+                ...source,
+                course: String(source.course || "Curso não identificado"),
+                turma: String(source.turma || "Turma não identificada"),
+                tutor1: String(source.tutor1 || "Não Identificado"),
+                tutor2: String(source.tutor2 || "Não Identificado"),
+                instructors: savedArray(source.instructors).map(String),
+                ucs: savedArray(source.ucs).map(String),
+                courseDates: savedArray(source.courseDates).map(toDashboardDate).filter(Boolean),
+                attendanceWarnings,
+                naAlerts: { students: naStudents, totalStudents: Object.keys(naStudents).length },
+                students: savedArray(source.students).map(normalizeSavedStudent)
+            };
+        };
+
+        const makeSavedClassSummary = (data, source = {}) => ({
+            turmaKey: getSavedClassKey(data.turma),
+            turma: String(data.turma || "Turma não identificada"),
+            course: String(data.course || "Curso não identificado"),
+            tutor1: String(data.tutor1 || "Não Identificado"),
+            tutor2: String(data.tutor2 || "Não Identificado"),
+            instructors: Array.isArray(data.instructors) ? data.instructors.map(String) : [],
+            ucs: Array.isArray(data.ucs) ? data.ucs.map(String) : [],
+            studentCount: Array.isArray(data.students) ? data.students.length : 0,
+            updatedAt: new Date().toISOString(),
+            updatedBy: getCurrentAuthenticatedEmail(),
+            sourceFileName: String(source.name || ""),
+            sourceLastModified: Number(source.lastModified || 0)
+        });
+
+        const readSavedClassesLocal = () => {
+            try {
+                const parsed = JSON.parse(localStorage.getItem(SAVED_CLASSES_INDEX_KEY) || "[]");
+                return Array.isArray(parsed) ? parsed : [];
+            } catch (error) { return []; }
+        };
+
+        const writeSavedClassLocal = (summary, data) => {
+            try {
+                const index = [summary, ...readSavedClassesLocal().filter(item => item.turmaKey !== summary.turmaKey)]
+                    .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt))).slice(0, 20);
+                localStorage.setItem(SAVED_CLASSES_INDEX_KEY, JSON.stringify(index));
+                localStorage.setItem(`${SAVED_CLASS_DATA_PREFIX}${summary.turmaKey}`, JSON.stringify(cleanForStorage(data)));
+            } catch (error) {
+                console.warn("Não foi possível manter a cópia completa da turma neste dispositivo", error);
+            }
+        };
+
+        const canAccessSavedClass = (summary) => {
+            const email = getCurrentAuthenticatedEmail();
+            if (!email || getCurrentAnalystName()) return true;
+            if (String(summary.updatedBy || "").toLowerCase() === email) return true;
+            return (summary.instructors || []).some(name => instructorNameMatchesAccount(name, email));
+        };
+
+        const loadSavedClasses = async () => {
+            const local = readSavedClassesLocal().filter(canAccessSavedClass);
+            const db = await getNotebookFirestore();
+            if (!db) return { classes: local, source: "local" };
+            try {
+                const snapshot = await db.collection("saved_classes").get();
+                const merged = new Map(local.map(item => [item.turmaKey, item]));
+                snapshot.docs.map(doc => ({ turmaKey: doc.id, ...doc.data() })).filter(canAccessSavedClass).forEach(item => merged.set(item.turmaKey, item));
+                return { classes: Array.from(merged.values()).sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt))), source: "cloud" };
+            } catch (error) {
+                console.error("Erro ao carregar turmas salvas", error);
+                return { classes: local, source: "local" };
+            }
+        };
+
+        const persistSavedClass = async (data, source = {}) => {
+            if (!data || !data.turma || !Array.isArray(data.students)) return { source: "local", summary: null };
+            const summary = makeSavedClassSummary(data, source);
+            writeSavedClassLocal(summary, data);
+            const db = await getNotebookFirestore();
+            if (!db) return { source: "local", summary };
+            try {
+                const existing = await db.collection("saved_class_students").where("turmaKey", "==", summary.turmaKey).get();
+                const nextIds = new Set(data.students.map(student => `${summary.turmaKey}_${cleanNotebookKey(student.name, String(student.id || "ALUNO"))}`));
+                const operations = [];
+                operations.push({ type: "set", ref: db.collection("saved_classes").doc(summary.turmaKey), data: cleanForStorage({
+                    ...summary,
+                    courseDates: (data.courseDates || []).map(value => value instanceof Date ? value.toISOString() : String(value || "")),
+                    attendanceWarnings: data.attendanceWarnings || []
+                }) });
+                existing.docs.forEach(doc => { if (!nextIds.has(doc.id)) operations.push({ type: "delete", ref: doc.ref }); });
+                data.students.forEach(student => {
+                    const id = `${summary.turmaKey}_${cleanNotebookKey(student.name, String(student.id || "ALUNO"))}`;
+                    const naAlert = data.naAlerts && data.naAlerts.students ? data.naAlerts.students[normalizeName(student.name)] || null : null;
+                    operations.push({ type: "set", ref: db.collection("saved_class_students").doc(id), data: cleanForStorage({ turmaKey: summary.turmaKey, studentKey: normalizeName(student.name), updatedBy: summary.updatedBy, data: student, naAlert }) });
+                });
+                for (let start = 0; start < operations.length; start += 450) {
+                    const batch = db.batch();
+                    operations.slice(start, start + 450).forEach(operation => operation.type === "delete" ? batch.delete(operation.ref) : batch.set(operation.ref, operation.data, { merge: true }));
+                    await batch.commit();
+                }
+                return { source: "cloud", summary };
+            } catch (error) {
+                console.error("Erro ao salvar a turma no Firebase", error);
+                return { source: "local", summary };
+            }
+        };
+
+        const loadSavedClassData = async (summary) => {
+            const turmaKey = summary && summary.turmaKey;
+            if (!turmaKey) throw new Error("Turma inválida.");
+            const db = await getNotebookFirestore();
+            if (db) {
+                try {
+                    const [classDoc, studentSnapshot] = await Promise.all([
+                        db.collection("saved_classes").doc(turmaKey).get(),
+                        db.collection("saved_class_students").where("turmaKey", "==", turmaKey).get()
+                    ]);
+                    if (classDoc.exists && !studentSnapshot.empty) {
+                        const meta = classDoc.data();
+                        const students = studentSnapshot.docs.map(doc => doc.data()).filter(item => item && item.data).map(item => item.data)
+                            .sort((a, b) => Number(a.id || 0) - Number(b.id || 0) || String(a.name || "").localeCompare(String(b.name || ""), "pt-BR"));
+                        const naStudents = {};
+                        studentSnapshot.docs.map(doc => doc.data()).filter(item => item && item.naAlert).forEach(item => { naStudents[item.studentKey] = item.naAlert; });
+                        const data = normalizeSavedClassData({
+                            course: meta.course,
+                            turma: meta.turma,
+                            tutor1: meta.tutor1,
+                            tutor2: meta.tutor2,
+                            instructors: meta.instructors || [],
+                            ucs: meta.ucs || [],
+                            courseDates: (meta.courseDates || []).map(value => new Date(value)).filter(value => !Number.isNaN(value.getTime())),
+                            attendanceWarnings: meta.attendanceWarnings || [],
+                            naAlerts: { students: naStudents, totalStudents: Object.keys(naStudents).length },
+                            students
+                        });
+                        writeSavedClassLocal({ turmaKey, ...meta }, data);
+                        return { data, source: "cloud", updatedAt: meta.updatedAt || "" };
+                    }
+                } catch (error) {
+                    console.error("Erro ao abrir turma salva no Firebase", error);
+                }
+            }
+            try {
+                const local = JSON.parse(localStorage.getItem(`${SAVED_CLASS_DATA_PREFIX}${turmaKey}`) || "null");
+                if (local) return { data: normalizeSavedClassData(local), source: "local", updatedAt: summary.updatedAt || "" };
+            } catch (error) {}
+            throw new Error("Os dados desta turma não estão disponíveis neste dispositivo e não puderam ser carregados do Firebase.");
+        };
+
+        const isElectronDesktop = () => Boolean(window.senacDesktop && window.senacDesktop.isDesktop);
+        const getElectronSourcePath = (file) => {
+            if (!isElectronDesktop() || !file) return "";
+            try {
+                return window.senacDesktop.getPathForFile(file) || "";
+            } catch (error) { return ""; }
+        };
+        const getClassSourceStorageKey = (turma) => `class_source_v1_${getSavedClassKey(turma)}`;
+        const rememberElectronClassSource = (turma, file) => {
+            const sourcePath = getElectronSourcePath(file);
+            if (!sourcePath || !turma) return;
+            try { localStorage.setItem(getClassSourceStorageKey(turma), JSON.stringify({ path: sourcePath, lastModified: Number(file.lastModified || Date.now()), checkedAt: new Date().toISOString() })); } catch (error) {}
         };
 
         const parseGeneralDataContacts = (workbook) => {
@@ -4057,6 +4279,23 @@
             return domains.some(domain => email.endsWith(String(domain).toLowerCase()));
         };
 
+        class DashboardErrorBoundary extends React.Component {
+            constructor(props) {
+                super(props);
+                this.state = { hasError: false };
+            }
+            static getDerivedStateFromError() {
+                return { hasError: true };
+            }
+            componentDidCatch(error, info) {
+                console.error("Falha protegida na interface do dashboard", error, info);
+            }
+            render() {
+                if (!this.state.hasError) return this.props.children;
+                return <div className="min-h-screen bg-gray-100 p-6 flex items-center justify-center"><div className="w-full max-w-lg rounded-lg border border-red-200 bg-white p-6 text-center shadow-lg"><h1 className="text-xl font-bold text-senac-blue">Não foi possível exibir esta turma</h1><p className="mt-3 text-sm text-gray-600">Os dados permanecem salvos. Recarregue o sistema e tente abrir a turma novamente.</p><button type="button" onClick={() => window.location.reload()} className="mt-5 rounded-md bg-senac-blue px-5 py-2.5 text-sm font-bold text-white hover:bg-blue-800">Recarregar o sistema</button></div></div>;
+            }
+        }
+
         const AuthGate = () => {
             const auth = getFirebaseAuth();
             const [user, setUser] = useState(null);
@@ -4123,6 +4362,10 @@
             const activityUploadSequence = useRef(0);
             const [naJustifications, setNaJustifications] = useState({});
             const [naJustificationDrafts, setNaJustificationDrafts] = useState({});
+            const [savedClasses, setSavedClasses] = useState([]);
+            const [savedClassesLoading, setSavedClassesLoading] = useState(true);
+            const [classSyncMessage, setClassSyncMessage] = useState("");
+            const [activeClassUpdatedAt, setActiveClassUpdatedAt] = useState("");
             
             // --- MODAIS ---
             const [showAtaModal, setShowAtaModal] = useState(false);
@@ -4180,6 +4423,31 @@
             }, [data, tutor1Name, tutor2Name]);
             const activeInstructorNames = useMemo(() => currentAnalystName ? [] : filterInstructorNamesForCurrentUser(detectedInstructorNames), [detectedInstructorNames, currentAnalystName]);
             const notebookInstructorNames = useMemo(() => currentAnalystName ? detectedInstructorNames : activeInstructorNames, [currentAnalystName, detectedInstructorNames, activeInstructorNames]);
+
+            const refreshSavedClasses = async () => {
+                setSavedClassesLoading(true);
+                const loaded = await loadSavedClasses();
+                setSavedClasses(loaded.classes || []);
+                setSavedClassesLoading(false);
+            };
+
+            useEffect(() => { refreshSavedClasses().catch(error => { console.error(error); setSavedClassesLoading(false); }); }, []);
+
+            const openSavedClass = async (summary) => {
+                setClassSyncMessage("Abrindo turma salva...");
+                try {
+                    const loaded = await loadSavedClassData(summary);
+                    setData(loaded.data);
+                    setActivityTracking(null);
+                    setReportSelection([]);
+                    setSelectedUC("all");
+                    setActiveClassUpdatedAt(loaded.updatedAt || summary.updatedAt || "");
+                    setClassSyncMessage(loaded.source === "cloud" ? "Turma carregada do Firebase." : "Turma carregada deste dispositivo.");
+                } catch (error) {
+                    setClassSyncMessage("");
+                    alert(error.message);
+                }
+            };
 
             const captureDashboardHistory = async (dataSnapshot, activitySnapshot, justificationsSnapshot, trigger, notesSnapshot = classNotebookNotes) => {
                 const snapshot = buildDashboardHistorySnapshot({ data: dataSnapshot, activityTracking: activitySnapshot, naJustifications: justificationsSnapshot || {}, notebookNotes: notesSnapshot || [], trigger });
@@ -4340,6 +4608,25 @@
                 }
             }, [showAtaModal, analistaName, analistaCPF, analistaMatricula, analistaRubrica, tutor1Name, tutor1CPF, tutor1Matricula, tutor1Rubrica, tutor2Name, tutor2CPF, tutor2Matricula, tutor2Rubrica, customLogo, data]);
 
+            const applyProcessedFrequency = async (processed, source = {}, file = null, trigger = "frequência") => {
+                if (!processed) return;
+                setData(processed);
+                setActivityTracking(null);
+                setReportSelection([]);
+                setSelectedUC("all");
+                setClassSyncMessage("Salvando turma...");
+                captureDashboardHistory(processed, null, {}, trigger).catch(error => console.error("Erro ao registrar histórico da frequência", error));
+                seedImportedStudentContacts(processed.turma, processed.students).catch(error => console.error("Erro ao sincronizar contatos importados", error));
+                if (file) rememberElectronClassSource(processed.turma, file);
+                const saved = await persistSavedClass(processed, source);
+                setActiveClassUpdatedAt(saved.summary && saved.summary.updatedAt || new Date().toISOString());
+                setClassSyncMessage(saved.source === "cloud" ? `Turma ${processed.turma} salva e sincronizada.` : `Turma ${processed.turma} salva somente neste dispositivo.`);
+                await refreshSavedClasses();
+                if (processed.attendanceWarnings && processed.attendanceWarnings.length > 0 && trigger !== "atualização automática") {
+                    setTimeout(() => alert(summarizeAttendanceWarnings(processed.attendanceWarnings)), 100);
+                }
+            };
+
             const handleFile = async (file) => {
                 if (!file) return;
                 try {
@@ -4351,19 +4638,65 @@
                         return;
                     }
                     const processed = processExcelFile(buffer);
-                    if (processed) { 
-                        setData(processed); 
-                        setActivityTracking(null);
-                        setReportSelection([]); 
-                        setSelectedUC('all');
-                        captureDashboardHistory(processed, null, {}, "frequência").catch(error => console.error("Erro ao registrar histórico da frequência", error));
-                        seedImportedStudentContacts(processed.turma, processed.students).catch(error => console.error("Erro ao sincronizar contatos importados", error));
-                        if (processed.attendanceWarnings && processed.attendanceWarnings.length > 0) {
-                            setTimeout(() => alert(summarizeAttendanceWarnings(processed.attendanceWarnings)), 100);
-                        }
-                    }
+                    await applyProcessedFrequency(processed, { name: file.name, lastModified: file.lastModified }, file);
                 } catch (e) { alert("Erro: " + e.message); }
             };
+
+            useEffect(() => {
+                if (!data || !data.turma || !isElectronDesktop()) return undefined;
+                let stopped = false;
+                let checking = false;
+                const checkSource = async () => {
+                    if (checking || stopped) return;
+                    checking = true;
+                    try {
+                        const stored = JSON.parse(localStorage.getItem(getClassSourceStorageKey(data.turma)) || "null");
+                        if (!stored || !stored.path) return;
+                        const stat = await window.senacDesktop.stat(stored.path);
+                        if (Number(stat.mtimeMs || 0) <= Number(stored.lastModified || 0) + 500) {
+                            setClassSyncMessage(`Monitorando a chamada: ${window.senacDesktop.basename(stored.path)}`);
+                            return;
+                        }
+                        setClassSyncMessage("Alteração detectada. Atualizando a chamada...");
+                        const fileBuffer = await window.senacDesktop.readFile(stored.path);
+                        const arrayBuffer = fileBuffer.buffer.slice(fileBuffer.byteOffset, fileBuffer.byteOffset + fileBuffer.byteLength);
+                        const processed = processExcelFile(arrayBuffer);
+                        if (getSavedClassKey(processed.turma) !== getSavedClassKey(data.turma)) throw new Error("O arquivo monitorado passou a indicar outra turma.");
+                        localStorage.setItem(getClassSourceStorageKey(data.turma), JSON.stringify({ ...stored, lastModified: Number(stat.mtimeMs), checkedAt: new Date().toISOString() }));
+                        await applyProcessedFrequency(processed, { name: window.senacDesktop.basename(stored.path), lastModified: Number(stat.mtimeMs) }, null, "atualização automática");
+                    } catch (error) {
+                        console.error("Erro ao monitorar a chamada", error);
+                        setClassSyncMessage("Não foi possível acessar automaticamente a planilha original.");
+                    } finally {
+                        checking = false;
+                    }
+                };
+                checkSource();
+                const timer = setInterval(checkSource, 60000);
+                return () => { stopped = true; clearInterval(timer); };
+            }, [data ? data.turma : ""]);
+
+            useEffect(() => {
+                if (!data || !data.turma || isElectronDesktop()) return undefined;
+                let unsubscribe = null;
+                let stopped = false;
+                getNotebookFirestore().then(db => {
+                    if (!db || stopped) return;
+                    unsubscribe = db.collection("saved_classes").doc(getSavedClassKey(data.turma)).onSnapshot(async snapshot => {
+                        if (!snapshot.exists || stopped) return;
+                        const summary = { turmaKey: snapshot.id, ...snapshot.data() };
+                        if (!summary.updatedAt || summary.updatedAt === activeClassUpdatedAt) return;
+                        try {
+                            const loaded = await loadSavedClassData(summary);
+                            if (stopped) return;
+                            setData(loaded.data);
+                            setActiveClassUpdatedAt(summary.updatedAt);
+                            setClassSyncMessage("A chamada foi atualizada automaticamente pelo sincronizador.");
+                        } catch (error) { console.error("Erro ao receber atualização da turma", error); }
+                    });
+                });
+                return () => { stopped = true; if (typeof unsubscribe === "function") unsubscribe(); };
+            }, [data ? data.turma : "", activeClassUpdatedAt]);
 
             const handleGeneralDataFile = async (file, providedBuffer = null) => {
                 if (!file || !data) return;
@@ -4518,14 +4851,14 @@
             }, [data, selectedUC]);
 
             const toggleProcessDropout = (studentId) => {
-                const newData = { ...data };
-                const sIndex = newData.students.findIndex(s => s.id === studentId);
-                if (sIndex > -1) {
-                    const student = newData.students[sIndex];
+                const currentStudent = data.students.find(student => student.id === studentId);
+                if (currentStudent) {
+                    const student = { ...currentStudent };
                     const current = student.is_process_dropout;
                     const newValue = !current;
                     student.is_process_dropout = newValue;
                     if(newValue) { student.status = "Em Processo de Desligamento"; } else { if (student.needs_recuperacao) student.status = "Não Desenvolveu"; else if (student.needs_conselho) student.status = "Conselho de Classe"; else student.status = "Desenvolveu"; }
+                    const newData = { ...data, students: data.students.map(item => item.id === studentId ? student : item) };
                     setData(newData);
                     const currentManualList = getManualProcessList(data.turma);
                     const normalizedName = normalizeName(student.name);
@@ -4533,6 +4866,11 @@
                     if (newValue) { if(!currentManualList.includes(normalizedName)) newList = [...currentManualList, normalizedName]; else newList = currentManualList; } else { newList = currentManualList.filter(n => n !== normalizedName); }
                     saveManualProcessList(data.turma, newList);
                     if(selectedStudentForModal && selectedStudentForModal.id === studentId) setSelectedStudentForModal(student);
+                    persistSavedClass(newData, { name: "Atualização manual" }).then(saved => {
+                        setActiveClassUpdatedAt(saved.summary && saved.summary.updatedAt || "");
+                        setClassSyncMessage(saved.source === "cloud" ? "Alteração salva na turma." : "Alteração salva neste dispositivo.");
+                        refreshSavedClasses();
+                    });
                 }
             };
 
@@ -4579,8 +4917,8 @@
             if (!data) {
                 return (
                     <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4">
-                        <div className="absolute top-4 right-4 text-xs text-gray-400">Acesso Livre (Admin Mode)</div>
-                        <div className="w-full max-w-2xl bg-white rounded-2xl shadow-2xl overflow-hidden animate-slide-up">
+                        <div className="absolute top-4 right-4 text-xs text-gray-400">{getCurrentAuthenticatedEmail()}</div>
+                        <div className="w-full max-w-4xl bg-white rounded-2xl shadow-2xl overflow-hidden animate-slide-up">
                             <div className="bg-senac-blue p-8 text-center relative overflow-hidden">
                                 <div className="absolute top-0 left-0 w-full h-full opacity-10 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')]"></div>
                                 <div className="relative z-10"><h1 className="text-2xl font-bold text-white mb-2">Gestão de Frequência</h1><p className="text-blue-100">Relatório e ATA</p></div>
@@ -4593,6 +4931,11 @@
                                     <input id="fileUpload" type="file" className="hidden" accept=".xlsx, .xls, .xlsm" onChange={(e) => { handleFile(e.target.files[0]); e.target.value = ''; }} />
                                 </div >
                                 <p className="text-xs text-gray-500 mt-4">Depois de abrir a turma, você poderá carregar o arquivo separado de Informações Gerais.</p>
+                                <div className="mt-8 border-t border-gray-200 pt-6 text-left">
+                                    <div className="mb-3 flex items-center justify-between gap-3"><div><h2 className="text-base font-bold text-senac-blue">Minhas turmas</h2><p className="mt-1 text-xs text-gray-500">Abra uma turma já salva sem carregar novamente a chamada.</p></div><button type="button" onClick={refreshSavedClasses} className="rounded-md border border-senac-blue px-3 py-2 text-xs font-bold text-senac-blue hover:bg-blue-50"><IconRefreshCw className="mr-1 inline-block h-3.5 w-3.5" /> Atualizar lista</button></div>
+                                    {classSyncMessage && <div className="mb-3 rounded border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800">{classSyncMessage}</div>}
+                                    {savedClassesLoading ? <div className="py-6 text-center text-xs text-gray-400">Carregando turmas...</div> : savedClasses.length === 0 ? <div className="rounded-lg border-2 border-dashed border-gray-200 p-5 text-center text-xs text-gray-500">Nenhuma turma salva. A primeira planilha carregada aparecerá aqui automaticamente.</div> : <div className="max-h-64 divide-y divide-gray-100 overflow-y-auto rounded-lg border border-gray-200">{savedClasses.map(item => <button key={item.turmaKey} type="button" onClick={() => openSavedClass(item)} className="flex w-full items-center justify-between gap-4 px-4 py-3 text-left hover:bg-blue-50"><span className="min-w-0"><strong className="block text-sm text-gray-800">Turma {item.turma}</strong><span className="mt-0.5 block truncate text-xs text-gray-500">{item.course} | {item.studentCount || 0} aluno(s)</span></span><span className="shrink-0 text-right text-[10px] text-gray-400">Atualizada<br/>{item.updatedAt ? new Date(item.updatedAt).toLocaleDateString("pt-BR") : "--"}</span></button>)}</div>}
+                                </div>
                                 <div className="mt-8 pt-6 border-t border-gray-100"><button onClick={() => { setData(DEMO_DATA); setActivityTracking(null); setSelectedUC('all'); }} className="text-sm text-gray-400 hover:text-senac-orange">Testar com versão Demo</button></div>
                             </div>
                         </div>
@@ -4812,8 +5155,9 @@
                     
                     <header className="bg-white border-b-4 border-senac-orange shadow-sm sticky top-0 z-20">
                         <div className="max-w-7xl mx-auto px-4 py-3 flex flex-col xl:flex-row xl:items-start justify-between gap-5">
-                            <div className="flex min-w-0 items-start gap-3 xl:w-[390px] xl:shrink-0"><img src="https://upload.wikimedia.org/wikipedia/commons/thumb/8/86/Senac_logo.svg/500px-Senac_logo.svg.png" className="h-12 w-auto shrink-0 object-contain" /><div className="min-w-0 flex-1"><h1 className="text-lg md:text-xl font-bold text-senac-blue leading-tight">Gestão de Frequência - Relatório e ATA</h1><div className="mt-1 max-w-full break-words text-xs font-bold text-senac-orange uppercase leading-tight">{data.course}</div><div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs"><span className="font-medium text-gray-500">Turma: {data.turma}</span><button onClick={() => { setData(null); setActivityTracking(null); }} className="inline-flex shrink-0 items-center gap-1 rounded-full bg-blue-50 px-2 py-1 text-senac-blue transition-colors hover:underline"><IconRefreshCw className="w-3 h-3" /> Trocar</button><span className="text-gray-300">|</span><span className="max-w-full break-all text-gray-500">Usuário: {getCurrentAuthenticatedEmail() || "Acesso Livre"}</span><button onClick={() => {if(confirm("Reiniciar sistema?")) window.location.reload()}} className="inline-flex shrink-0 items-center gap-1 rounded-md border border-red-200 bg-red-50 px-2 py-1 font-semibold text-red-600 hover:bg-red-100"><IconLogOut className="w-3 h-3"/> Sair</button></div></div></div>
+                            <div className="flex min-w-0 items-start gap-3 xl:w-[390px] xl:shrink-0"><img src="https://upload.wikimedia.org/wikipedia/commons/thumb/8/86/Senac_logo.svg/500px-Senac_logo.svg.png" className="h-12 w-auto shrink-0 object-contain" /><div className="min-w-0 flex-1"><h1 className="text-lg md:text-xl font-bold text-senac-blue leading-tight">Gestão de Frequência - Relatório e ATA</h1><div className="mt-1 max-w-full break-words text-xs font-bold text-senac-orange uppercase leading-tight">{data.course}</div><div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs"><span className="font-medium text-gray-500">Turma: {data.turma}</span><button onClick={() => { setData(null); setActivityTracking(null); refreshSavedClasses(); }} className="inline-flex shrink-0 items-center gap-1 rounded-full bg-blue-50 px-2 py-1 text-senac-blue transition-colors hover:underline"><IconUsers className="w-3 h-3" /> Minhas turmas</button><span className="text-gray-300">|</span><span className="max-w-full break-all text-gray-500">Usuário: {getCurrentAuthenticatedEmail() || "Acesso Livre"}</span><button onClick={() => {if(confirm("Reiniciar sistema?")) window.location.reload()}} className="inline-flex shrink-0 items-center gap-1 rounded-md border border-red-200 bg-red-50 px-2 py-1 font-semibold text-red-600 hover:bg-red-100"><IconLogOut className="w-3 h-3"/> Sair</button></div></div></div>
                             <div className="w-full min-w-0 flex-1 flex flex-wrap items-stretch justify-start gap-2 xl:justify-end">
+                                <label className="cursor-pointer bg-white border border-senac-blue text-senac-blue hover:bg-blue-50 px-4 py-2 rounded-lg flex items-center gap-2 shadow transition-all active:scale-95 text-sm font-medium min-h-[54px] min-w-[116px] max-w-[160px] justify-center whitespace-normal text-center leading-tight" title="Substituir os dados da chamada desta turma"><IconRefreshCw className="w-4 h-4" /> Atualizar chamada <input type="file" className="hidden" accept=".xlsx,.xlsm,.xls" onChange={(e) => { handleFile(e.target.files[0]); e.target.value = ''; }} /></label>
                                 <label className="cursor-pointer bg-white border border-senac-blue text-senac-blue hover:bg-blue-50 px-4 py-2 rounded-lg flex items-center gap-2 shadow transition-all active:scale-95 text-sm font-medium min-h-[54px] min-w-[116px] max-w-[160px] justify-center whitespace-normal text-center leading-tight" title="Ler a aba DADOS GERAIS"><IconUploadCloud className="w-4 h-4" /> Dados Gerais <input type="file" className="hidden" accept=".xlsx,.xlsm,.xls" onChange={(e) => { handleGeneralDataFile(e.target.files[0]); e.target.value = ''; }} /></label>
                                 <label className="cursor-pointer bg-white border border-senac-orange text-senac-orange hover:bg-orange-50 px-4 py-2 rounded-lg flex items-center gap-2 shadow transition-all active:scale-95 text-sm font-medium min-h-[54px] min-w-[116px] max-w-[160px] justify-center whitespace-normal text-center leading-tight" title="Ler uma ou várias planilhas de atividades por UC"><IconUploadCloud className="w-4 h-4" /> Ler atividades{activityTracking && activityTracking.uploads ? ` (${activityTracking.uploads.length})` : ""} <input type="file" multiple className="hidden" accept=".xlsx,.xlsm,.xls" onChange={(e) => { handleActivityFiles(e.target.files); e.target.value = ''; }} /></label>
                                 <button onClick={() => setShowNotebookReport(true)} className="bg-white border border-senac-orange text-senac-orange hover:bg-orange-50 px-4 py-2 rounded-lg flex items-center gap-2 shadow transition-all active:scale-95 text-sm font-medium min-h-[54px] min-w-[116px] max-w-[160px] justify-center whitespace-normal text-center leading-tight"><IconBookOpen className="w-4 h-4" /> Relatório de Anotações</button>
@@ -4825,6 +5169,7 @@
                         </div>
                         <div className="bg-white border-t border-gray-100">
                             <div className="max-w-7xl mx-auto px-4 py-2 flex flex-wrap items-center gap-x-5 gap-y-1 text-xs text-gray-600">
+                                {classSyncMessage && <span className="flex items-center gap-1 text-[10px] text-gray-500"><IconRefreshCw className="h-3 w-3" /> {classSyncMessage}</span>}
                                 {currentAnalystName ? <>
                                     <span className="flex items-center gap-2 font-bold whitespace-nowrap text-senac-orange"><IconUser className="w-3.5 h-3.5" /> Analista (clique para acompanhar):</span>
                                     <button onClick={() => setShowAnalystNotebook(true)} className="flex items-center gap-1 rounded px-2 py-0.5 font-medium text-blue-700 transition-colors hover:bg-blue-50" title="Abrir Caderno do Analista">{currentAnalystName} <IconEdit3 className="h-3 w-3 opacity-50" /></button>
@@ -4994,7 +5339,7 @@
         }
 
         const root = ReactDOM.createRoot(document.getElementById('root'));
-        root.render(<AuthGate />);
+        root.render(<DashboardErrorBoundary><AuthGate /></DashboardErrorBoundary>);
     </script>
 </body>
 </html>
