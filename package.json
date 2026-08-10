@@ -1,0 +1,56 @@
+{
+  "name": "dashboard-senac",
+  "version": "1.1.1",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder --win nsis",
+    "release": "electron-builder --win nsis --publish always"
+  },
+  "author": "Senac",
+  "license": "ISC",
+  "description": "Dashboard",
+  "devDependencies": {
+    "electron": "^43.1.0",
+    "electron-builder": "^26.0.12",
+    "electron-packager": "^17.1.2"
+  },
+  "build": {
+    "appId": "br.senacpr.dashboardfrequencia",
+    "productName": "Dashboard Senac",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "Dashboard_V76.html",
+      "firebase-config.js",
+      "main.js",
+      "preload.js",
+      "package.json"
+    ],
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "Supervisao-pratica",
+        "repo": "Dash-Frequencia",
+        "releaseType": "release"
+      }
+    ],
+    "win": {
+      "target": "nsis",
+      "artifactName": "Dashboard-Senac-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Dashboard Senac"
+    }
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.9"
+  }
+}

@@ -1,0 +1,76 @@
+name: Publicar aplicativo Windows
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Nova versão, por exemplo 1.1.2"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Baixar o projeto
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Definir a versão
+        shell: pwsh
+        run: |
+          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            $version = "${{ inputs.version }}"
+          } else {
+            $version = "${{ github.ref_name }}" -replace '^v', ''
+          }
+          if ($version -notmatch '^\d+\.\d+\.\d+$') {
+            throw "Use uma versão no formato 1.1.2"
+          }
+          "APP_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Preparar a versão do aplicativo
+        shell: pwsh
+        run: |
+          npm version $env:APP_VERSION --no-git-tag-version --allow-same-version
+          Copy-Item -LiteralPath index.html -Destination Dashboard_V76.html -Force
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Gerar o instalador e os metadados
+        run: npm run dist -- --publish never
+
+      - name: Publicar no GitHub Releases
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "v$env:APP_VERSION"
+          $assets = Get-ChildItem -LiteralPath dist -File | Where-Object {
+            $_.Name -eq "latest.yml" -or
+            $_.Name -like "*.exe" -or
+            $_.Name -like "*.blockmap"
+          }
+          if (-not ($assets | Where-Object Name -eq "latest.yml")) {
+            throw "O arquivo latest.yml não foi gerado."
+          }
+          $arguments = @(
+            "release", "create", $tag,
+            "--repo", $env:GITHUB_REPOSITORY,
+            "--title", "Dashboard Senac $env:APP_VERSION",
+            "--generate-notes"
+          ) + @($assets.FullName)
+          & gh @arguments

@@ -1,0 +1,5 @@
+node_modules/
+dist/
+Instalador/
+Dashboard Senac-win32-x64/
+*.log
