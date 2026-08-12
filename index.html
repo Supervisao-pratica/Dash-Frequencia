@@ -51,6 +51,7 @@
     
     <!-- Fonte Inter -->
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="./senac-inho.css?v=1.5.2">
     
     <style>
         body { font-family: 'Inter', sans-serif; background-color: #f0f2f5; }
@@ -3248,6 +3249,31 @@
             }
         };
 
+        const removeSavedClassLocal = (turmaKey) => {
+            const nextIndex = readSavedClassesLocal().filter(item => item.turmaKey !== turmaKey);
+            localStorage.setItem(SAVED_CLASSES_INDEX_KEY, JSON.stringify(nextIndex));
+            localStorage.removeItem(`${SAVED_CLASS_DATA_PREFIX}${turmaKey}`);
+            localStorage.removeItem(`class_source_v1_${turmaKey}`);
+        };
+
+        const removeSavedClass = async (summary) => {
+            const turmaKey = summary && summary.turmaKey;
+            if (!turmaKey) throw new Error("Turma inválida.");
+            const db = await getNotebookFirestore();
+            if (db) {
+                const studentSnapshot = await db.collection("saved_class_students").where("turmaKey", "==", turmaKey).get();
+                const references = studentSnapshot.docs.map(document => document.ref);
+                references.push(db.collection("saved_classes").doc(turmaKey));
+                for (let start = 0; start < references.length; start += 450) {
+                    const batch = db.batch();
+                    references.slice(start, start + 450).forEach(reference => batch.delete(reference));
+                    await batch.commit();
+                }
+            }
+            removeSavedClassLocal(turmaKey);
+            return { source: db ? "cloud" : "local" };
+        };
+
         const canAccessSavedClass = (summary) => {
             const email = getCurrentAuthenticatedEmail();
             if (!email || getCurrentAnalystName()) return true;
@@ -4364,6 +4390,7 @@
             const [naJustificationDrafts, setNaJustificationDrafts] = useState({});
             const [savedClasses, setSavedClasses] = useState([]);
             const [savedClassesLoading, setSavedClassesLoading] = useState(true);
+            const [deletingClassKey, setDeletingClassKey] = useState("");
             const [classSyncMessage, setClassSyncMessage] = useState("");
             const [activeClassUpdatedAt, setActiveClassUpdatedAt] = useState("");
             
@@ -4446,6 +4473,31 @@
                 } catch (error) {
                     setClassSyncMessage("");
                     alert(error.message);
+                }
+            };
+
+            const deleteSavedClass = async (summary) => {
+                if (!summary || !summary.turmaKey || deletingClassKey) return;
+                const confirmed = window.confirm(
+                    `Excluir a turma ${summary.turma} de "Minhas turmas"?\n\n` +
+                    "A chamada e os alunos salvos serão removidos do Firebase e deste computador para todos os usuários. " +
+                    "Cadernos, contatos, justificativas e histórico serão preservados."
+                );
+                if (!confirmed) return;
+                setDeletingClassKey(summary.turmaKey);
+                setClassSyncMessage(`Excluindo a turma ${summary.turma}...`);
+                try {
+                    const removed = await removeSavedClass(summary);
+                    setSavedClasses(current => current.filter(item => item.turmaKey !== summary.turmaKey));
+                    setClassSyncMessage(removed.source === "cloud"
+                        ? `Turma ${summary.turma} excluída de Minhas turmas.`
+                        : `Turma ${summary.turma} excluída somente deste computador.`);
+                } catch (error) {
+                    console.error("Erro ao excluir turma salva", error);
+                    setClassSyncMessage("");
+                    alert("Não foi possível excluir a turma. Verifique a conexão e tente novamente.");
+                } finally {
+                    setDeletingClassKey("");
                 }
             };
 
@@ -4932,9 +4984,9 @@
                                 </div >
                                 <p className="text-xs text-gray-500 mt-4">Depois de abrir a turma, você poderá carregar o arquivo separado de Informações Gerais.</p>
                                 <div className="mt-8 border-t border-gray-200 pt-6 text-left">
-                                    <div className="mb-3 flex items-center justify-between gap-3"><div><h2 className="text-base font-bold text-senac-blue">Minhas turmas</h2><p className="mt-1 text-xs text-gray-500">Abra uma turma já salva sem carregar novamente a chamada.</p></div><button type="button" onClick={refreshSavedClasses} className="rounded-md border border-senac-blue px-3 py-2 text-xs font-bold text-senac-blue hover:bg-blue-50"><IconRefreshCw className="mr-1 inline-block h-3.5 w-3.5" /> Atualizar lista</button></div>
+                                    <div className="mb-3 flex items-center justify-between gap-3"><div><h2 className="text-base font-bold text-senac-blue">Minhas turmas</h2><p className="mt-1 text-xs text-gray-500">Abra uma turma já salva sem carregar novamente a chamada.</p></div><button type="button" onClick={refreshSavedClasses} className="rounded-md border border-senac-blue px-3 py-2 text-xs font-bold text-senac-blue hover:bg-blue-50"><IconRefreshCw className="mr-1 inline-block h-3.5 w-3.5" /> Sincronizar turmas salvas</button></div>
                                     {classSyncMessage && <div className="mb-3 rounded border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800">{classSyncMessage}</div>}
-                                    {savedClassesLoading ? <div className="py-6 text-center text-xs text-gray-400">Carregando turmas...</div> : savedClasses.length === 0 ? <div className="rounded-lg border-2 border-dashed border-gray-200 p-5 text-center text-xs text-gray-500">Nenhuma turma salva. A primeira planilha carregada aparecerá aqui automaticamente.</div> : <div className="max-h-64 divide-y divide-gray-100 overflow-y-auto rounded-lg border border-gray-200">{savedClasses.map(item => <button key={item.turmaKey} type="button" onClick={() => openSavedClass(item)} className="flex w-full items-center justify-between gap-4 px-4 py-3 text-left hover:bg-blue-50"><span className="min-w-0"><strong className="block text-sm text-gray-800">Turma {item.turma}</strong><span className="mt-0.5 block truncate text-xs text-gray-500">{item.course} | {item.studentCount || 0} aluno(s)</span></span><span className="shrink-0 text-right text-[10px] text-gray-400">Atualizada<br/>{item.updatedAt ? new Date(item.updatedAt).toLocaleDateString("pt-BR") : "--"}</span></button>)}</div>}
+                                    {savedClassesLoading ? <div className="py-6 text-center text-xs text-gray-400">Carregando turmas...</div> : savedClasses.length === 0 ? <div className="rounded-lg border-2 border-dashed border-gray-200 p-5 text-center text-xs text-gray-500">Nenhuma turma salva. A primeira planilha carregada aparecerá aqui automaticamente.</div> : <div className="max-h-64 divide-y divide-gray-100 overflow-y-auto rounded-lg border border-gray-200">{savedClasses.map(item => <div key={item.turmaKey} className="flex items-stretch bg-white transition-colors hover:bg-blue-50"><button type="button" onClick={() => openSavedClass(item)} className="flex min-w-0 flex-1 items-center justify-between gap-4 px-4 py-3 text-left"><span className="min-w-0"><strong className="block text-sm text-gray-800">Turma {item.turma}</strong><span className="mt-0.5 block truncate text-xs text-gray-500">{item.course} | {item.studentCount || 0} aluno(s)</span></span><span className="shrink-0 text-right text-[10px] text-gray-400">Atualizada<br/>{item.updatedAt ? new Date(item.updatedAt).toLocaleDateString("pt-BR") : "--"}</span></button><button type="button" onClick={() => deleteSavedClass(item)} disabled={deletingClassKey === item.turmaKey} aria-label={`Excluir turma ${item.turma}`} title={`Excluir turma ${item.turma}`} className="m-2 grid w-9 shrink-0 place-items-center rounded-md border border-red-200 bg-red-50 text-red-600 transition-colors hover:bg-red-100 disabled:cursor-wait disabled:opacity-50"><IconTrash2 className="h-4 w-4" /></button></div>)}</div>}
                                 </div>
                                 <div className="mt-8 pt-6 border-t border-gray-100"><button onClick={() => { setData(DEMO_DATA); setActivityTracking(null); setSelectedUC('all'); }} className="text-sm text-gray-400 hover:text-senac-orange">Testar com versão Demo</button></div>
                             </div>
@@ -5341,5 +5393,6 @@
         const root = ReactDOM.createRoot(document.getElementById('root'));
         root.render(<DashboardErrorBoundary><AuthGate /></DashboardErrorBoundary>);
     </script>
+    <script src="./senac-inho.js?v=1.5.2"></script>
 </body>
 </html>
