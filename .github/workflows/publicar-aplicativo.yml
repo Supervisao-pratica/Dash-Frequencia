@@ -53,6 +53,16 @@ jobs:
       - name: Gerar o instalador e os metadados
         run: npm run dist -- --publish never
 
+      - name: Compactar o instalador
+        shell: pwsh
+        run: |
+          $installer = Join-Path "dist" "Dashboard-Senac-Setup-$env:APP_VERSION.exe"
+          $zip = Join-Path "dist" "Dashboard-Senac-Setup-$env:APP_VERSION.zip"
+          if (-not (Test-Path -LiteralPath $installer)) {
+            throw "O instalador não foi encontrado para compactação: $installer"
+          }
+          Compress-Archive -LiteralPath $installer -DestinationPath $zip -CompressionLevel Optimal -Force
+
       - name: Publicar no GitHub Releases
         shell: pwsh
         env:
@@ -62,6 +72,7 @@ jobs:
           $assets = Get-ChildItem -LiteralPath dist -File | Where-Object {
             $_.Name -eq "latest.yml" -or
             $_.Name -like "*.exe" -or
+            $_.Name -like "*.zip" -or
             $_.Name -like "*.blockmap"
           }
           if (-not ($assets | Where-Object Name -eq "latest.yml")) {
