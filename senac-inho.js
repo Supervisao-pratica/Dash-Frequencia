@@ -259,8 +259,9 @@
     function readSpeedPreference() {
         try {
             const saved = Number(window.localStorage.getItem("senacInhoSpeed"));
-            return [1.15, 1.5, 2].includes(saved) ? saved : 1.15;
-        } catch (_) { return 1.15; }
+            if (saved === 1.15) return 1.2;
+            return [1.2, 1.5, 2].includes(saved) ? saved : 1.2;
+        } catch (_) { return 1.2; }
     }
 
     function saveSpeedPreference(speed) {
@@ -297,6 +298,7 @@
     let toast;
     let contextObserver;
     let contextTimer;
+    let cachedPreferredVoice = null;
 
     function normalize(value) {
         return String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9@]+/g, " ").trim();
@@ -940,7 +942,7 @@
                     <button type="button" class="sena-play-control" data-tour="toggle" aria-label="Pausar">${svg("pause")}</button>
                     <button type="button" data-tour="next" aria-label="Próxima etapa">${svg("next")}</button>
                     <button type="button" data-tour="audio" aria-label="Desativar áudio">${svg(state.audio ? "volume" : "muted")}</button><span class="sena-audio-status">${state.audio ? "Áudio ligado" : "Áudio desligado"}</span>
-                    <select class="sena-speed-control" data-tour-speed aria-label="Velocidade da narração" title="Velocidade da narração"><option value="1.15"${state.speed === 1.15 ? " selected" : ""}>Normal</option><option value="1.5"${state.speed === 1.5 ? " selected" : ""}>1,5x</option><option value="2"${state.speed === 2 ? " selected" : ""}>2x</option></select>
+                    <select class="sena-speed-control" data-tour-speed aria-label="Velocidade da narração" title="Velocidade da narração"><option value="1.2"${state.speed === 1.2 ? " selected" : ""}>Normal</option><option value="1.5"${state.speed === 1.5 ? " selected" : ""}>1,5x</option><option value="2"${state.speed === 2 ? " selected" : ""}>2x</option></select>
                     <div class="sena-tour-progress"><span></span></div><span class="sena-tour-step-count"></span>
                 </div>
             </div>`;
@@ -955,7 +957,7 @@
         });
         player.addEventListener("change", event => {
             if (!event.target.matches("[data-tour-speed]")) return;
-            state.speed = Number(event.target.value) || 1.15;
+            state.speed = Number(event.target.value) || 1.2;
             saveSpeedPreference(state.speed);
             if (state.playing) narrateStep();
             showToast(`Velocidade da narração: ${event.target.options[event.target.selectedIndex].text}.`);
@@ -1003,27 +1005,29 @@
 
     function preferredVoice() {
         if (!("speechSynthesis" in window)) return null;
+        if (cachedPreferredVoice) return cachedPreferredVoice;
         const voices = window.speechSynthesis.getVoices();
         const portuguese = voices.filter(voice => /^pt(-|_)/i.test(voice.lang));
         const voiceScore = voice => {
             const name = normalize(voice.name);
-            let score = /pt[-_]br/i.test(voice.lang) ? 30 : 0;
-            if (name.includes("natural")) score += 100;
-            if (name.includes("francisca")) score += 90;
-            if (name.includes("thalita")) score += 85;
-            if (name.includes("google") && name.includes("portugu")) score += 80;
-            if (name.includes("luciana") || name.includes("maria")) score += 65;
-            if (voice.localService) score += 5;
+            let score = /pt[-_]br/i.test(voice.lang) ? 100 : 0;
+            if (voice.localService) score += 240;
+            if (name.includes("maria") || name.includes("luciana") || name.includes("thalita")) score += 90;
+            if (name.includes("francisca")) score += 70;
+            if (name.includes("google") && name.includes("portugu")) score += 55;
+            if (name.includes("natural")) score += 15;
+            if (!voice.localService && (name.includes("online") || name.includes("natural"))) score -= 120;
             return score;
         };
-        return portuguese.sort((a, b) => voiceScore(b) - voiceScore(a))[0] || null;
+        cachedPreferredVoice = portuguese.sort((a, b) => voiceScore(b) - voiceScore(a))[0] || null;
+        return cachedPreferredVoice;
     }
 
     function narrationText(topic, step) {
         return `${step.title}. ${step.text}`;
     }
 
-    function splitNarration(text, maximumLength = 155) {
+    function splitNarration(text, maximumLength = 280) {
         const sentences = String(text || "").match(/[^.!?;:]+[.!?;:]?/g) || [String(text || "")];
         const chunks = [];
         let current = "";
@@ -1082,7 +1086,7 @@
             if (state.speechWatchdog) window.clearTimeout(state.speechWatchdog);
             state.speechWatchdog = null;
             if (state.speechToken !== token || !state.playing) return;
-            state.timer = window.setTimeout(() => speakNarrationChunks(chunks, chunkIndex + 1, topic, stepIndex, token, voice, 0), 110);
+            state.timer = window.setTimeout(() => speakNarrationChunks(chunks, chunkIndex + 1, topic, stepIndex, token, voice, 0), 25);
         };
 
         utterance.onstart = () => {
@@ -1117,14 +1121,15 @@
             completeChunk();
         };
         state.utterance = utterance;
-        window.speechSynthesis.resume?.();
+        if (window.speechSynthesis.paused) window.speechSynthesis.resume?.();
         window.speechSynthesis.speak(utterance);
 
+        const estimatedWords = Math.max(1, chunk.trim().split(/\s+/).length);
         state.speechWatchdog = window.setTimeout(() => {
             if (settled || state.speechToken !== token) return;
             completeChunk();
             window.speechSynthesis.cancel();
-        }, Math.max(3500, Math.min(12000, (chunk.length * 82) / Math.max(1, state.speed))));
+        }, Math.max(15000, Math.min(45000, ((estimatedWords * 820) + 6000) / Math.max(1, state.speed))));
     }
 
     function narrateStep() {
@@ -1278,7 +1283,10 @@
         installChildWindowSupport();
         if ("speechSynthesis" in window) {
             window.speechSynthesis.getVoices();
-            window.speechSynthesis.addEventListener?.("voiceschanged", preferredVoice, { once: true });
+            window.speechSynthesis.addEventListener?.("voiceschanged", () => {
+                cachedPreferredVoice = null;
+                preferredVoice();
+            }, { once: true });
         }
         window.SenacInho = {
             open: openPanel,

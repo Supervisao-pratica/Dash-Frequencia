@@ -51,7 +51,7 @@
     
     <!-- Fonte Inter -->
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="./senac-inho.css?v=1.6.3">
+    <link rel="stylesheet" href="./senac-inho.css?v=1.6.4">
     
     <style>
         body { font-family: 'Inter', sans-serif; background-color: #f0f2f5; }
@@ -4387,8 +4387,8 @@
             }
         }
 
-        const DESKTOP_APP_VERSION = "1.1.5";
-        const DESKTOP_APP_DOWNLOAD_URL = "https://github.com/Supervisao-pratica/Dash-Frequencia/releases/download/v1.1.5/Dashboard-Senac-Setup-1.1.5.zip";
+        const DESKTOP_APP_VERSION = "1.1.6";
+        const DESKTOP_APP_DOWNLOAD_URL = "https://github.com/Supervisao-pratica/Dash-Frequencia/releases/download/v1.1.6/Dashboard-Senac-Setup-1.1.6.zip";
         const DesktopAppOffer = () => {
             const storageKey = `desktop_app_download_started_${DESKTOP_APP_VERSION}`;
             const [downloadStarted, setDownloadStarted] = useState(() => {
@@ -5666,6 +5666,6 @@
         const root = ReactDOM.createRoot(document.getElementById('root'));
         root.render(<><DashboardErrorBoundary><AuthGate /></DashboardErrorBoundary><DesktopAppOffer /></>);
     </script>
-    <script src="./senac-inho.js?v=1.6.3"></script>
+    <script src="./senac-inho.js?v=1.6.4"></script>
 </body>
 </html>
