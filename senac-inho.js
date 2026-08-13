@@ -6,7 +6,7 @@
 
     const ownScriptUrl = document.currentScript && document.currentScript.src;
     const mascotUrl = new URL("./assets/senac-inho.png", ownScriptUrl || window.location.href).href;
-    const assistantStyleUrl = new URL("./senac-inho.css?v=1.6.1", ownScriptUrl || window.location.href).href;
+    const assistantStyleUrl = new URL("./senac-inho.css?v=1.6.2", ownScriptUrl || window.location.href).href;
     const STOP_WORDS = new Set(["a", "ao", "as", "como", "da", "das", "de", "do", "dos", "e", "em", "eu", "o", "os", "para", "por", "que", "um", "uma"]);
 
     const icons = {
@@ -319,6 +319,22 @@
         return normalize(clone.innerText || clone.textContent || "");
     }
 
+    function contextText(container) {
+        if (!container) return "";
+        const parts = [];
+        const blockedSelector = ".sena-launcher,.sena-panel,.sena-overlay,.sena-tour-player,.sena-highlight,.sena-tour-fallback,.sena-toast,script,style,[hidden],[aria-hidden='true']";
+        const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, {
+            acceptNode(node) {
+                const parent = node.parentElement;
+                const value = String(node.nodeValue || "").replace(/\s+/g, " ").trim();
+                if (!parent || !value || parent.closest(blockedSelector) || !isVisible(parent)) return NodeFilter.FILTER_REJECT;
+                return NodeFilter.FILTER_ACCEPT;
+            }
+        });
+        while (walker.nextNode() && parts.join(" ").length < 24000) parts.push(walker.currentNode.nodeValue);
+        return normalize(parts.join(" ").slice(0, 24000));
+    }
+
     function scoreTopic(topic, query) {
         const words = queryWords(query);
         if (!words.length) return 0;
@@ -392,8 +408,7 @@
     function detectCurrentContext() {
         const layer = topVisibleLayer();
         const container = layer || document.body;
-        const rawText = String(container.innerText || container.textContent || "").slice(0, 24000);
-        const text = normalize(rawText);
+        const text = contextText(container);
         const profile = contextProfiles.find(item => profileMatches(item, text));
         const title = contextHeading(container) || (profile && profile.label) || document.title || "Dashboard";
         let topicIds = profile ? [...profile.topics] : [];
@@ -413,7 +428,7 @@
             text,
             element: layer,
             topics: matchedTopics.filter(Boolean),
-            signature: `${profile ? profile.id : "generic"}|${normalize(title)}|${layer ? "layer" : "page"}`
+            signature: `${profile ? profile.id : "generic"}|${normalize(title)}|${layer ? "layer" : "page"}|${matchedTopics.map(topic => topic.id).join(",")}|${text.slice(0, 320)}`
         };
     }
 
@@ -637,7 +652,8 @@
     }
 
     function explainContext() {
-        refreshDetectedContext(true);
+        const context = detectCurrentContext();
+        applyDetectedContext(context, true);
     }
 
     function bindUi() {
@@ -1232,7 +1248,7 @@
                 stylesheet.href = assistantStyleUrl;
                 stylesheet.dataset.senacInhoChild = "style";
                 const script = childDocument.createElement("script");
-                script.src = ownScriptUrl || new URL("./senac-inho.js?v=1.6.1", window.location.href).href;
+                script.src = ownScriptUrl || new URL("./senac-inho.js?v=1.6.2", window.location.href).href;
                 script.dataset.senacInhoChild = "script";
                 childDocument.head.append(stylesheet);
                 childDocument.body.append(script);
