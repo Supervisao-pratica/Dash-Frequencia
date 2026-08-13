@@ -116,6 +116,13 @@
             s("Em Processo e Evasão", "Fonte laranja no nome indica processo de desligamento. Célula do nome pintada de laranja ou termos como evadido, desistente e desligado levam à Evasão.", { text: "Em Processo (", tags: ["button"] }, "Filtros")
         ], "Ao filtrar uma UC, os contadores e as situações são recalculados somente para ela."),
 
+        t("dropout-documents", "attendance", "calendar", "Documentação de desligamento", "Acompanhe quem está em processo até a entrega e a baixa dos documentos.", "documentação desligamento sem documento com documento pasta rede segunda feira outlook evasão", [
+            s("Abra o aluno em processo", "No filtro Em Processo, clique no cartão do aluno para acessar o acompanhamento documental.", { text: "Em Processo (", tags: ["button"] }, "Filtros"),
+            s("Atualize a situação", "Escolha Sem documentação enquanto aguarda ou Com documentação quando os arquivos forem recebidos.", { text: "Situação da documentação" }, "Quadro do aluno"),
+            s("Use o alerta semanal", "O painel destaca os pendentes e permite criar no Outlook um lembrete recorrente para toda segunda-feira.", { text: "Criar alerta semanal no Outlook" }, "Painel principal"),
+            s("Verifique a rede no aplicativo", "A versão instalada procura arquivos em Documentos e Desligamentos. Ao localizar, move o aluno para Evasão e avisa sobre pintar a célula e dar baixa no sistema.", { text: "Verificar documentos na rede" }, "Painel principal")
+        ], "A busca automática na rede funciona no aplicativo instalado. Na versão web, a situação pode ser atualizada manualmente."),
+
         t("filters", "students", "filter", "Filtrar por UC, situação, nome ou Órion", "Reduza a lista para analisar exatamente o grupo necessário.", "filtro uc busca nome orion código situação abas todos", [
             s("Escolha a UC", "Use o seletor Todas as UCs para mudar do panorama global para uma unidade específica.", { selectText: "Todas as UCs (Global)" }, "Barra de filtros"),
             s("Escolha a situação", "Use Todos, Desenvolveu, Recuperação, Conselho, Em Processo ou Evasão.", { text: "Todos (", tags: ["button"] }, "Barra de filtros"),
@@ -219,16 +226,17 @@
 
         t("analyst-notebook", "notebooks", "chart", "Caderno do Analista e PDI", "Acompanhe instrutores, registre evidências e observe a evolução.", "caderno analista pdi instrutor competência avaliação evolução acompanhamento", [
             s("Abra seu caderno", "Clique no nome do analista ao lado do usuário. O acesso é disponibilizado quando o login é reconhecido.", { text: "Caderno do Analista", tags: ["h2"] }, "Caderno do Analista"),
-            s("Escolha o instrutor", "Selecione o profissional acompanhado e informe o tipo e o assunto.", { text: "Instrutor acompanhado" }, "Caderno do Analista"),
-            s("Use as sugestões", "Competência e avaliação são sugeridas pelo tipo, assunto e registro, mas podem ser alteradas manualmente.", { text: "Classificação PDI" }, "Caderno do Analista"),
-            s("Acompanhe o PDI", "O gráfico, pontos fortes, oportunidades e ações consolidam os registros avaliativos.", { text: "PDI consolidado" }, "Caderno do Analista")
+            s("Escolha várias situações", "Marque um ou mais tipos. O sistema abre campos próprios de assunto e descrição para cada situação selecionada.", { text: "Tipos a serem tratados" }, "Caderno do Analista"),
+            s("Use as sugestões", "A competência é sugerida para todos os tipos pelo assunto e pela descrição, mas pode ser ajustada manualmente.", { text: "Classificação PDI" }, "Caderno do Analista"),
+            s("Crie o acompanhamento", "Ative o status, escolha a data do lembrete e use Abrir no Outlook para agendar a revisão.", { text: "Criar status para acompanhamento" }, "Caderno do Analista"),
+            s("Consulte a avaliação somente quando necessário", "Percentuais, gráfico e PDI começam ocultos. O botão Mostrar avaliações libera a consulta apenas dentro do caderno do analista.", { text: "Mostrar avaliações" }, "Caderno do Analista")
         ], "Registros não avaliativos podem ficar sem competência ou nota."),
 
         t("analyst-visibility", "notebooks", "eye", "Visibilidade das anotações do analista", "Escolha quando o instrutor poderá consultar um acompanhamento.", "analista visibilidade instrutor permitir visualizar restrito privado anotação", [
             s("Localize a opção", "Dentro do Caderno do Analista, há uma caixa para permitir visualização pelo instrutor.", { text: "Permitir visualização pelo instrutor" }, "Caderno do Analista"),
             s("Marcada", "Quando marcada, o instrutor acompanhado poderá consultar o registro.", { text: "Permitir visualização pelo instrutor" }, "Caderno do Analista"),
             s("Desmarcada", "Quando desmarcada, a anotação permanece restrita ao analista responsável.", { text: "Restrito" }, "Histórico do acompanhamento")
-        ], "Revise a visibilidade antes de salvar informações sensíveis de acompanhamento."),
+        ], "A avaliação percentual nunca é compartilhada com o instrutor, mesmo quando o texto do registro estiver visível."),
 
         t("ata", "ata", "signature", "Gerar ATA do Conselho de Classe", "Gere a ATA global da turma com as situações de atenção identificadas pelo sistema.", "ata conselho classe gerar doc documento imprimir assinatura data uc extenso global turma atenção", [
             s("Abra o gerador da ATA", "A ATA é global e não depende de selecionar alunos. A demonstração mostra o gerador usando automaticamente os dados de toda a turma.", { text: "Gerador de ATA Digital", tags: ["h2"] }, "Gerador de ATA"),
@@ -546,6 +554,9 @@
         ["caderno do instrutor", "instructor-notebook"],
         ["status da tratativa", "treatment-status"],
         ["tratativa", "treatment-status"],
+        ["documentacao de desligamento", "dropout-documents"],
+        ["sem documentacao", "dropout-documents"],
+        ["documentos de desligamento", "dropout-documents"],
         ["caderno do analista", "analyst-notebook"],
         ["pdi", "analyst-notebook"],
         ["visibilidade do analista", "analyst-visibility"],

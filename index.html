@@ -51,7 +51,7 @@
     
     <!-- Fonte Inter -->
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="./senac-inho.css?v=1.6.4">
+    <link rel="stylesheet" href="./senac-inho.css?v=1.6.5">
     
     <style>
         body { font-family: 'Inter', sans-serif; background-color: #f0f2f5; }
@@ -538,6 +538,13 @@
             { name: "Juliana Severo", tokens: ["JULIANA", "SEVERO"] }
         ];
         const ANALYST_FOLLOWUP_TYPES = ["Avaliação", "Acompanhamento", "Ponto de atenção", "Elogio", "Plano de ação"];
+        const ANALYST_TRACKING_STATUS_OPTIONS = [
+            { value: "em_acompanhamento", label: "Em acompanhamento", className: "bg-blue-100 text-blue-800 border-blue-200", closed: false },
+            { value: "aguardando_retorno", label: "Aguardando retorno", className: "bg-yellow-100 text-yellow-800 border-yellow-200", closed: false },
+            { value: "resolvido", label: "Resolvido", className: "bg-green-100 text-green-800 border-green-200", closed: true },
+            { value: "suspenso", label: "Suspenso", className: "bg-gray-100 text-gray-700 border-gray-200", closed: true },
+            { value: "cancelado", label: "Cancelado", className: "bg-red-100 text-red-800 border-red-200", closed: true }
+        ];
         const PDI_COMPETENCIES = [
             { id: "planejamento", label: "Planejamento", action: "Estruturar prioridades, prazos e checkpoints das entregas." },
             { id: "resultados", label: "Foco em Resultados", action: "Acompanhar indicadores e combinar metas objetivas para o período." },
@@ -562,6 +569,13 @@
             { id: "problemas", keywords: ["PROBLEMA", "SOLUCAO", "RISCO", "DECISAO", "CONFLITO"] },
             { id: "equipe", keywords: ["EQUIPE", "COLABORACAO", "COOPERACAO", "PARCERIA", "APOIO"] }
         ];
+        const ANALYST_TYPE_COMPETENCY_DEFAULTS = {
+            "AVALIACAO": "resultados",
+            "ACOMPANHAMENTO": "planejamento",
+            "PONTO DE ATENCAO": "problemas",
+            "ELOGIO": "equipe",
+            "PLANO DE ACAO": "planejamento"
+        };
 
         const inferAnalystPDI = (followupType, subject, notes) => {
             const text = normalizeText(`${followupType || ""} ${subject || ""} ${notes || ""}`);
@@ -571,7 +585,8 @@
             else if (/PARCIAL|DIFICULDADE|PONTO DE ATENCAO|PLANO DE ACAO/.test(text)) score = 50;
             else if (/EXCELENCIA|EXCELENTE|DESTAQUE|ELOGIO/.test(text)) score = 100;
             else if (normalizeText(followupType) === "AVALIACAO" || /ATENDE|ADEQUADO/.test(text)) score = 75;
-            return { competency: competencyRule ? competencyRule.id : "", score };
+            const defaultCompetency = ANALYST_TYPE_COMPETENCY_DEFAULTS[normalizeText(followupType)] || "";
+            return { competency: competencyRule ? competencyRule.id : defaultCompetency, score };
         };
         const NOTEBOOK_TREATMENT_STATUS_OPTIONS = [
             { value: "em_tratativa", label: "Em tratativa", className: "bg-blue-100 text-blue-800 border-blue-200", closed: false },
@@ -910,6 +925,93 @@
             return source;
         };
 
+        const DROPOUT_DOCUMENT_STORAGE_PREFIX = "dropout_documents_v1_";
+        const DROPOUT_DOCUMENT_STATUS_OPTIONS = [
+            { value: "sem_documentacao", label: "Sem documentação", className: "bg-red-100 text-red-800 border-red-200" },
+            { value: "com_documentacao", label: "Com documentação", className: "bg-orange-100 text-orange-800 border-orange-200" }
+        ];
+        const makeDropoutDocumentStorageKey = turma => `${DROPOUT_DOCUMENT_STORAGE_PREFIX}${cleanNotebookKey(turma, "TURMA_DESCONHECIDA")}`;
+        const makeDropoutDocumentDocId = (turma, studentKey) => `dropout_${cleanNotebookKey(turma, "TURMA_DESCONHECIDA")}_${cleanNotebookKey(studentKey, "ALUNO")}`;
+        const normalizeDropoutDocumentRecord = (record, turma, studentName = "") => ({
+            turmaKey: cleanNotebookKey(turma, "TURMA_DESCONHECIDA"),
+            studentKey: String(record && record.studentKey || normalizeName(studentName)).trim(),
+            studentName: String(record && record.studentName || studentName).trim(),
+            status: record && record.status === "com_documentacao" ? "com_documentacao" : "sem_documentacao",
+            source: String(record && record.source || "manual"),
+            fileCount: Math.max(0, Number(record && record.fileCount || 0)),
+            folderName: String(record && record.folderName || ""),
+            detectedAt: String(record && record.detectedAt || ""),
+            updatedAt: String(record && record.updatedAt || new Date().toISOString()),
+            updatedBy: String(record && record.updatedBy || getCurrentAuthenticatedEmail())
+        });
+        const readDropoutDocumentsLocal = turma => {
+            try {
+                const parsed = JSON.parse(localStorage.getItem(makeDropoutDocumentStorageKey(turma)) || "{}");
+                return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+            } catch (error) { return {}; }
+        };
+        const writeDropoutDocumentsLocal = (turma, records) => {
+            try { localStorage.setItem(makeDropoutDocumentStorageKey(turma), JSON.stringify(records || {})); }
+            catch (error) { console.error("Erro ao salvar acompanhamento documental localmente", error); }
+        };
+        const loadDropoutDocuments = async turma => {
+            const localRecords = readDropoutDocumentsLocal(turma);
+            const db = await getNotebookFirestore();
+            if (!db) return { records: localRecords, source: "local" };
+            try {
+                const snapshot = await db.collection("dropout_documents").where("turmaKey", "==", cleanNotebookKey(turma, "TURMA_DESCONHECIDA")).get();
+                const records = { ...localRecords };
+                snapshot.docs.forEach(doc => {
+                    const record = normalizeDropoutDocumentRecord(doc.data(), turma, doc.data().studentName);
+                    if (record.studentKey) records[record.studentKey] = record;
+                });
+                writeDropoutDocumentsLocal(turma, records);
+                return { records, source: "cloud" };
+            } catch (error) {
+                console.error("Erro ao carregar acompanhamento documental", error);
+                return { records: localRecords, source: "local" };
+            }
+        };
+        const persistDropoutDocument = async (turma, record) => {
+            const normalized = normalizeDropoutDocumentRecord(record, turma, record && record.studentName);
+            if (!normalized.studentKey) return { record: normalized, source: "local" };
+            const records = readDropoutDocumentsLocal(turma);
+            records[normalized.studentKey] = normalized;
+            writeDropoutDocumentsLocal(turma, records);
+            const db = await getNotebookFirestore();
+            if (!db) return { record: normalized, source: "local" };
+            try {
+                await db.collection("dropout_documents").doc(makeDropoutDocumentDocId(turma, normalized.studentKey)).set(normalized, { merge: true });
+                return { record: normalized, source: "cloud" };
+            } catch (error) {
+                console.error("Erro ao salvar acompanhamento documental", error);
+                return { record: normalized, source: "local" };
+            }
+        };
+        const getDropoutDocumentMeta = record => DROPOUT_DOCUMENT_STATUS_OPTIONS.find(item => item.value === String(record && record.status || "sem_documentacao")) || DROPOUT_DOCUMENT_STATUS_OPTIONS[0];
+        const nextMondayDate = () => {
+            const date = new Date();
+            const days = (8 - date.getDay()) % 7 || 7;
+            date.setDate(date.getDate() + days);
+            return notebookDateInput(date);
+        };
+        const escapeICS = value => String(value || "").replace(/\\/g, "\\\\").replace(/\n/g, "\\n").replace(/,/g, "\\,").replace(/;/g, "\\;");
+        const downloadWeeklyDropoutReminder = (turma, students) => {
+            const start = nextMondayDate().replace(/-/g, "");
+            const names = (students || []).map(student => student.name).filter(Boolean);
+            const uid = `documentacao-desligamento-${cleanNotebookKey(turma, "turma")}@dashfrequencia`;
+            const description = [`Turma: ${turma}`, "Alunos sem documentação:", ...names.map(name => `- ${name}`), "", "Verificar Documentos/Desligamentos, atualizar o Dashboard, pintar a célula de laranja na chamada e dar baixa no sistema quando a documentação for recebida."].join("\n");
+            const ics = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Senac PR//Dashboard Frequencia//PT-BR", "CALSCALE:GREGORIAN", "METHOD:PUBLISH", "BEGIN:VEVENT", `UID:${uid}`, `DTSTART:${start}T090000`, `DTEND:${start}T093000`, "RRULE:FREQ=WEEKLY;BYDAY=MO", `SUMMARY:${escapeICS(`Verificar documentação de desligamento - Turma ${turma}`)}`, `DESCRIPTION:${escapeICS(description)}`, "BEGIN:VALARM", "TRIGGER:-PT15M", "ACTION:DISPLAY", "DESCRIPTION:Verificar documentação de desligamento", "END:VALARM", "END:VEVENT", "END:VCALENDAR"].join("\r\n");
+            const url = URL.createObjectURL(new Blob([ics], { type: "text/calendar;charset=utf-8" }));
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = `lembrete-documentacao-turma-${cleanNotebookKey(turma, "turma")}.ics`;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+        };
+
         const loadNotebookNotes = async (turma, instructorName) => {
             const canonicalInstructorName = canonicalizeInstructorName(instructorName);
             const storageKey = makeNotebookStorageKey(turma, canonicalInstructorName);
@@ -1019,6 +1121,9 @@
                 subject: String(note.subject || "").trim(),
                 periodStart: notebookDateInput(note.periodStart),
                 periodEnd: notebookDateInput(note.periodEnd),
+                trackingEnabled: note.trackingEnabled === true,
+                trackingStatus: ANALYST_TRACKING_STATUS_OPTIONS.some(item => item.value === note.trackingStatus) ? note.trackingStatus : "em_acompanhamento",
+                reminderDate: notebookDateInput(note.reminderDate || note.periodEnd),
                 notes: String(note.notes || "").trim(),
                 visibleToInstructor: note.visibleToInstructor === true,
                 createdAt: String(note.createdAt || new Date().toISOString()),
@@ -1048,12 +1153,47 @@
             const db = await getNotebookFirestore();
             if (!db) return { notes: localNotes, source: "local" };
             try {
-                const snapshot = await db.collection("analyst_notes")
-                    .where("turmaKey", "==", cleanNotebookKey(turma, "TURMA_DESCONHECIDA"))
+                const turmaKey = cleanNotebookKey(turma, "TURMA_DESCONHECIDA");
+                const ownerEmail = getCurrentAuthenticatedEmail();
+                const [snapshot, evaluationSnapshot] = await Promise.all([
+                    db.collection("analyst_notes")
+                    .where("turmaKey", "==", turmaKey)
                     .where("ownerEmail", "==", getCurrentAuthenticatedEmail())
-                    .get();
+                    .get(),
+                    db.collection("analyst_evaluations")
+                    .where("turmaKey", "==", turmaKey)
+                    .where("ownerEmail", "==", ownerEmail)
+                    .get()
+                ]);
+                const evaluations = new Map(evaluationSnapshot.docs.map(doc => [doc.id, doc.data()]));
                 const merged = new Map(localNotes.map(note => [note.id, note]));
-                snapshot.docs.map(doc => normalizeAnalystNote({ id: doc.id, ...doc.data() })).filter(Boolean).forEach(note => merged.set(note.id, note));
+                const legacyMigrations = [];
+                snapshot.docs.forEach(doc => {
+                    const publicData = doc.data();
+                    const privateEvaluation = evaluations.get(doc.id);
+                    const legacyScore = publicData.score !== null && publicData.score !== undefined ? Number(publicData.score) : null;
+                    const score = privateEvaluation && privateEvaluation.score !== undefined ? privateEvaluation.score : legacyScore;
+                    const note = normalizeAnalystNote({ id: doc.id, ...publicData, score });
+                    if (note) merged.set(note.id, note);
+                    if (note && note.visibleToInstructor) {
+                        const sharedNote = { ...note, score: null };
+                        delete sharedNote.ownerEmail;
+                        legacyMigrations.push(db.collection("analyst_shared_notes").doc(doc.id).set({ ...sharedNote, ownerEmail }, { merge: true }));
+                    }
+                    if (!privateEvaluation && PDI_SCORE_OPTIONS.some(item => item.value === legacyScore)) {
+                        legacyMigrations.push(Promise.all([
+                            db.collection("analyst_evaluations").doc(doc.id).set({
+                                turmaKey,
+                                analystKey: publicData.analystKey || cleanNotebookKey(canonicalAnalyst, "ANALISTA"),
+                                ownerEmail,
+                                score: legacyScore,
+                                updatedAt: new Date().toISOString()
+                            }, { merge: true }),
+                            db.collection("analyst_notes").doc(doc.id).set({ score: null }, { merge: true })
+                        ]));
+                    }
+                });
+                if (legacyMigrations.length) await Promise.allSettled(legacyMigrations);
                 const notes = Array.from(merged.values()).sort((a, b) => String(b.date).localeCompare(String(a.date)) || String(b.createdAt).localeCompare(String(a.createdAt)));
                 writeAnalystNotesLocal(turma, canonicalAnalyst, notes);
                 return { notes, source: "cloud" };
@@ -1071,7 +1211,23 @@
             const db = await getNotebookFirestore();
             if (!db) return { note: normalized, source: "local" };
             try {
-                await db.collection("analyst_notes").doc(normalized.id).set(normalized, { merge: true });
+                const publicNote = { ...normalized, score: null };
+                const evaluation = {
+                    turmaKey: normalized.turmaKey,
+                    analystKey: normalized.analystKey,
+                    ownerEmail: normalized.ownerEmail,
+                    score: normalized.score,
+                    updatedAt: new Date().toISOString()
+                };
+                const writes = [db.collection("analyst_notes").doc(normalized.id).set(publicNote, { merge: true })];
+                if (normalized.visibleToInstructor) {
+                    const sharedNote = { ...publicNote };
+                    delete sharedNote.score;
+                    writes.push(db.collection("analyst_shared_notes").doc(normalized.id).set(sharedNote, { merge: true }));
+                } else writes.push(db.collection("analyst_shared_notes").doc(normalized.id).delete().catch(() => null));
+                if (normalized.score === null) writes.push(db.collection("analyst_evaluations").doc(normalized.id).delete().catch(() => null));
+                else writes.push(db.collection("analyst_evaluations").doc(normalized.id).set(evaluation, { merge: true }));
+                await Promise.all(writes);
                 return { note: normalized, source: "cloud" };
             } catch (error) {
                 console.error("Erro ao salvar o caderno do analista; registro mantido localmente", error);
@@ -1085,7 +1241,11 @@
             const db = await getNotebookFirestore();
             if (!db) return { source: "local" };
             try {
-                await db.collection("analyst_notes").doc(String(noteId)).delete();
+                await Promise.all([
+                    db.collection("analyst_notes").doc(String(noteId)).delete(),
+                    db.collection("analyst_shared_notes").doc(String(noteId)).delete().catch(() => null),
+                    db.collection("analyst_evaluations").doc(String(noteId)).delete().catch(() => null)
+                ]);
                 return { source: "cloud" };
             } catch (error) {
                 console.error("Erro ao excluir anotação do analista", error);
@@ -1102,7 +1262,7 @@
                     const key = localStorage.key(index);
                     if (!key || !key.startsWith(`${ANALYST_NOTE_STORAGE_PREFIX}${turmaKey}_`)) continue;
                     const parsed = JSON.parse(localStorage.getItem(key) || "[]");
-                    if (Array.isArray(parsed)) notes.push(...parsed.map(normalizeAnalystNote).filter(note => note && note.visibleToInstructor && instructorKeys.has(note.instructorKey)));
+                    if (Array.isArray(parsed)) notes.push(...parsed.map(normalizeAnalystNote).filter(note => note && note.visibleToInstructor && instructorKeys.has(note.instructorKey)).map(note => ({ ...note, score: null })));
                 }
             } catch (error) {}
             return Array.from(new Map(notes.map(note => [note.id, note])).values());
@@ -1114,12 +1274,12 @@
             const db = await getNotebookFirestore();
             if (!db || instructorKeys.size === 0) return localNotes;
             try {
-                const snapshot = await db.collection("analyst_notes")
+                const snapshot = await db.collection("analyst_shared_notes")
                     .where("turmaKey", "==", cleanNotebookKey(turma, "TURMA_DESCONHECIDA"))
                     .where("visibleToInstructor", "==", true)
                     .get();
                 const merged = new Map(localNotes.map(note => [note.id, note]));
-                snapshot.docs.map(doc => normalizeAnalystNote({ id: doc.id, ...doc.data() })).filter(note => note && instructorKeys.has(note.instructorKey)).forEach(note => merged.set(note.id, note));
+                snapshot.docs.map(doc => normalizeAnalystNote({ id: doc.id, ...doc.data(), score: null })).filter(note => note && instructorKeys.has(note.instructorKey)).forEach(note => merged.set(note.id, note));
                 return Array.from(merged.values()).sort((a, b) => String(b.date).localeCompare(String(a.date)));
             } catch (error) {
                 console.error("Erro ao carregar anotações visíveis do analista", error);
@@ -1330,7 +1490,7 @@
                                 <div className="space-y-2">{analystNotes.map(note => {
                                     const competency = PDI_COMPETENCIES.find(item => item.id === note.competency);
                                     return <div key={note.id} className="rounded-lg border border-blue-100 bg-white p-3 text-xs">
-                                        <div className="flex flex-wrap items-center gap-2"><strong className="text-senac-blue">{note.subject || note.followupType}</strong>{competency && <span className="rounded bg-blue-50 px-2 py-0.5 text-blue-700">{competency.label}</span>}{note.score !== null && <span className="font-bold text-gray-600">{note.score}%</span>}</div>
+                                        <div className="flex flex-wrap items-center gap-2"><strong className="text-senac-blue">{note.subject || note.followupType}</strong>{competency && <span className="rounded bg-blue-50 px-2 py-0.5 text-blue-700">{competency.label}</span>}{note.trackingEnabled && <span className="rounded bg-gray-100 px-2 py-0.5 text-gray-700">{(ANALYST_TRACKING_STATUS_OPTIONS.find(item => item.value === note.trackingStatus) || ANALYST_TRACKING_STATUS_OPTIONS[0]).label}</span>}</div>
                                         <div className="mt-1 text-gray-500">{note.followupType} | {formatNotebookDate(note.date)} | {note.analystName}</div>
                                         {(note.periodStart || note.periodEnd) && <div className="mt-1 text-gray-500">Período: {note.periodStart ? formatNotebookDate(note.periodStart) : "Início não informado"} a {note.periodEnd ? formatNotebookDate(note.periodEnd) : "Em aberto"}</div>}
                                         {note.notes && <p className="mt-2 whitespace-pre-wrap text-gray-700">{note.notes}</p>}
@@ -1696,6 +1856,164 @@
                     </div>
                 </div>
             );
+        };
+
+        const getAnalystTrackingMeta = note => ANALYST_TRACKING_STATUS_OPTIONS.find(item => item.value === String(note && note.trackingStatus || "em_acompanhamento")) || ANALYST_TRACKING_STATUS_OPTIONS[0];
+        const getAnalystTrackingState = note => {
+            if (!note || !note.trackingEnabled || getAnalystTrackingMeta(note).closed) return "closed";
+            const due = notebookDateInput(note.reminderDate || note.periodEnd);
+            if (!due) return "open";
+            const today = notebookDateInput(new Date());
+            if (due < today) return "overdue";
+            if (due === today) return "today";
+            return "open";
+        };
+        const openAnalystTrackingInOutlook = (note, turma) => {
+            const due = notebookDateInput(note && (note.reminderDate || note.periodEnd));
+            if (!due) { alert("Informe a data do lembrete para abrir o acompanhamento no Outlook."); return; }
+            const subject = `Acompanhamento: ${note.followupType} - ${note.instructorName}`;
+            const body = [`Turma: ${turma}`, `Instrutor: ${note.instructorName}`, `Analista: ${note.analystName}`, `Situação: ${note.followupType}`, `Assunto: ${note.subject || "Não informado"}`, `Status: ${getAnalystTrackingMeta(note).label}`, "", note.notes || "Sem descrição adicional."].join("\n");
+            const url = `https://outlook.office.com/calendar/0/deeplink/compose?subject=${encodeURIComponent(subject)}&startdt=${encodeURIComponent(`${due}T09:00:00`)}&enddt=${encodeURIComponent(`${due}T09:30:00`)}&body=${encodeURIComponent(body)}&allday=false`;
+            const popup = window.open(url, "_blank", "noopener,noreferrer");
+            if (!popup) window.location.href = url;
+        };
+        const createAnalystDraft = followupType => ({
+            id: `draft_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+            followupType,
+            subject: "",
+            notes: "",
+            manualPDI: false,
+            manualCompetency: "",
+            manualScore: ""
+        });
+
+        const AnalystNotebookMulti = ({ analystName, turma, instructors, onClose, onChanged }) => {
+            const instructorOptions = useMemo(() => [...new Set((instructors || []).map(canonicalizeInstructorName).filter(isValidInstructorName))], [instructors]);
+            const [selectedInstructor, setSelectedInstructor] = useState(() => instructorOptions[0] || "");
+            const [periodStart, setPeriodStart] = useState("");
+            const [periodEnd, setPeriodEnd] = useState("");
+            const [date, setDate] = useState(() => notebookDateInput(new Date()));
+            const [drafts, setDrafts] = useState([]);
+            const [visibleToInstructor, setVisibleToInstructor] = useState(false);
+            const [showEvaluations, setShowEvaluations] = useState(false);
+            const [trackingEnabled, setTrackingEnabled] = useState(false);
+            const [trackingStatus, setTrackingStatus] = useState("em_acompanhamento");
+            const [reminderDate, setReminderDate] = useState("");
+            const [allNotes, setAllNotes] = useState([]);
+            const [storageSource, setStorageSource] = useState("local");
+            const [isSaving, setIsSaving] = useState(false);
+            const [saveNotice, setSaveNotice] = useState("");
+
+            useEffect(() => {
+                let current = true;
+                loadAnalystNotes(turma, analystName).then(loaded => {
+                    if (!current) return;
+                    setAllNotes(loaded.notes || []);
+                    setStorageSource(loaded.source || "local");
+                });
+                return () => { current = false; };
+            }, [turma, analystName]);
+            useEffect(() => { if (!selectedInstructor && instructorOptions[0]) setSelectedInstructor(instructorOptions[0]); }, [selectedInstructor, instructorOptions]);
+            useEffect(() => { if (trackingEnabled && !reminderDate && periodEnd) setReminderDate(periodEnd); }, [trackingEnabled, periodEnd, reminderDate]);
+
+            const toggleType = type => setDrafts(current => current.some(item => item.followupType === type)
+                ? current.filter(item => item.followupType !== type)
+                : [...current, createAnalystDraft(type)]);
+            const updateDraft = (id, changes) => setDrafts(current => current.map(item => item.id === id ? { ...item, ...changes } : item));
+            const suggestionFor = draft => inferAnalystPDI(draft.followupType, draft.subject, draft.notes);
+            const instructorNotes = useMemo(() => allNotes.filter(note => normalizeName(note.instructorName) === normalizeName(selectedInstructor)).sort((a, b) => String(a.date).localeCompare(String(b.date))), [allNotes, selectedInstructor]);
+            const trackedAlerts = useMemo(() => instructorNotes.filter(note => note.trackingEnabled && ["overdue", "today", "open"].includes(getAnalystTrackingState(note))).sort((a, b) => String(a.reminderDate || a.periodEnd || "9999").localeCompare(String(b.reminderDate || b.periodEnd || "9999"))), [instructorNotes]);
+            const pdi = useMemo(() => buildInstructorPDI(instructorNotes), [instructorNotes]);
+            const graphHistory = useMemo(() => instructorNotes.filter(note => note.score !== null && Number.isFinite(Number(note.score))).map(note => ({ ...note, capturedAt: `${note.date}T12:00:00` })), [instructorNotes]);
+            const competenceLabel = value => (PDI_COMPETENCIES.find(item => item.id === value) || {}).label || "Sem competência avaliativa";
+            const scoreLabel = value => value === null ? "Sem avaliação" : `${(PDI_SCORE_OPTIONS.find(item => item.value === Number(value)) || {}).label || "Avaliação"} (${value}%)`;
+            const periodLabel = note => note.periodStart || note.periodEnd ? `${note.periodStart ? formatNotebookDate(note.periodStart) : "Início não informado"} a ${note.periodEnd ? formatNotebookDate(note.periodEnd) : "Em aberto"}` : "Período não informado";
+
+            const save = async () => {
+                if (!selectedInstructor || drafts.length === 0 || drafts.some(item => !item.subject.trim() && !item.notes.trim())) {
+                    alert("Selecione o instrutor, ao menos uma situação e informe assunto ou descrição em cada situação escolhida.");
+                    return;
+                }
+                if (trackingEnabled && !reminderDate && !periodEnd) {
+                    alert("Informe a data do lembrete ou o fim do período para acompanhar o status.");
+                    return;
+                }
+                setIsSaving(true);
+                try {
+                    const results = [];
+                    for (const draft of drafts) {
+                        const suggestion = suggestionFor(draft);
+                        const competency = draft.manualPDI ? draft.manualCompetency : suggestion.competency;
+                        const score = draft.manualPDI ? (draft.manualScore === "" ? null : Number(draft.manualScore)) : suggestion.score;
+                        results.push(await persistAnalystNote(turma, analystName, {
+                            instructorName: selectedInstructor,
+                            periodStart,
+                            periodEnd,
+                            date,
+                            followupType: draft.followupType,
+                            subject: draft.subject,
+                            notes: draft.notes,
+                            competency: competency || "",
+                            score,
+                            visibleToInstructor,
+                            trackingEnabled,
+                            trackingStatus: trackingEnabled ? trackingStatus : "em_acompanhamento",
+                            reminderDate: trackingEnabled ? (reminderDate || periodEnd) : ""
+                        }));
+                    }
+                    setAllNotes(current => [...results.map(item => item.note), ...current.filter(note => !results.some(item => item.note.id === note.id))]);
+                    setStorageSource(results.every(item => item.source === "cloud") ? "cloud" : "local");
+                    setDrafts([]);
+                    setVisibleToInstructor(false);
+                    setTrackingEnabled(false);
+                    setTrackingStatus("em_acompanhamento");
+                    setReminderDate("");
+                    setSaveNotice(`${results.length} situação(ões) salva(s) com sucesso.`);
+                    if (typeof onChanged === "function") onChanged();
+                } finally { setIsSaving(false); }
+            };
+            const remove = async noteId => {
+                if (!confirm("Excluir este acompanhamento do instrutor?")) return;
+                setAllNotes(current => current.filter(note => note.id !== noteId));
+                const result = await removeAnalystNote(turma, analystName, noteId);
+                setStorageSource(result.source);
+                if (typeof onChanged === "function") onChanged();
+            };
+            const changeTrackingStatus = async (note, value) => {
+                const updated = normalizeAnalystNote({ ...note, trackingEnabled: true, trackingStatus: value });
+                setAllNotes(current => current.map(item => item.id === note.id ? updated : item));
+                const result = await persistAnalystNote(turma, analystName, updated);
+                setStorageSource(result.source);
+                if (typeof onChanged === "function") onChanged();
+            };
+            const printPDI = () => {
+                const reportWindow = window.open("", "_blank");
+                if (!reportWindow) { alert("Não foi possível abrir o PDI. Verifique o bloqueio de pop-ups."); return; }
+                const strengths = pdi.strengths.map(item => `<li><strong>${escapeReportHTML(item.label)}:</strong> ${escapeReportHTML(item.note.subject || item.note.notes)}</li>`).join("") || "<li>Nenhum ponto forte avaliado.</li>";
+                const opportunities = pdi.opportunities.map(item => `<li><strong>${escapeReportHTML(item.label)}:</strong> ${escapeReportHTML(item.note.subject || item.note.notes)}<br><em>Ação sugerida: ${escapeReportHTML(item.action)}</em></li>`).join("") || "<li>Nenhuma oportunidade registrada.</li>";
+                reportWindow.document.write(`<html lang="pt-BR"><head><meta charset="UTF-8"><title>PDI - ${escapeReportHTML(selectedInstructor)}</title><style>body{font-family:Aptos,Arial,sans-serif;color:#243447;margin:32px}h1{color:#004587;border-bottom:3px solid #f5821f;padding-bottom:10px}h2{font-size:15px;color:#004587;margin-top:22px}li{margin:8px 0;line-height:1.45}.score{background:#eef5fb;border-left:4px solid #f5821f;padding:12px;font-weight:bold}@media print{button{display:none}}</style></head><body><button onclick="window.print()">Imprimir / PDF</button><h1>Plano de Desenvolvimento Individual</h1><p><strong>Instrutor:</strong> ${escapeReportHTML(selectedInstructor)}<br><strong>Turma:</strong> ${escapeReportHTML(turma)}<br><strong>Analista:</strong> ${escapeReportHTML(analystName)}</p><div class="score">Indicador atual: ${pdi.average === null ? "Sem avaliação" : `${pdi.average}%`}</div><h2>Pontos fortes</h2><ul>${strengths}</ul><h2>Oportunidades e ações</h2><ul>${opportunities}</ul></body></html>`);
+                reportWindow.document.close();
+            };
+
+            return <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm" onClick={event => { if (event.target === event.currentTarget) onClose(); }}><div className="flex max-h-[94vh] w-full max-w-7xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl">
+                <div className="flex shrink-0 items-center justify-between bg-senac-blue p-4 text-white"><div><h2 className="flex items-center gap-2 text-xl font-bold"><IconBarChart2 className="h-6 w-6" /> Caderno do Analista</h2><p className="mt-1 text-xs text-blue-100">Acompanhamento de instrutores e construção do PDI | {analystName}</p></div><div className="flex items-center gap-2"><button type="button" onClick={() => setShowEvaluations(value => !value)} className="rounded-md border border-white/40 px-3 py-2 text-xs font-bold hover:bg-white/10"><IconEye className="mr-1 inline h-4 w-4" /> {showEvaluations ? "Ocultar avaliações" : "Mostrar avaliações"}</button><button onClick={onClose} className="rounded-full p-1 hover:bg-white/20"><IconXCircle className="h-6 w-6" /></button></div></div>
+                <div className="grid flex-1 grid-cols-1 overflow-y-auto bg-gray-50 lg:grid-cols-[440px_1fr]"><div className="border-r border-gray-200 bg-white p-5">
+                    <label className="block text-xs font-bold uppercase text-gray-500">Instrutor acompanhado<select value={selectedInstructor} onChange={event => setSelectedInstructor(event.target.value)} className="mt-2 w-full rounded-md border border-gray-300 p-2 text-sm font-normal"><option value="">Selecione</option>{instructorOptions.map(name => <option key={name} value={name}>{name}</option>)}</select></label>
+                    <div className="mt-4"><div className="mb-2 text-xs font-bold uppercase text-gray-500">Período de acompanhamento</div><div className="grid grid-cols-2 gap-3"><label className="text-xs font-bold text-gray-600">Início<input type="date" value={periodStart} onChange={event => setPeriodStart(event.target.value)} className="mt-1 w-full rounded-md border border-gray-300 p-2 font-normal" /></label><label className="text-xs font-bold text-gray-600">Fim<input type="date" min={periodStart || undefined} value={periodEnd} onChange={event => setPeriodEnd(event.target.value)} className="mt-1 w-full rounded-md border border-gray-300 p-2 font-normal" /></label></div></div>
+                    <label className="mt-4 block text-xs font-bold text-gray-600">Data do registro<input type="date" value={date} onChange={event => setDate(event.target.value)} className="mt-1 w-full rounded-md border border-gray-300 p-2 font-normal" /></label>
+                    <fieldset className="mt-4"><legend className="text-xs font-bold uppercase text-gray-500">Tipos a serem tratados</legend><div className="mt-2 grid grid-cols-2 gap-2">{ANALYST_FOLLOWUP_TYPES.map(type => <label key={type} className={`flex cursor-pointer items-center gap-2 rounded-md border p-2 text-xs font-semibold ${drafts.some(item => item.followupType === type) ? "border-senac-blue bg-blue-50 text-senac-blue" : "border-gray-200 text-gray-600"}`}><input type="checkbox" checked={drafts.some(item => item.followupType === type)} onChange={() => toggleType(type)} className="rounded text-senac-blue" />{type}</label>)}</div></fieldset>
+                    <div className="mt-4 space-y-3">{drafts.map(draft => { const suggestion = suggestionFor(draft); return <section key={draft.id} className="rounded-lg border border-gray-200 bg-gray-50 p-3"><div className="mb-2 flex items-center justify-between"><strong className="text-sm text-senac-blue">{draft.followupType}</strong><button type="button" onClick={() => toggleType(draft.followupType)} className="text-gray-400 hover:text-red-600"><IconXCircle className="h-4 w-4" /></button></div><label className="block text-xs font-bold text-gray-600">Assunto<input value={draft.subject} onChange={event => updateDraft(draft.id, { subject: event.target.value })} className="mt-1 w-full rounded border border-gray-300 bg-white p-2 font-normal" placeholder="Assunto específico desta situação" /></label><label className="mt-2 block text-xs font-bold text-gray-600">Descrição<textarea value={draft.notes} onChange={event => updateDraft(draft.id, { notes: event.target.value })} className="mt-1 h-20 w-full resize-none rounded border border-gray-300 bg-white p-2 font-normal" placeholder="Fatos, evidências e encaminhamentos" /></label><div className="mt-2 rounded border border-orange-200 bg-orange-50 p-2 text-xs"><div className="flex justify-between gap-2"><strong className="text-orange-900">Classificação PDI</strong><button type="button" onClick={() => updateDraft(draft.id, draft.manualPDI ? { manualPDI: false } : { manualPDI: true, manualCompetency: suggestion.competency || "", manualScore: suggestion.score === null ? "" : String(suggestion.score) })} className="font-bold text-senac-blue">{draft.manualPDI ? "Usar automática" : "Ajustar"}</button></div>{draft.manualPDI ? <div className="mt-2 space-y-2"><select value={draft.manualCompetency} onChange={event => updateDraft(draft.id, { manualCompetency: event.target.value })} className="w-full rounded border border-gray-300 bg-white p-2"><option value="">Não se aplica</option>{PDI_COMPETENCIES.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}</select>{showEvaluations && <select value={draft.manualScore} onChange={event => updateDraft(draft.id, { manualScore: event.target.value })} className="w-full rounded border border-gray-300 bg-white p-2"><option value="">Sem avaliação</option>{PDI_SCORE_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label} ({option.value}%)</option>)}</select>}</div> : <div className="mt-2 text-gray-700"><strong>Competência:</strong> {competenceLabel(suggestion.competency)}{showEvaluations && <div className="mt-1"><strong>Avaliação:</strong> {scoreLabel(suggestion.score)}</div>}</div>}</div></section>; })}{drafts.length === 0 && <p className="rounded-lg border border-dashed border-gray-300 p-4 text-center text-xs text-gray-400">Selecione uma ou mais situações para abrir os campos de registro.</p>}</div>
+                    <label className="mt-4 flex cursor-pointer items-start gap-2 rounded-lg border border-purple-200 bg-purple-50 p-3 text-xs text-purple-900"><input type="checkbox" checked={trackingEnabled} onChange={event => setTrackingEnabled(event.target.checked)} className="mt-0.5 rounded text-purple-600" /><span><strong className="block">Criar status para acompanhamento</strong>Ativa prazo, alertas e acompanhamento no Outlook.</span></label>
+                    {trackingEnabled && <div className="mt-3 grid grid-cols-1 gap-2 rounded-lg border border-purple-200 p-3"><label className="text-xs font-bold text-gray-600">Status<select value={trackingStatus} onChange={event => setTrackingStatus(event.target.value)} className="mt-1 w-full rounded border border-gray-300 p-2 font-normal">{ANALYST_TRACKING_STATUS_OPTIONS.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label><label className="text-xs font-bold text-gray-600">Data do lembrete<input type="date" min={date || undefined} value={reminderDate} onChange={event => setReminderDate(event.target.value)} className="mt-1 w-full rounded border border-gray-300 p-2 font-normal" /></label></div>}
+                    <label className="mt-4 flex cursor-pointer items-start gap-2 rounded-lg border border-blue-200 bg-blue-50 p-3 text-xs text-blue-900"><input type="checkbox" checked={visibleToInstructor} onChange={event => setVisibleToInstructor(event.target.checked)} className="mt-0.5 rounded text-senac-blue" /><span><strong className="block">Permitir visualização pelo instrutor</strong>A avaliação percentual nunca é compartilhada.</span></label>
+                    <button onClick={save} disabled={isSaving || !selectedInstructor || drafts.length === 0} className="mt-4 flex w-full items-center justify-center gap-2 rounded-md bg-senac-blue px-4 py-2.5 text-sm font-bold text-white disabled:opacity-50"><IconSave className="h-4 w-4" /> {isSaving ? "Salvando..." : `Salvar ${drafts.length || ""} situação(ões)`}</button>{saveNotice && <p className="mt-2 text-center text-xs font-semibold text-green-700">{saveNotice}</p>}<p className="mt-1 text-center text-[10px] text-gray-400">{storageSource === "cloud" ? "Sincronizado com o Firebase" : "Salvo neste dispositivo"}</p>
+                </div><div className="space-y-4 p-5">
+                    {trackedAlerts.length > 0 && <section className="rounded-lg border border-orange-200 bg-orange-50 p-4"><h3 className="text-sm font-bold text-orange-900">Acompanhamentos pendentes</h3><div className="mt-2 space-y-2">{trackedAlerts.slice(0, 8).map(note => <div key={note.id} className="flex flex-wrap items-center justify-between gap-2 rounded bg-white p-2 text-xs"><span><strong>{note.followupType}:</strong> {note.subject || "Sem assunto"} | {note.reminderDate ? formatNotebookDate(note.reminderDate) : "Sem prazo"}</span><button type="button" onClick={() => openAnalystTrackingInOutlook(note, turma)} className="font-bold text-senac-blue">Abrir no Outlook</button></div>)}</div></section>}
+                    <div className={`grid grid-cols-2 gap-3 ${showEvaluations ? "md:grid-cols-4" : "md:grid-cols-3"}`}><div className="rounded-lg border border-gray-200 bg-white p-3"><div className="text-[10px] font-bold uppercase text-gray-400">Registros</div><div className="mt-1 text-2xl font-bold text-senac-blue">{instructorNotes.length}</div></div><div className="rounded-lg border border-gray-200 bg-white p-3"><div className="text-[10px] font-bold uppercase text-gray-400">Em acompanhamento</div><div className="mt-1 text-2xl font-bold text-purple-700">{trackedAlerts.length}</div></div>{showEvaluations && <><div className="rounded-lg border border-gray-200 bg-white p-3"><div className="text-[10px] font-bold uppercase text-gray-400">Indicador PDI</div><div className="mt-1 text-2xl font-bold text-senac-orange">{pdi.average === null ? "--" : `${pdi.average}%`}</div></div><div className="rounded-lg border border-gray-200 bg-white p-3"><div className="text-[10px] font-bold uppercase text-gray-400">Competências avaliadas</div><div className="mt-1 text-2xl font-bold text-green-700">{pdi.strengths.length + pdi.opportunities.length}</div></div></>}</div>
+                    {showEvaluations ? <><HistoryBars title="Evolução das avaliações do instrutor" history={graphHistory} getValue={item => item.score} color="#004587" /><div className="rounded-lg border border-gray-200 bg-white p-4"><div className="mb-3 flex items-center justify-between"><h3 className="text-sm font-bold text-gray-800">PDI consolidado</h3><button onClick={printPDI} disabled={pdi.average === null} className="rounded border border-senac-blue px-2 py-1 text-xs font-bold text-senac-blue disabled:opacity-40">Emitir PDI</button></div><div className="grid gap-4 md:grid-cols-2"><div><h4 className="text-xs font-bold uppercase text-green-700">Pontos fortes</h4>{pdi.strengths.length ? <ul className="mt-2 space-y-2 text-xs">{pdi.strengths.map(item => <li key={item.id}><strong>{item.label}:</strong> {item.note.subject || item.note.notes}</li>)}</ul> : <p className="mt-2 text-xs text-gray-400">Sem avaliações positivas.</p>}</div><div><h4 className="text-xs font-bold uppercase text-red-700">Oportunidades e ações</h4>{pdi.opportunities.length ? <ul className="mt-2 space-y-2 text-xs">{pdi.opportunities.map(item => <li key={item.id}><strong>{item.label}:</strong> {item.note.subject || item.note.notes}</li>)}</ul> : <p className="mt-2 text-xs text-gray-400">Sem oportunidades avaliadas.</p>}</div></div></div></> : <div className="rounded-lg border border-dashed border-gray-300 bg-white p-5 text-center text-sm text-gray-500"><IconEye className="mx-auto mb-2 h-5 w-5" />Avaliações, percentuais, gráfico e PDI estão ocultos. Use “Mostrar avaliações” quando precisar consultá-los.</div>}
+                    <div className="rounded-lg border border-gray-200 bg-white p-4"><h3 className="mb-3 text-sm font-bold text-gray-800">Histórico do acompanhamento</h3><div className="max-h-[480px] space-y-2 overflow-y-auto">{instructorNotes.length === 0 ? <p className="py-8 text-center text-xs text-gray-400">Nenhum acompanhamento para este instrutor.</p> : [...instructorNotes].reverse().map(note => <div key={note.id} className="relative rounded-lg border border-gray-200 p-3 text-xs"><button onClick={() => remove(note.id)} className="absolute right-2 top-2 text-gray-300 hover:text-red-600"><IconTrash2 className="h-4 w-4" /></button><div className="flex flex-wrap items-center gap-2 pr-6"><span className="font-bold text-senac-blue">{note.subject || note.followupType}</span><span className="rounded bg-orange-50 px-2 py-0.5 text-orange-800">{note.followupType}</span>{note.competency && <span className="rounded bg-blue-50 px-2 py-0.5 text-blue-700">{competenceLabel(note.competency)}</span>}{showEvaluations && note.score !== null && <span className="rounded bg-gray-100 px-2 py-0.5 font-bold text-gray-600">{note.score}%</span>}{note.visibleToInstructor ? <span className="rounded bg-green-100 px-2 py-0.5 text-green-800">Visível ao instrutor</span> : <span className="rounded bg-gray-100 px-2 py-0.5 text-gray-600">Restrito</span>}</div><div className="mt-1 text-gray-400">{formatNotebookDate(note.date)} | {periodLabel(note)}</div>{note.notes && <p className="mt-2 whitespace-pre-wrap text-gray-700">{note.notes}</p>}{note.trackingEnabled && <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-gray-100 pt-2"><select value={note.trackingStatus} onChange={event => changeTrackingStatus(note, event.target.value)} className={`rounded border px-2 py-1 text-xs font-bold ${getAnalystTrackingMeta(note).className}`}>{ANALYST_TRACKING_STATUS_OPTIONS.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}</select>{note.reminderDate && <span className={getAnalystTrackingState(note) === "overdue" ? "font-bold text-red-700" : "text-gray-500"}>Lembrete: {formatNotebookDate(note.reminderDate)}</span>}<button type="button" onClick={() => openAnalystTrackingInOutlook(note, turma)} className="font-bold text-senac-blue">Abrir no Outlook</button></div>}</div>)}</div></div>
+                </div></div><div className="flex shrink-0 justify-end border-t border-gray-200 bg-white p-4"><button onClick={onClose} className="rounded-md border border-gray-300 px-4 py-2 text-sm font-bold text-gray-600">Fechar</button></div>
+            </div></div>;
         };
 
         const NotebookNotesReport = ({ turma, instructors, onClose }) => {
@@ -4387,8 +4705,8 @@
             }
         }
 
-        const DESKTOP_APP_VERSION = "1.1.6";
-        const DESKTOP_APP_DOWNLOAD_URL = "https://github.com/Supervisao-pratica/Dash-Frequencia/releases/download/v1.1.6/Dashboard-Senac-Setup-1.1.6.zip";
+        const DESKTOP_APP_VERSION = "1.1.7";
+        const DESKTOP_APP_DOWNLOAD_URL = "https://github.com/Supervisao-pratica/Dash-Frequencia/releases/download/v1.1.7/Dashboard-Senac-Setup-1.1.7.zip";
         const DesktopAppOffer = () => {
             const storageKey = `desktop_app_download_started_${DESKTOP_APP_VERSION}`;
             const [downloadStarted, setDownloadStarted] = useState(() => {
@@ -4497,11 +4815,16 @@
             const [contactSaving, setContactSaving] = useState(false);
             const [contactStorageSource, setContactStorageSource] = useState("local");
             const [contactMessage, setContactMessage] = useState("");
+            const [dropoutDocuments, setDropoutDocuments] = useState({});
+            const [dropoutDocumentSource, setDropoutDocumentSource] = useState("local");
+            const [dropoutDocumentScanning, setDropoutDocumentScanning] = useState(false);
+            const [dropoutDocumentNotice, setDropoutDocumentNotice] = useState("");
 
             // Novo Estado V72 - Instrutor Selecionado para Notas
             const [selectedInstructorForNotes, setSelectedInstructorForNotes] = useState(null);
             const [showAnalystNotebook, setShowAnalystNotebook] = useState(false);
             const [visibleAnalystNotes, setVisibleAnalystNotes] = useState([]);
+            const [analystTrackingAlerts, setAnalystTrackingAlerts] = useState([]);
             const [showNotebookReport, setShowNotebookReport] = useState(false);
             const [showUCIntervalReport, setShowUCIntervalReport] = useState(false);
             const [showStudentReportModal, setShowStudentReportModal] = useState(false);
@@ -4692,9 +5015,19 @@
                 setVisibleAnalystNotes(await loadVisibleAnalystNotes(data.turma, activeInstructorNames));
             };
 
+            const refreshAnalystTrackingAlerts = async () => {
+                if (!data || !data.turma || !currentAnalystName) { setAnalystTrackingAlerts([]); return; }
+                const loaded = await loadAnalystNotes(data.turma, currentAnalystName);
+                setAnalystTrackingAlerts((loaded.notes || []).filter(note => note.trackingEnabled && ["overdue", "today", "open"].includes(getAnalystTrackingState(note))));
+            };
+
             useEffect(() => {
                 refreshVisibleAnalystNotes().catch(error => console.error("Erro ao carregar acompanhamentos visíveis", error));
             }, [data ? data.turma : "", activeInstructorNames.join("|")]);
+
+            useEffect(() => {
+                refreshAnalystTrackingAlerts().catch(error => console.error("Erro ao carregar alertas do analista", error));
+            }, [data ? data.turma : "", currentAnalystName]);
 
             useEffect(() => {
                 if (!data || !data.turma) {
@@ -4735,6 +5068,33 @@
                         return { ...previous, students };
                     });
                 }).catch(error => console.error("Erro ao carregar contatos da turma", error));
+                return () => { isCurrent = false; };
+            }, [data ? data.turma : ""]);
+
+            useEffect(() => {
+                if (!data || !data.turma) {
+                    setDropoutDocuments({});
+                    setDropoutDocumentSource("local");
+                    return undefined;
+                }
+                let isCurrent = true;
+                loadDropoutDocuments(data.turma).then(loaded => {
+                    if (!isCurrent) return;
+                    const records = loaded.records || {};
+                    setDropoutDocuments(records);
+                    setDropoutDocumentSource(loaded.source || "local");
+                    setData(previous => {
+                        if (!previous || previous.turma !== data.turma) return previous;
+                        let changed = false;
+                        const students = previous.students.map(student => {
+                            const record = records[normalizeName(student.name)];
+                            if (!record || record.status !== "com_documentacao" || student.is_dropout) return student;
+                            changed = true;
+                            return { ...student, is_dropout: true, is_process_dropout: false, status: "Evadido/Desligado", dropout_reason: "Documentação de desligamento confirmada" };
+                        });
+                        return changed ? { ...previous, students } : previous;
+                    });
+                }).catch(error => console.error("Erro ao carregar o acompanhamento documental", error));
                 return () => { isCurrent = false; };
             }, [data ? data.turma : ""]);
 
@@ -5199,6 +5559,112 @@
                 }
             };
 
+            const confirmDropoutDocumentation = async (student, status, detection = {}) => {
+                if (!data || !student) return;
+                const studentKey = normalizeName(student.name);
+                const saved = await persistDropoutDocument(data.turma, {
+                    studentKey,
+                    studentName: student.name,
+                    status,
+                    source: detection.source || "manual",
+                    fileCount: detection.fileCount || 0,
+                    folderName: detection.folderName || "",
+                    detectedAt: detection.detectedAt || (status === "com_documentacao" ? new Date().toISOString() : "")
+                });
+                setDropoutDocuments(current => ({ ...current, [studentKey]: saved.record }));
+                setDropoutDocumentSource(saved.source || "local");
+                if (status !== "com_documentacao") {
+                    setDropoutDocumentNotice(`${student.name} permanece em processo e sem documentação.`);
+                    return;
+                }
+
+                const updatedStudent = {
+                    ...student,
+                    is_dropout: true,
+                    is_process_dropout: false,
+                    status: "Evadido/Desligado",
+                    dropout_reason: detection.source === "rede"
+                        ? "Documentação localizada na rede"
+                        : "Documentação de desligamento confirmada"
+                };
+                const updatedData = { ...data, students: data.students.map(item => item.id === student.id ? updatedStudent : item) };
+                setData(updatedData);
+                if (selectedStudentForModal && selectedStudentForModal.id === student.id) setSelectedStudentForModal(updatedStudent);
+                saveManualProcessList(data.turma, getManualProcessList(data.turma).filter(name => name !== studentKey));
+                setDropoutDocumentNotice(`Documentação confirmada para ${student.name}. O aluno foi movido para Evasão/Desligado. Pinte a célula do nome de laranja na chamada e dê baixa no sistema Senac.`);
+                try {
+                    const persisted = await persistSavedClass(updatedData, { name: detection.source === "rede" ? "Documentação localizada na rede" : "Documentação confirmada" });
+                    setActiveClassUpdatedAt(persisted.summary && persisted.summary.updatedAt || "");
+                    refreshSavedClasses();
+                } catch (error) {
+                    console.error("Erro ao salvar a baixa documental na turma", error);
+                }
+            };
+
+            const scanDropoutDocumentsForClass = async ({ silent = false } = {}) => {
+                if (!data || !isElectronDesktop() || !window.senacDesktop || typeof window.senacDesktop.scanDropoutDocuments !== "function") {
+                    if (!silent) setDropoutDocumentNotice("A busca automática nas pastas da rede está disponível no aplicativo instalado.");
+                    return;
+                }
+                const candidates = data.students.filter(student => student.is_process_dropout && !student.is_dropout);
+                if (candidates.length === 0) {
+                    if (!silent) setDropoutDocumentNotice("Não há alunos em processo de desligamento para verificar.");
+                    return;
+                }
+                setDropoutDocumentScanning(true);
+                try {
+                    const result = await window.senacDesktop.scanDropoutDocuments(data.turma, candidates.map(student => student.name));
+                    const detected = (result.students || []).filter(item => item.hasDocuments);
+                    if (detected.length === 0) {
+                        if (!silent) setDropoutDocumentNotice(result.dropoutDirectory
+                            ? "Nenhum documento foi localizado para os alunos em processo."
+                            : "A pasta Documentos/Desligamentos não foi localizada para esta turma.");
+                        return;
+                    }
+
+                    const detectedByName = new Map(detected.map(item => [normalizeName(item.studentName), item]));
+                    const nextRecords = { ...dropoutDocuments };
+                    for (const student of candidates) {
+                        const item = detectedByName.get(normalizeName(student.name));
+                        if (!item) continue;
+                        const saved = await persistDropoutDocument(data.turma, {
+                            studentKey: normalizeName(student.name), studentName: student.name, status: "com_documentacao", source: "rede",
+                            fileCount: item.fileCount, folderName: item.folderName, detectedAt: new Date().toISOString()
+                        });
+                        nextRecords[normalizeName(student.name)] = saved.record;
+                        setDropoutDocumentSource(saved.source || "local");
+                    }
+                    setDropoutDocuments(nextRecords);
+                    const updatedData = {
+                        ...data,
+                        students: data.students.map(student => {
+                            if (!detectedByName.has(normalizeName(student.name))) return student;
+                            return { ...student, is_dropout: true, is_process_dropout: false, status: "Evadido/Desligado", dropout_reason: "Documentação localizada na rede" };
+                        })
+                    };
+                    setData(updatedData);
+                    const selectedUpdated = selectedStudentForModal && updatedData.students.find(student => student.id === selectedStudentForModal.id);
+                    if (selectedUpdated) setSelectedStudentForModal(selectedUpdated);
+                    const detectedKeys = new Set(detected.map(item => normalizeName(item.studentName)));
+                    saveManualProcessList(data.turma, getManualProcessList(data.turma).filter(name => !detectedKeys.has(name)));
+                    const persisted = await persistSavedClass(updatedData, { name: "Verificação de documentos na rede" });
+                    setActiveClassUpdatedAt(persisted.summary && persisted.summary.updatedAt || "");
+                    setDropoutDocumentNotice(`${detected.length} aluno(s) com documentação localizada foram movidos para Evasão/Desligado. Pinte as células dos nomes de laranja na chamada e dê baixa no sistema Senac.`);
+                    refreshSavedClasses();
+                } catch (error) {
+                    console.error("Erro ao verificar documentos de desligamento", error);
+                    if (!silent) setDropoutDocumentNotice(`Não foi possível verificar a documentação na rede: ${error.message}`);
+                } finally {
+                    setDropoutDocumentScanning(false);
+                }
+            };
+
+            useEffect(() => {
+                if (!data || !data.turma || !isElectronDesktop()) return undefined;
+                const timer = window.setTimeout(() => scanDropoutDocumentsForClass({ silent: true }), 500);
+                return () => window.clearTimeout(timer);
+            }, [data ? data.turma : "", frequencySourceRevision]);
+
             const filteredStudents = useMemo(() => {
                 if (!data) return [];
                 return data.students.filter(s => {
@@ -5222,6 +5688,9 @@
             const selectedNAStudentSummary = selectedStudentForModal ? getNAStudentSummary(data, selectedStudentForModal.name, naJustifications) : null;
             const selectedNAStudentRaw = selectedStudentForModal && data && data.naAlerts && data.naAlerts.students ? data.naAlerts.students[normalizeName(selectedStudentForModal.name)] : null;
             const naAttentionTotal = naAttentionStudents.reduce((total, student) => total + student.count, 0);
+            const processStudentsWithoutDocuments = data ? data.students.filter(student => student.is_process_dropout && !student.is_dropout && (!dropoutDocuments[normalizeName(student.name)] || dropoutDocuments[normalizeName(student.name)].status !== "com_documentacao")) : [];
+            const selectedDropoutDocument = selectedStudentForModal ? dropoutDocuments[normalizeName(selectedStudentForModal.name)] : null;
+            const selectedDropoutDocumentMeta = getDropoutDocumentMeta(selectedDropoutDocument);
             const selectedObservationGroups = useMemo(() => {
                 if (!selectedStudentForModal) return [];
                 const groups = new Map();
@@ -5285,7 +5754,7 @@
                         />
                     )}
 
-                    {showAnalystNotebook && currentAnalystName && <AnalystNotebookEnhanced analystName={currentAnalystName} turma={data.turma} instructors={detectedInstructorNames} onChanged={refreshVisibleAnalystNotes} onClose={() => setShowAnalystNotebook(false)} />}
+                    {showAnalystNotebook && currentAnalystName && <AnalystNotebookMulti analystName={currentAnalystName} turma={data.turma} instructors={detectedInstructorNames} onChanged={() => { refreshVisibleAnalystNotes(); refreshAnalystTrackingAlerts(); }} onClose={() => setShowAnalystNotebook(false)} />}
 
                     {showNotebookReport && <NotebookNotesReport turma={data.turma} instructors={notebookInstructorNames} onClose={() => setShowNotebookReport(false)} />}
                     {showUCIntervalReport && <UCIntervalReportModal data={data} activityTracking={activityTracking} naJustifications={naJustifications} notebookNotes={classNotebookNotes} onClose={() => setShowUCIntervalReport(false)} />}
@@ -5342,8 +5811,28 @@
                                 </div>
                                 <div className="p-8 overflow-y-auto">
                                     <div className="mb-5 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2"><span className="text-xs text-blue-800">Escolha em um só lugar quais informações incluir.</span><button type="button" onClick={() => { setStudentReportMode("complete"); setShowStudentReportModal(true); }} className="px-3 py-2 rounded-md bg-senac-blue text-white text-xs font-bold hover:bg-blue-800 flex items-center gap-2"><IconFileText className="w-4 h-4" /> Emitir relatório</button></div>
-                                    <div className="mb-6 flex justify-between items-center"><h3 className="text-sm font-bold text-gray-400 uppercase tracking-wider">Situação Atual</h3><label className="flex items-center gap-2 text-xs bg-purple-50 px-2 py-1 rounded border border-purple-200 cursor-pointer hover:bg-purple-100"><input type="checkbox" checked={selectedStudentForModal.is_process_dropout} onChange={() => toggleProcessDropout(selectedStudentForModal.id)} className="rounded text-purple-600 focus:ring-purple-500" /> Marcar como "Em Processo de Desligamento"</label></div>
+                                    <div className="mb-6 flex justify-between items-center"><h3 className="text-sm font-bold text-gray-400 uppercase tracking-wider">Situação Atual</h3>{!selectedStudentForModal.is_dropout && <label className="flex items-center gap-2 text-xs bg-purple-50 px-2 py-1 rounded border border-purple-200 cursor-pointer hover:bg-purple-100"><input type="checkbox" checked={selectedStudentForModal.is_process_dropout} onChange={() => toggleProcessDropout(selectedStudentForModal.id)} className="rounded text-purple-600 focus:ring-purple-500" /> Marcar como "Em Processo de Desligamento"</label>}</div>
                                     <div className="flex gap-2 mb-6">{selectedStudentForModal.is_dropout ? (<div className="bg-orange-100 text-orange-800 px-4 py-2 rounded-lg font-bold flex items-center gap-2"><IconLogOut className="w-5 h-5"/> {selectedStudentForModal.dropout_reason || "Evadido"}</div>) : selectedStudentForModal.is_process_dropout ? (<div className="bg-purple-100 text-purple-800 px-4 py-2 rounded-lg font-bold flex items-center gap-2"><IconClock className="w-5 h-5"/> Em Processo de Desligamento</div>) : (<>{selectedStudentForModal.needs_recuperacao && <div className="bg-red-100 text-red-800 px-4 py-2 rounded-lg font-bold flex items-center gap-2"><IconXCircle className="w-5 h-5"/> Recuperação Necessária</div>}{selectedStudentForModal.needs_conselho && !selectedStudentForModal.needs_recuperacao && <div className="bg-yellow-100 text-yellow-800 px-4 py-2 rounded-lg font-bold flex items-center gap-2"><IconAlertTriangle className="w-5 h-5"/> Conselho de Classe</div>}{!selectedStudentForModal.needs_recuperacao && !selectedStudentForModal.needs_conselho && <div className="bg-green-100 text-green-800 px-4 py-2 rounded-lg font-bold flex items-center gap-2"><IconCheckCircle className="w-5 h-5"/> Desenvolvimento Pleno na Aba Pedagógico</div>}</>)}</div>
+
+                                    {(selectedStudentForModal.is_process_dropout || selectedDropoutDocument) && (
+                                        <div className="mb-6 overflow-hidden rounded-xl border border-purple-200 bg-purple-50">
+                                            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-purple-200 bg-purple-100 px-4 py-2">
+                                                <h3 className="flex items-center gap-2 text-sm font-bold text-purple-900"><IconFileText className="h-4 w-4" /> Documentação de desligamento</h3>
+                                                <span className="text-[10px] font-bold uppercase text-purple-700">{dropoutDocumentSource === "cloud" ? "Compartilhado no Firebase" : "Salvo localmente"}</span>
+                                            </div>
+                                            <div className="space-y-3 p-4">
+                                                <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+                                                    <label className="flex-1 text-xs font-bold text-gray-700">Situação da documentação
+                                                        <select value={selectedDropoutDocument && selectedDropoutDocument.status || "sem_documentacao"} onChange={event => confirmDropoutDocumentation(selectedStudentForModal, event.target.value)} className={`mt-1 w-full rounded-md border px-3 py-2 text-sm font-bold outline-none ${selectedDropoutDocumentMeta.className}`}>
+                                                            {DROPOUT_DOCUMENT_STATUS_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+                                                        </select>
+                                                    </label>
+                                                    {isElectronDesktop() && <button type="button" onClick={() => scanDropoutDocumentsForClass()} disabled={dropoutDocumentScanning} className="rounded-md border border-purple-300 bg-white px-3 py-2 text-xs font-bold text-purple-800 hover:bg-purple-100 disabled:opacity-60"><IconRefreshCw className={`mr-1 inline h-3.5 w-3.5 ${dropoutDocumentScanning ? "animate-spin" : ""}`} /> {dropoutDocumentScanning ? "Verificando..." : "Verificar pasta na rede"}</button>}
+                                                </div>
+                                                {selectedDropoutDocument && selectedDropoutDocument.status === "com_documentacao" ? <div className="rounded-md border border-orange-200 bg-orange-50 px-3 py-2 text-xs text-orange-900"><strong>Próxima ação:</strong> pinte a célula do nome de laranja na chamada e dê baixa no sistema Senac.{selectedDropoutDocument.fileCount > 0 ? ` Foram localizado(s) ${selectedDropoutDocument.fileCount} arquivo(s) na pasta ${selectedDropoutDocument.folderName}.` : ""}</div> : <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800">Este aluno continuará no alerta semanal até a documentação ser confirmada.</div>}
+                                            </div>
+                                        </div>
+                                    )}
 
                                     <div className="mb-6 bg-blue-50 rounded-xl border border-blue-200 overflow-hidden">
                                         <div className="bg-blue-100 px-4 py-2 border-b border-blue-200 flex justify-between items-center">
@@ -5512,6 +6001,30 @@
 
                     <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-6">
                         <DashboardCharts stats={stats} context={selectedUC} />
+                        {currentAnalystName && analystTrackingAlerts.length > 0 && (
+                            <div className="mb-6 rounded-lg border border-orange-200 border-l-4 border-l-orange-500 bg-orange-50 p-4 text-sm text-orange-900 shadow-sm">
+                                <div className="flex flex-wrap items-center justify-between gap-3"><div><div className="flex items-center gap-2 font-bold"><IconClock className="h-4 w-4" /> Acompanhamentos do analista</div><div className="mt-1 text-xs">{analystTrackingAlerts.length} situação(ões) exigem acompanhamento nesta turma.</div></div><button type="button" onClick={() => setShowAnalystNotebook(true)} className="rounded-md border border-orange-300 bg-white px-3 py-2 text-xs font-bold text-orange-800 hover:bg-orange-100">Abrir caderno</button></div>
+                                <div className="mt-3 text-xs">{analystTrackingAlerts.slice(0, 8).map(note => `${note.instructorName}: ${note.subject || note.followupType}${note.reminderDate ? ` (${formatNotebookDate(note.reminderDate)})` : ""}`).join("; ")}{analystTrackingAlerts.length > 8 ? `; e mais ${analystTrackingAlerts.length - 8}` : ""}</div>
+                            </div>
+                        )}
+                        {dropoutDocumentNotice && (
+                            <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-orange-300 bg-orange-50 px-4 py-3 text-sm text-orange-900 shadow-sm">
+                                <span className="font-medium">{dropoutDocumentNotice}</span>
+                                <button type="button" onClick={() => setDropoutDocumentNotice("")} className="text-xs font-bold text-orange-800 hover:underline">Dispensar</button>
+                            </div>
+                        )}
+                        {processStudentsWithoutDocuments.length > 0 && (
+                            <div className={`mb-6 rounded-lg border border-l-4 p-4 text-sm shadow-sm ${new Date().getDay() === 1 ? "border-red-300 border-l-red-600 bg-red-50 text-red-900" : "border-purple-200 border-l-purple-600 bg-purple-50 text-purple-900"}`}>
+                                <div className="flex flex-wrap items-start justify-between gap-3">
+                                    <div><div className="flex items-center gap-2 font-bold"><IconAlertTriangle className="h-4 w-4" /> Documentação de desligamento pendente</div><div className="mt-1 text-xs">{processStudentsWithoutDocuments.length} aluno(s) em processo ainda estão sem documentação.{new Date().getDay() === 1 ? " Este é o alerta semanal de segunda-feira." : " Acompanhe no quadro de cada aluno."}</div></div>
+                                    <div className="flex flex-wrap gap-2">
+                                        <button type="button" onClick={() => downloadWeeklyDropoutReminder(data.turma, processStudentsWithoutDocuments)} className="rounded-md border border-blue-300 bg-white px-3 py-2 text-xs font-bold text-senac-blue hover:bg-blue-50"><IconCalendar className="mr-1 inline h-3.5 w-3.5" /> Criar alerta semanal no Outlook</button>
+                                        {isElectronDesktop() && <button type="button" onClick={() => scanDropoutDocumentsForClass()} disabled={dropoutDocumentScanning} className="rounded-md border border-purple-300 bg-white px-3 py-2 text-xs font-bold text-purple-800 hover:bg-purple-100 disabled:opacity-60"><IconRefreshCw className={`mr-1 inline h-3.5 w-3.5 ${dropoutDocumentScanning ? "animate-spin" : ""}`} /> {dropoutDocumentScanning ? "Verificando..." : "Verificar documentos na rede"}</button>}
+                                    </div>
+                                </div>
+                                <div className="mt-3 text-xs"><strong>Alunos:</strong> {processStudentsWithoutDocuments.slice(0, 16).map(student => student.name).join("; ")}{processStudentsWithoutDocuments.length > 16 ? `; e mais ${processStudentsWithoutDocuments.length - 16}` : ""}</div>
+                            </div>
+                        )}
                         {data.attendanceWarnings && data.attendanceWarnings.length > 0 && (
                             <div className="mb-6 bg-yellow-50 border border-yellow-200 border-l-4 border-l-yellow-500 rounded-lg p-4 text-sm text-yellow-900 shadow-sm">
                                 <div className="font-bold flex items-center gap-2 mb-2"><IconAlertTriangle className="w-4 h-4"/> Pendências de preenchimento da chamada</div>
@@ -5591,6 +6104,8 @@
                             {filteredStudents.length === 0 ? (<div className="col-span-full py-16 text-center"><div className="inline-block p-4 rounded-full bg-gray-100 mb-4"><IconSearch className="w-8 h-8 text-gray-400"/></div><p className="text-gray-500 font-medium">Nenhum aluno encontrado.</p></div>) : (filteredStudents.map((student) => {
                                 const isDropout = student.is_dropout;
                                 const isProcess = student.is_process_dropout;
+                                const dropoutDocumentRecord = dropoutDocuments[normalizeName(student.name)];
+                                const dropoutDocumentMeta = getDropoutDocumentMeta(dropoutDocumentRecord);
                                 const activitySummary = getActivityStudentSummary(activityTracking, student.name);
                                 const naSummary = getNAStudentSummary(data, student.name, naJustifications);
                                 const studentNotebookNotes = classNotebookNotes.filter(note => note.scope === "class" || Number(note.studentId) === Number(student.id) || (note.studentIds || []).includes(Number(student.id)));
@@ -5651,6 +6166,7 @@
                                                 </div>
                                             )}
                                             {studentNotebookNotes.length > 0 && <div className="mt-2 pt-2 border-t border-orange-100 flex items-center justify-between gap-2 text-[10px] font-bold"><span className="bg-orange-100 text-orange-700 px-2 py-1 rounded">Caderno: {studentNotebookNotes.length} registro(s)</span><span className="text-orange-700">Abrir quadro</span></div>}
+                                            {(isProcess || dropoutDocumentRecord) && <div className="mt-2 flex items-center justify-between gap-2 border-t border-purple-100 pt-2 text-[10px] font-bold"><span className={`rounded border px-2 py-1 ${dropoutDocumentMeta.className}`}>{dropoutDocumentMeta.label}</span><span className="text-purple-700">Acompanhar documentos</span></div>}
                                             <div className="flex items-center gap-2 text-[11px] text-gray-500 mt-3 pt-2 border-t border-gray-50"><IconCalendar className="w-3 h-3 text-gray-400" /><span>Contra Turno: <span className={`font-semibold ${student.contra_turno_desc !== "Sem Contra Turno" ? 'text-senac-blue' : 'text-gray-400'}`}>{student.contra_turno_desc}</span></span></div>
                                             {(student.studentEmail || student.studentPhone || student.supervisorEmail || student.supervisorPhone) && <div className="mt-2 pt-2 border-t border-blue-50 text-[10px] text-gray-500 space-y-1"><div className="flex items-center gap-1"><IconMail className="w-3 h-3 text-senac-blue"/><span className="min-w-0 flex-1 truncate">Aluno: {student.studentEmail || student.studentPhone || 'Contato não informado'}</span>{getWhatsAppUrl(student.studentPhone) && <a href={getWhatsAppUrl(student.studentPhone)} target="_blank" rel="noopener noreferrer" onClick={event => event.stopPropagation()} title="WhatsApp do aluno" className="rounded bg-green-600 p-1 text-white"><IconPhone className="h-3 w-3" /></a>}</div><div className="flex items-center gap-1"><IconUser className="w-3 h-3 text-senac-orange"/><span className="min-w-0 flex-1 truncate">Supervisor: {student.supervisorName || student.supervisorEmail || student.supervisorPhone || 'Contato não informado'}</span>{getWhatsAppUrl(student.supervisorPhone) && <a href={getWhatsAppUrl(student.supervisorPhone)} target="_blank" rel="noopener noreferrer" onClick={event => event.stopPropagation()} title="WhatsApp do supervisor" className="rounded bg-green-600 p-1 text-white"><IconPhone className="h-3 w-3" /></a>}</div></div>}
                                         </div>
@@ -5666,6 +6182,6 @@
         const root = ReactDOM.createRoot(document.getElementById('root'));
         root.render(<><DashboardErrorBoundary><AuthGate /></DashboardErrorBoundary><DesktopAppOffer /></>);
     </script>
-    <script src="./senac-inho.js?v=1.6.4"></script>
+    <script src="./senac-inho.js?v=1.6.5"></script>
 </body>
 </html>

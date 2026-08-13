@@ -84,6 +84,67 @@ const findControlDirectory = entries => entries.find(entry => {
     return normalized.includes('CONTROLE') && normalized.includes('FREQUENCIA');
 });
 
+const findChildDirectory = async (directory, matcher) => {
+    let entries;
+    try { entries = await directoryEntries(directory); }
+    catch (error) { return ''; }
+    const entry = entries.find(item => item.isDirectory() && matcher(normalizeName(item.name)));
+    return entry ? path.join(directory, entry.name) : '';
+};
+
+const countFilesRecursive = async (directory, depth = 2) => {
+    let entries;
+    try { entries = await directoryEntries(directory); }
+    catch (error) { return { fileCount: 0, latestMtimeMs: 0 }; }
+    let fileCount = 0;
+    let latestMtimeMs = 0;
+    for (const entry of entries) {
+        const itemPath = path.join(directory, entry.name);
+        if (entry.isFile() && !entry.name.startsWith('~$')) {
+            fileCount += 1;
+            try { latestMtimeMs = Math.max(latestMtimeMs, Number((await fs.promises.stat(itemPath)).mtimeMs || 0)); } catch (error) {}
+        } else if (entry.isDirectory() && depth > 0) {
+            const child = await countFilesRecursive(itemPath, depth - 1);
+            fileCount += child.fileCount;
+            latestMtimeMs = Math.max(latestMtimeMs, child.latestMtimeMs);
+        }
+    }
+    return { fileCount, latestMtimeMs };
+};
+
+async function scanDropoutDocuments(turmaValue, studentNames, options = {}) {
+    const turma = extractClassNumber(turmaValue);
+    if (!turma) throw new Error('O número da turma não foi identificado.');
+    const root = options.root || DEFAULT_NETWORK_ROOT;
+    const classDirectory = await findClassDirectory(root, turma);
+    if (!classDirectory) throw new Error(`A pasta da turma ${turma} não foi encontrada na rede.`);
+    const documentsDirectory = await findChildDirectory(classDirectory, name => /^DOCUMENTOS?$/.test(name.trim()) || name.includes('DOCUMENTOS'));
+    if (!documentsDirectory) return { turma, classDirectory, documentsDirectory: '', dropoutDirectory: '', students: [] };
+    const dropoutDirectory = await findChildDirectory(documentsDirectory, name => name.includes('DESLIGAMENTO') || name.includes('EVASAO') || name.includes('DESISTENTE'));
+    if (!dropoutDirectory) return { turma, classDirectory, documentsDirectory, dropoutDirectory: '', students: [] };
+    const folders = (await directoryEntries(dropoutDirectory)).filter(entry => entry.isDirectory());
+    const students = [];
+    for (const studentName of studentNames || []) {
+        const normalizedStudent = normalizeName(studentName).replace(/[^A-Z0-9]+/g, ' ').trim();
+        if (!normalizedStudent) continue;
+        const folder = folders.find(entry => {
+            const normalizedFolder = normalizeName(entry.name).replace(/[^A-Z0-9]+/g, ' ').trim();
+            return normalizedFolder === normalizedStudent || normalizedFolder.includes(normalizedStudent);
+        });
+        if (!folder) continue;
+        const folderPath = path.join(dropoutDirectory, folder.name);
+        const summary = await countFilesRecursive(folderPath);
+        students.push({
+            studentName,
+            folderName: folder.name,
+            fileCount: summary.fileCount,
+            latestMtimeMs: summary.latestMtimeMs,
+            hasDocuments: summary.fileCount > 0
+        });
+    }
+    return { turma, classDirectory, documentsDirectory, dropoutDirectory, students };
+}
+
 async function locateFrequencyFile(turmaValue, options = {}) {
     const turma = extractClassNumber(turmaValue);
     if (!turma) throw new Error('O número da turma não foi identificado.');
@@ -103,4 +164,4 @@ async function locateFrequencyFile(turmaValue, options = {}) {
     throw new Error(`Nenhuma planilha de frequência foi encontrada para a turma ${turma} na pasta da turma ou em Controle de Frequência.`);
 }
 
-module.exports = { DEFAULT_NETWORK_ROOT, extractClassNumber, locateFrequencyFile, normalizeName };
+module.exports = { DEFAULT_NETWORK_ROOT, extractClassNumber, locateFrequencyFile, normalizeName, scanDropoutDocuments };

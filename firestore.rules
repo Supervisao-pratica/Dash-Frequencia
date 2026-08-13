@@ -1,0 +1,217 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSenacUser() {
+      return request.auth != null
+        && (request.auth.token.email.matches('.*@pr\\.senac\\.br')
+          || request.auth.token.email.matches('.*@docente\\.pr\\.senac\\.br'));
+    }
+
+    match /instructor_profiles/{userId} {
+      allow create, read, update: if request.auth != null
+        && request.auth.uid == userId
+        && (request.auth.token.email.matches('.*@pr\\.senac\\.br')
+          || request.auth.token.email.matches('.*@docente\\.pr\\.senac\\.br'));
+    }
+
+    match /instructor_notes/{noteId} {
+      // Nao ha prazo de expiracao: o acesso depende de autenticacao.
+      // A colecao e compartilhada entre os instrutores da aplicacao.
+      allow read, delete: if isSenacUser();
+
+      allow create: if isSenacUser()
+        && request.resource.data.turmaKey is string
+        && request.resource.data.instructorKey is string
+        && request.resource.data.scope in ['student', 'class']
+        && request.resource.data.date is string
+        && request.resource.data.notes is string
+        && request.resource.data.situationTypes is list
+        && request.resource.data.attachments is list
+        && (!('treatmentStatus' in request.resource.data) || request.resource.data.treatmentStatus is string)
+        && (!('responsibleAnalyst' in request.resource.data) || request.resource.data.responsibleAnalyst is string)
+        && (!('treatmentStartDate' in request.resource.data) || request.resource.data.treatmentStartDate is string)
+        && (!('treatmentDueDate' in request.resource.data) || request.resource.data.treatmentDueDate is string)
+        && (!('treatmentDays' in request.resource.data) || request.resource.data.treatmentDays == null || request.resource.data.treatmentDays is int)
+        && (!('ownerEmail' in request.resource.data) || request.resource.data.ownerEmail == request.auth.token.email);
+
+      allow update: if isSenacUser()
+        && request.resource.data.turmaKey == resource.data.turmaKey
+        && request.resource.data.instructorKey == resource.data.instructorKey
+        && request.resource.data.scope in ['student', 'class']
+        && request.resource.data.notes is string
+        && request.resource.data.situationTypes is list
+        && request.resource.data.attachments is list
+        && (!('treatmentStatus' in request.resource.data) || request.resource.data.treatmentStatus is string)
+        && (!('responsibleAnalyst' in request.resource.data) || request.resource.data.responsibleAnalyst is string)
+        && (!('treatmentStartDate' in request.resource.data) || request.resource.data.treatmentStartDate is string)
+        && (!('treatmentDueDate' in request.resource.data) || request.resource.data.treatmentDueDate is string)
+        && (!('treatmentDays' in request.resource.data) || request.resource.data.treatmentDays == null || request.resource.data.treatmentDays is int)
+        && (!('ownerEmail' in request.resource.data) || request.resource.data.ownerEmail == request.auth.token.email);
+    }
+
+    match /analyst_notes/{noteId} {
+      allow read: if isSenacUser()
+        && resource.data.ownerEmail == request.auth.token.email;
+
+      allow create: if isSenacUser()
+        && request.resource.data.ownerEmail == request.auth.token.email
+        && request.resource.data.turmaKey is string
+        && request.resource.data.analystKey is string
+        && request.resource.data.instructorKey is string
+        && request.resource.data.date is string
+        && request.resource.data.notes is string
+        && request.resource.data.visibleToInstructor is bool
+        && request.resource.data.score == null
+        && request.resource.data.subject is string
+        && request.resource.data.periodStart is string
+        && request.resource.data.periodEnd is string
+        && (!('trackingEnabled' in request.resource.data) || request.resource.data.trackingEnabled is bool)
+        && (!('trackingStatus' in request.resource.data) || request.resource.data.trackingStatus is string)
+        && (!('reminderDate' in request.resource.data) || request.resource.data.reminderDate is string);
+
+      allow update: if isSenacUser()
+        && resource.data.ownerEmail == request.auth.token.email
+        && request.resource.data.ownerEmail == request.auth.token.email
+        && request.resource.data.turmaKey == resource.data.turmaKey
+        && request.resource.data.analystKey == resource.data.analystKey
+        && request.resource.data.instructorKey is string
+        && request.resource.data.notes is string
+        && request.resource.data.visibleToInstructor is bool
+        && request.resource.data.score == null
+        && request.resource.data.subject is string
+        && request.resource.data.periodStart is string
+        && request.resource.data.periodEnd is string
+        && (!('trackingEnabled' in request.resource.data) || request.resource.data.trackingEnabled is bool)
+        && (!('trackingStatus' in request.resource.data) || request.resource.data.trackingStatus is string)
+        && (!('reminderDate' in request.resource.data) || request.resource.data.reminderDate is string);
+
+      allow delete: if isSenacUser()
+        && resource.data.ownerEmail == request.auth.token.email;
+    }
+
+    match /analyst_shared_notes/{noteId} {
+      allow read: if isSenacUser()
+        && resource.data.visibleToInstructor == true;
+
+      allow create, update: if isSenacUser()
+        && request.resource.data.ownerEmail == request.auth.token.email
+        && request.resource.data.visibleToInstructor == true
+        && request.resource.data.turmaKey is string
+        && request.resource.data.instructorKey is string
+        && request.resource.data.subject is string
+        && request.resource.data.notes is string
+        && !('score' in request.resource.data);
+
+      allow delete: if isSenacUser()
+        && resource.data.ownerEmail == request.auth.token.email;
+    }
+
+    match /analyst_evaluations/{noteId} {
+      allow read, delete: if isSenacUser()
+        && resource.data.ownerEmail == request.auth.token.email;
+
+      allow create, update: if isSenacUser()
+        && request.resource.data.ownerEmail == request.auth.token.email
+        && request.resource.data.turmaKey is string
+        && request.resource.data.analystKey is string
+        && request.resource.data.score is int;
+    }
+
+    match /student_contacts/{contactId} {
+      allow read, delete: if isSenacUser();
+
+      allow create: if isSenacUser()
+        && request.resource.data.turmaKey is string
+        && request.resource.data.studentKey is string
+        && request.resource.data.studentContactName is string
+        && request.resource.data.studentPhone is string
+        && request.resource.data.studentEmail is string
+        && request.resource.data.supervisorName is string
+        && request.resource.data.supervisorPhone is string
+        && request.resource.data.supervisorEmail is string;
+
+      allow update: if isSenacUser()
+        && request.resource.data.turmaKey == resource.data.turmaKey
+        && request.resource.data.studentKey == resource.data.studentKey
+        && request.resource.data.studentContactName is string
+        && request.resource.data.studentPhone is string
+        && request.resource.data.studentEmail is string
+        && request.resource.data.supervisorName is string
+        && request.resource.data.supervisorPhone is string
+        && request.resource.data.supervisorEmail is string;
+    }
+
+    match /dropout_documents/{documentId} {
+      allow read: if isSenacUser();
+
+      allow create, update: if isSenacUser()
+        && request.resource.data.turmaKey is string
+        && request.resource.data.studentKey is string
+        && request.resource.data.studentName is string
+        && request.resource.data.status in ['sem_documentacao', 'com_documentacao']
+        && request.resource.data.source is string
+        && request.resource.data.fileCount is number
+        && request.resource.data.folderName is string
+        && request.resource.data.detectedAt is string
+        && request.resource.data.updatedAt is string
+        && request.resource.data.updatedBy == request.auth.token.email;
+    }
+
+    match /na_justifications/{justificationId} {
+      allow read, delete: if isSenacUser();
+
+      allow create, update: if isSenacUser()
+        && request.resource.data.turmaKey is string
+        && request.resource.data.entryKey is string
+        && request.resource.data.justified is bool
+        && request.resource.data.sheet is string
+        && request.resource.data.date is string
+        && request.resource.data.reason is string;
+    }
+
+    match /dashboard_history/{snapshotId} {
+      allow read: if isSenacUser();
+
+      allow create: if isSenacUser()
+        && request.resource.data.turmaKey is string
+        && request.resource.data.turma is string
+        && request.resource.data.capturedAt is string
+        && request.resource.data.trigger is string
+        && request.resource.data['class'] is map
+        && request.resource.data.students is map;
+
+      allow update: if isSenacUser()
+        && request.resource.data.turmaKey == resource.data.turmaKey
+        && request.resource.data.turma is string
+        && request.resource.data.capturedAt is string
+        && request.resource.data.trigger is string
+        && request.resource.data['class'] is map
+        && request.resource.data.students is map;
+    }
+
+    match /saved_classes/{turmaKey} {
+      allow read, delete: if isSenacUser();
+
+      allow create, update: if isSenacUser()
+        && request.resource.data.turmaKey == turmaKey
+        && request.resource.data.turma is string
+        && request.resource.data.course is string
+        && request.resource.data.instructors is list
+        && request.resource.data.ucs is list
+        && request.resource.data.studentCount is int
+        && request.resource.data.updatedAt is string
+        && request.resource.data.updatedBy == request.auth.token.email;
+    }
+
+    match /saved_class_students/{studentId} {
+      allow read, delete: if isSenacUser();
+
+      allow create, update: if isSenacUser()
+        && request.resource.data.turmaKey is string
+        && request.resource.data.studentKey is string
+        && request.resource.data.updatedBy == request.auth.token.email
+        && request.resource.data.data is map;
+    }
+  }
+}
