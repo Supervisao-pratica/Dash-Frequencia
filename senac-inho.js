@@ -6,7 +6,7 @@
 
     const ownScriptUrl = document.currentScript && document.currentScript.src;
     const mascotUrl = new URL("./assets/senac-inho.png", ownScriptUrl || window.location.href).href;
-    const assistantStyleUrl = new URL("./senac-inho.css?v=1.6.2", ownScriptUrl || window.location.href).href;
+    const assistantStyleUrl = new URL("./senac-inho.css?v=1.6.3", ownScriptUrl || window.location.href).href;
     const STOP_WORDS = new Set(["a", "ao", "as", "como", "da", "das", "de", "do", "dos", "e", "em", "eu", "o", "os", "para", "por", "que", "um", "uma"]);
 
     const icons = {
@@ -72,10 +72,10 @@
 
         t("saved-classes", "access", "users", "Abrir uma turma salva", "Abra uma turma que já foi armazenada sem selecionar novamente a planilha.", "minhas turmas turma salva abrir voltar lista nuvem firebase", [
             s("Abra Minhas turmas", "Na tela inicial, localize a lista de turmas salvas. Dentro de uma turma, o mesmo acesso aparece no cabeçalho.", { text: "Minhas turmas", tags: ["h2", "button"] }, "Tela inicial ou cabeçalho"),
-            s("Sincronize as turmas", "Clique em Sincronizar turmas salvas para buscar no Firebase a relação mais recente de turmas compartilhadas.", { text: "Sincronizar turmas salvas", tags: ["button"] }, "Bloco Minhas turmas"),
-            s("Escolha a turma", "Confirme o número, o curso e a data de atualização. Depois clique na linha da turma desejada.", { text: "Atualizada", tags: ["span"] }, "Lista de turmas"),
+            s("Confira a sincronização", "A lista acompanha o Firebase automaticamente. Use Sincronizar lista para conferir imediatamente e observe o indicador Firebase sincronizado ou Cópia local.", { text: "Sincronizar lista", tags: ["button"] }, "Bloco Minhas turmas"),
+            s("Escolha a turma", "Confirme o número, o curso e a data de atualização. No aplicativo, ao abrir a turma o sistema também verifica a chamada na rede e inicia o monitoramento.", { text: "Atualizada", tags: ["span"] }, "Lista de turmas"),
             s("Exclua turmas encerradas", "Use o botão de lixeira ao lado da turma e confirme a exclusão. A chamada sai de Minhas turmas, mas cadernos, contatos, justificativas e histórico são preservados.", { title: "Excluir turma" }, "Lista de turmas")
-        ], "A exclusão da chamada é compartilhada e retira a turma da lista de todos os usuários que tinham acesso."),
+        ], "Sincronizar lista atualiza os dados compartilhados do Firebase; não relê o Excel. Na web, use Atualizar chamada para reler o arquivo vinculado."),
 
         t("update-call", "access", "refresh", "Atualizar a chamada da turma", "Substitua somente os dados variáveis pela versão mais recente da planilha.", "atualizar chamada reler planilha mudou mudança frequência arquivo rede substituir", [
             s("Abra a turma correta", "Confira o número da turma no cabeçalho antes de selecionar qualquer arquivo.", { text: "Turma:", tags: ["span"] }, "Cabeçalho"),
@@ -1248,7 +1248,7 @@
                 stylesheet.href = assistantStyleUrl;
                 stylesheet.dataset.senacInhoChild = "style";
                 const script = childDocument.createElement("script");
-                script.src = ownScriptUrl || new URL("./senac-inho.js?v=1.6.2", window.location.href).href;
+                script.src = ownScriptUrl || new URL("./senac-inho.js?v=1.6.3", window.location.href).href;
                 script.dataset.senacInhoChild = "script";
                 childDocument.head.append(stylesheet);
                 childDocument.body.append(script);

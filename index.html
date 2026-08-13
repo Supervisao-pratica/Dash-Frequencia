@@ -51,7 +51,7 @@
     
     <!-- Fonte Inter -->
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="./senac-inho.css?v=1.6.2">
+    <link rel="stylesheet" href="./senac-inho.css?v=1.6.3">
     
     <style>
         body { font-family: 'Inter', sans-serif; background-color: #f0f2f5; }
@@ -3238,6 +3238,21 @@
             } catch (error) { return []; }
         };
 
+        const writeSavedClassesIndexLocal = classes => {
+            try { localStorage.setItem(SAVED_CLASSES_INDEX_KEY, JSON.stringify((classes || []).slice(0, 20))); }
+            catch (error) { console.warn("Não foi possível atualizar o índice local de turmas", error); }
+        };
+
+        const synchronizeSavedClassSummaries = documents => {
+            const cloudClasses = (documents || []).map(document => ({ turmaKey: document.id, ...document.data(), cloudSynced: true })).filter(canAccessSavedClass);
+            const pendingLocal = readSavedClassesLocal().filter(item => item.cloudSynced === false && canAccessSavedClass(item));
+            const merged = new Map(cloudClasses.map(item => [item.turmaKey, item]));
+            pendingLocal.forEach(item => { if (!merged.has(item.turmaKey)) merged.set(item.turmaKey, item); });
+            const classes = Array.from(merged.values()).sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
+            writeSavedClassesIndexLocal(classes);
+            return classes;
+        };
+
         const writeSavedClassLocal = (summary, data) => {
             try {
                 const index = [summary, ...readSavedClassesLocal().filter(item => item.turmaKey !== summary.turmaKey)]
@@ -3287,27 +3302,26 @@
             if (!db) return { classes: local, source: "local" };
             try {
                 const snapshot = await db.collection("saved_classes").get();
-                const merged = new Map(local.map(item => [item.turmaKey, item]));
-                snapshot.docs.map(doc => ({ turmaKey: doc.id, ...doc.data() })).filter(canAccessSavedClass).forEach(item => merged.set(item.turmaKey, item));
-                return { classes: Array.from(merged.values()).sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt))), source: "cloud" };
+                return { classes: synchronizeSavedClassSummaries(snapshot.docs), source: "cloud" };
             } catch (error) {
                 console.error("Erro ao carregar turmas salvas", error);
-                return { classes: local, source: "local" };
+                return { classes: local, source: "local", error };
             }
         };
 
         const persistSavedClass = async (data, source = {}) => {
             if (!data || !data.turma || !Array.isArray(data.students)) return { source: "local", summary: null };
-            const summary = makeSavedClassSummary(data, source);
+            const summary = { ...makeSavedClassSummary(data, source), cloudSynced: false };
             writeSavedClassLocal(summary, data);
             const db = await getNotebookFirestore();
             if (!db) return { source: "local", summary };
             try {
+                const syncedSummary = { ...summary, cloudSynced: true };
                 const existing = await db.collection("saved_class_students").where("turmaKey", "==", summary.turmaKey).get();
                 const nextIds = new Set(data.students.map(student => `${summary.turmaKey}_${cleanNotebookKey(student.name, String(student.id || "ALUNO"))}`));
                 const operations = [];
                 operations.push({ type: "set", ref: db.collection("saved_classes").doc(summary.turmaKey), data: cleanForStorage({
-                    ...summary,
+                    ...syncedSummary,
                     courseDates: (data.courseDates || []).map(value => value instanceof Date ? value.toISOString() : String(value || "")),
                     attendanceWarnings: data.attendanceWarnings || []
                 }) });
@@ -3322,7 +3336,8 @@
                     operations.slice(start, start + 450).forEach(operation => operation.type === "delete" ? batch.delete(operation.ref) : batch.set(operation.ref, operation.data, { merge: true }));
                     await batch.commit();
                 }
-                return { source: "cloud", summary };
+                writeSavedClassLocal(syncedSummary, data);
+                return { source: "cloud", summary: syncedSummary };
             } catch (error) {
                 console.error("Erro ao salvar a turma no Firebase", error);
                 return { source: "local", summary };
@@ -3357,8 +3372,8 @@
                             naAlerts: { students: naStudents, totalStudents: Object.keys(naStudents).length },
                             students
                         });
-                        writeSavedClassLocal({ turmaKey, ...meta }, data);
-                        return { data, source: "cloud", updatedAt: meta.updatedAt || "" };
+                        writeSavedClassLocal({ turmaKey, ...meta, cloudSynced: true }, data);
+                        return { data, source: "cloud", updatedAt: meta.updatedAt || "", sourceLastModified: Number(meta.sourceLastModified || 0) };
                     }
                 } catch (error) {
                     console.error("Erro ao abrir turma salva no Firebase", error);
@@ -3366,7 +3381,7 @@
             }
             try {
                 const local = JSON.parse(localStorage.getItem(`${SAVED_CLASS_DATA_PREFIX}${turmaKey}`) || "null");
-                if (local) return { data: normalizeSavedClassData(local), source: "local", updatedAt: summary.updatedAt || "" };
+                if (local) return { data: normalizeSavedClassData(local), source: "local", updatedAt: summary.updatedAt || "", sourceLastModified: Number(summary.sourceLastModified || 0) };
             } catch (error) {}
             throw new Error("Os dados desta turma não estão disponíveis neste dispositivo e não puderam ser carregados do Firebase.");
         };
@@ -4372,8 +4387,8 @@
             }
         }
 
-        const DESKTOP_APP_VERSION = "1.1.4";
-        const DESKTOP_APP_DOWNLOAD_URL = "https://github.com/Supervisao-pratica/Dash-Frequencia/releases/download/v1.1.4/Dashboard-Senac-Setup-1.1.4.zip";
+        const DESKTOP_APP_VERSION = "1.1.5";
+        const DESKTOP_APP_DOWNLOAD_URL = "https://github.com/Supervisao-pratica/Dash-Frequencia/releases/download/v1.1.5/Dashboard-Senac-Setup-1.1.5.zip";
         const DesktopAppOffer = () => {
             const storageKey = `desktop_app_download_started_${DESKTOP_APP_VERSION}`;
             const [downloadStarted, setDownloadStarted] = useState(() => {
@@ -4465,9 +4480,12 @@
             const [naJustificationDrafts, setNaJustificationDrafts] = useState({});
             const [savedClasses, setSavedClasses] = useState([]);
             const [savedClassesLoading, setSavedClassesLoading] = useState(true);
+            const [savedClassesSource, setSavedClassesSource] = useState("local");
+            const [savedClassesLastSync, setSavedClassesLastSync] = useState("");
             const [deletingClassKey, setDeletingClassKey] = useState("");
             const [updatingFrequency, setUpdatingFrequency] = useState(false);
             const [webFrequencyHandle, setWebFrequencyHandle] = useState(null);
+            const [frequencySourceRevision, setFrequencySourceRevision] = useState(0);
             const [classSyncMessage, setClassSyncMessage] = useState("");
             const [activeClassUpdatedAt, setActiveClassUpdatedAt] = useState("");
             
@@ -4528,14 +4546,42 @@
             const activeInstructorNames = useMemo(() => currentAnalystName ? [] : filterInstructorNamesForCurrentUser(detectedInstructorNames), [detectedInstructorNames, currentAnalystName]);
             const notebookInstructorNames = useMemo(() => currentAnalystName ? detectedInstructorNames : activeInstructorNames, [currentAnalystName, detectedInstructorNames, activeInstructorNames]);
 
-            const refreshSavedClasses = async () => {
+            const refreshSavedClasses = async ({ announce = false } = {}) => {
                 setSavedClassesLoading(true);
-                const loaded = await loadSavedClasses();
-                setSavedClasses(loaded.classes || []);
-                setSavedClassesLoading(false);
+                try {
+                    const loaded = await loadSavedClasses();
+                    const synchronizedAt = new Date();
+                    setSavedClasses(loaded.classes || []);
+                    setSavedClassesSource(loaded.source || "local");
+                    setSavedClassesLastSync(synchronizedAt.toISOString());
+                    if (announce) setClassSyncMessage(loaded.source === "cloud"
+                        ? `Lista sincronizada com o Firebase às ${synchronizedAt.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}. A planilha de chamada não foi relida.`
+                        : "Sem acesso ao Firebase. A lista local deste dispositivo foi exibida; a planilha de chamada não foi relida.");
+                } catch (error) {
+                    console.error("Erro ao sincronizar a lista de turmas", error);
+                    if (announce) setClassSyncMessage("Não foi possível sincronizar a lista de turmas. Tente novamente.");
+                } finally {
+                    setSavedClassesLoading(false);
+                }
             };
 
             useEffect(() => { refreshSavedClasses().catch(error => { console.error(error); setSavedClassesLoading(false); }); }, []);
+
+            useEffect(() => {
+                let stopped = false;
+                let unsubscribe = null;
+                getNotebookFirestore().then(db => {
+                    if (!db || stopped) return;
+                    unsubscribe = db.collection("saved_classes").onSnapshot(snapshot => {
+                        if (stopped) return;
+                        setSavedClasses(synchronizeSavedClassSummaries(snapshot.docs));
+                        setSavedClassesSource("cloud");
+                        setSavedClassesLastSync(new Date().toISOString());
+                        setSavedClassesLoading(false);
+                    }, error => console.error("Erro na sincronização automática da lista de turmas", error));
+                });
+                return () => { stopped = true; if (unsubscribe) unsubscribe(); };
+            }, []);
 
             useEffect(() => {
                 if (!data || !data.turma || isElectronDesktop() || typeof window.showOpenFilePicker !== "function") {
@@ -4559,6 +4605,27 @@
                     setSelectedUC("all");
                     setActiveClassUpdatedAt(loaded.updatedAt || summary.updatedAt || "");
                     setClassSyncMessage(loaded.source === "cloud" ? "Turma carregada do Firebase." : "Turma carregada deste dispositivo.");
+                    if (isElectronDesktop() && typeof window.senacDesktop.locateFrequencyFile === "function") {
+                        try {
+                            setClassSyncMessage(`Turma carregada. Verificando a chamada ${summary.turma} na rede...`);
+                            const located = await window.senacDesktop.locateFrequencyFile(summary.turma);
+                            rememberElectronClassSourcePath(summary.turma, located.path, located.mtimeMs);
+                            setFrequencySourceRevision(value => value + 1);
+                            if (Number(located.mtimeMs || 0) > Number(loaded.sourceLastModified || summary.sourceLastModified || 0) + 500) {
+                                const fileBuffer = await window.senacDesktop.readFile(located.path);
+                                const arrayBuffer = fileBuffer.buffer.slice(fileBuffer.byteOffset, fileBuffer.byteOffset + fileBuffer.byteLength);
+                                const processed = processExcelFile(arrayBuffer);
+                                if (getSavedClassKey(processed.turma) !== getSavedClassKey(summary.turma)) throw new Error("A planilha localizada pertence a outra turma.");
+                                await applyProcessedFrequency(processed, { name: located.name, lastModified: located.mtimeMs }, null, "atualização automática");
+                                setClassSyncMessage(`Turma ${summary.turma} aberta e atualizada automaticamente pela rede.`);
+                            } else {
+                                setClassSyncMessage(`Turma ${summary.turma} sincronizada. A chamada da rede já está atualizada e será monitorada.`);
+                            }
+                        } catch (error) {
+                            console.error("Erro ao verificar a chamada ao abrir a turma", error);
+                            setClassSyncMessage(`Turma ${summary.turma} aberta com os dados salvos. Não foi possível verificar a chamada na rede.`);
+                        }
+                    }
                 } catch (error) {
                     setClassSyncMessage("");
                     alert(error.message);
@@ -4758,7 +4825,10 @@
                 setClassSyncMessage("Salvando turma...");
                 captureDashboardHistory(processed, null, {}, trigger).catch(error => console.error("Erro ao registrar histórico da frequência", error));
                 seedImportedStudentContacts(processed.turma, processed.students).catch(error => console.error("Erro ao sincronizar contatos importados", error));
-                if (file) rememberElectronClassSource(processed.turma, file);
+                if (file) {
+                    rememberElectronClassSource(processed.turma, file);
+                    if (isElectronDesktop()) setFrequencySourceRevision(value => value + 1);
+                }
                 const saved = await persistSavedClass(processed, source);
                 setActiveClassUpdatedAt(saved.summary && saved.summary.updatedAt || new Date().toISOString());
                 setClassSyncMessage(saved.source === "cloud" ? `Turma ${processed.turma} salva e sincronizada.` : `Turma ${processed.turma} salva somente neste dispositivo.`);
@@ -4884,6 +4954,7 @@
                         throw new Error(`A planilha encontrada pertence à turma ${processed.turma || "não identificada"}.`);
                     }
                     rememberElectronClassSourcePath(data.turma, located.path, located.mtimeMs);
+                    setFrequencySourceRevision(value => value + 1);
                     await applyProcessedFrequency(processed, { name: located.name, lastModified: located.mtimeMs }, null, "atualização pela rede");
                     setClassSyncMessage(`Turma ${data.turma} atualizada automaticamente a partir de ${located.location}.`);
                 } catch (error) {
@@ -4928,7 +4999,7 @@
                 checkSource();
                 const timer = setInterval(checkSource, 60000);
                 return () => { stopped = true; clearInterval(timer); };
-            }, [data ? data.turma : ""]);
+            }, [data ? data.turma : "", frequencySourceRevision]);
 
             useEffect(() => {
                 if (!data || !data.turma || isElectronDesktop()) return undefined;
@@ -5186,7 +5257,7 @@
                                 </div >
                                 <p className="text-xs text-gray-500 mt-4">Depois de abrir a turma, você poderá carregar o arquivo separado de Informações Gerais.</p>
                                 <div className="mt-8 border-t border-gray-200 pt-6 text-left">
-                                    <div className="mb-3 flex items-center justify-between gap-3"><div><h2 className="text-base font-bold text-senac-blue">Minhas turmas</h2><p className="mt-1 text-xs text-gray-500">Abra uma turma já salva sem carregar novamente a chamada.</p></div><button type="button" onClick={refreshSavedClasses} className="rounded-md border border-senac-blue px-3 py-2 text-xs font-bold text-senac-blue hover:bg-blue-50"><IconRefreshCw className="mr-1 inline-block h-3.5 w-3.5" /> Sincronizar turmas salvas</button></div>
+                                    <div className="mb-3 flex flex-wrap items-center justify-between gap-3"><div><div className="flex flex-wrap items-center gap-2"><h2 className="text-base font-bold text-senac-blue">Minhas turmas</h2><span className={`rounded px-2 py-0.5 text-[10px] font-bold ${savedClassesSource === "cloud" ? "bg-green-50 text-green-700" : "bg-gray-100 text-gray-600"}`}>{savedClassesSource === "cloud" ? "Firebase sincronizado" : "Cópia local"}</span></div><p className="mt-1 text-xs text-gray-500">A lista sincroniza dados compartilhados. Para reler o Excel, abra a turma e use Atualizar chamada.</p>{savedClassesLastSync && <p className="mt-1 text-[10px] text-gray-400">Última sincronização: {new Date(savedClassesLastSync).toLocaleString("pt-BR")}</p>}</div><button type="button" onClick={() => refreshSavedClasses({ announce: true })} disabled={savedClassesLoading} className="rounded-md border border-senac-blue px-3 py-2 text-xs font-bold text-senac-blue hover:bg-blue-50 disabled:cursor-wait disabled:opacity-60"><IconRefreshCw className={`mr-1 inline-block h-3.5 w-3.5 ${savedClassesLoading ? "animate-spin" : ""}`} /> {savedClassesLoading ? "Sincronizando..." : "Sincronizar lista"}</button></div>
                                     {classSyncMessage && <div className="mb-3 rounded border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800">{classSyncMessage}</div>}
                                     {savedClassesLoading ? <div className="py-6 text-center text-xs text-gray-400">Carregando turmas...</div> : savedClasses.length === 0 ? <div className="rounded-lg border-2 border-dashed border-gray-200 p-5 text-center text-xs text-gray-500">Nenhuma turma salva. A primeira planilha carregada aparecerá aqui automaticamente.</div> : <div className="max-h-64 divide-y divide-gray-100 overflow-y-auto rounded-lg border border-gray-200">{savedClasses.map(item => <div key={item.turmaKey} className="flex items-stretch bg-white transition-colors hover:bg-blue-50"><button type="button" onClick={() => openSavedClass(item)} className="flex min-w-0 flex-1 items-center justify-between gap-4 px-4 py-3 text-left"><span className="min-w-0"><strong className="block text-sm text-gray-800">Turma {item.turma}</strong><span className="mt-0.5 block truncate text-xs text-gray-500">{item.course} | {item.studentCount || 0} aluno(s)</span></span><span className="shrink-0 text-right text-[10px] text-gray-400">Atualizada<br/>{item.updatedAt ? new Date(item.updatedAt).toLocaleDateString("pt-BR") : "--"}</span></button><button type="button" onClick={() => deleteSavedClass(item)} disabled={deletingClassKey === item.turmaKey} aria-label={`Excluir turma ${item.turma}`} title={`Excluir turma ${item.turma}`} className="m-2 grid w-9 shrink-0 place-items-center rounded-md border border-red-200 bg-red-50 text-red-600 transition-colors hover:bg-red-100 disabled:cursor-wait disabled:opacity-50"><IconTrash2 className="h-4 w-4" /></button></div>)}</div>}
                                 </div>
@@ -5595,6 +5666,6 @@
         const root = ReactDOM.createRoot(document.getElementById('root'));
         root.render(<><DashboardErrorBoundary><AuthGate /></DashboardErrorBoundary><DesktopAppOffer /></>);
     </script>
-    <script src="./senac-inho.js?v=1.6.2"></script>
+    <script src="./senac-inho.js?v=1.6.3"></script>
 </body>
 </html>
