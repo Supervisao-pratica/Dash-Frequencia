@@ -1,12 +1,26 @@
-const { app, BrowserWindow, dialog, Notification } = require('electron');
+const { app, BrowserWindow, dialog, Notification, ipcMain } = require('electron');
 const { autoUpdater } = require('electron-updater');
+const fs = require('fs');
 const path = require('path');
+const { locateFrequencyFile } = require('./frequency-locator');
 
 app.setAppUserModelId('br.senacpr.dashboardfrequencia');
 
 let mainWindow = null;
 let updateCheckTimer = null;
 let updatePromptOpen = false;
+
+ipcMain.handle('senac:stat-file', async (_event, filePath) => {
+    const value = await fs.promises.stat(String(filePath || ''));
+    return { mtimeMs: Number(value.mtimeMs || 0) };
+});
+
+ipcMain.handle('senac:read-file', async (_event, filePath) => {
+    const buffer = await fs.promises.readFile(String(filePath || ''));
+    return new Uint8Array(buffer);
+});
+
+ipcMain.handle('senac:locate-frequency', async (_event, turma) => locateFrequencyFile(turma));
 
 function createWindow() {
     mainWindow = new BrowserWindow({

@@ -1,6 +1,6 @@
 {
   "name": "dashboard-senac",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
@@ -24,7 +24,11 @@
     },
     "files": [
       "Dashboard_V76.html",
+      "senac-inho.js",
+      "senac-inho.css",
+      "assets/senac-inho.png",
       "firebase-config.js",
+      "frequency-locator.js",
       "main.js",
       "preload.js",
       "package.json"

@@ -1,17 +1,10 @@
-const { contextBridge, webUtils } = require('electron');
-const fs = require('fs');
-const path = require('path');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 contextBridge.exposeInMainWorld('senacDesktop', {
     isDesktop: true,
     getPathForFile: (file) => webUtils.getPathForFile(file),
-    basename: (filePath) => path.basename(String(filePath || '')),
-    stat: async (filePath) => {
-        const value = await fs.promises.stat(String(filePath || ''));
-        return { mtimeMs: Number(value.mtimeMs || 0) };
-    },
-    readFile: async (filePath) => {
-        const buffer = await fs.promises.readFile(String(filePath || ''));
-        return new Uint8Array(buffer);
-    }
+    basename: filePath => String(filePath || '').split(/[\\/]/).pop() || '',
+    locateFrequencyFile: turma => ipcRenderer.invoke('senac:locate-frequency', turma),
+    stat: filePath => ipcRenderer.invoke('senac:stat-file', filePath),
+    readFile: filePath => ipcRenderer.invoke('senac:read-file', filePath)
 });
