@@ -6,7 +6,7 @@
 
     const ownScriptUrl = document.currentScript && document.currentScript.src;
     const mascotUrl = new URL("./assets/senac-inho.png", ownScriptUrl || window.location.href).href;
-    const assistantStyleUrl = new URL("./senac-inho.css?v=1.6.0", ownScriptUrl || window.location.href).href;
+    const assistantStyleUrl = new URL("./senac-inho.css?v=1.6.1", ownScriptUrl || window.location.href).href;
     const STOP_WORDS = new Set(["a", "ao", "as", "como", "da", "das", "de", "do", "dos", "e", "em", "eu", "o", "os", "para", "por", "que", "um", "uma"]);
 
     const icons = {
@@ -79,10 +79,10 @@
 
         t("update-call", "access", "refresh", "Atualizar a chamada da turma", "Substitua somente os dados variáveis pela versão mais recente da planilha.", "atualizar chamada reler planilha mudou mudança frequência arquivo rede substituir", [
             s("Abra a turma correta", "Confira o número da turma no cabeçalho antes de selecionar qualquer arquivo.", { text: "Turma:", tags: ["span"] }, "Cabeçalho"),
-            s("Clique em Atualizar chamada", "No aplicativo instalado, o sistema usa o número da turma para localizar automaticamente a chamada na rede do Senac.", { text: "Atualizar chamada", tags: ["button"] }, "Barra de ações"),
-            s("Aguarde a localização", "O aplicativo procura primeiro na pasta da turma e depois em Controle de Frequência. Na versão web, a seleção do arquivo continua manual.", { text: "Atualizando...", tags: ["button"] }, "Barra de ações"),
+            s("Clique em Atualizar chamada", "No aplicativo instalado, o sistema usa o número da turma para localizar automaticamente a chamada na rede do Senac. Na versão web com Edge ou Chrome, escolha a planilha na primeira vez.", { text: "Atualizar chamada", tags: ["button"] }, "Barra de ações"),
+            s("Permita o acesso", "Na versão web, o navegador guarda o vínculo com o arquivo. Nas próximas vezes, basta clicar em Atualizar chamada e permitir a leitura quando solicitado. Em navegadores sem esse recurso, o seletor manual será aberto.", { text: "Atualizando...", tags: ["button"] }, "Barra de ações"),
             s("Revise os alertas", "Ao terminar, confira novamente pendências, NA, alunos e percentuais.", { text: "Pendências de preenchimento da chamada" }, "Painel principal")
-        ], "Se a rede estiver indisponível ou a chamada não for encontrada, o aplicativo oferece a seleção manual do arquivo."),
+        ], "A versão web não consegue procurar sozinha em toda a rede, mas pode lembrar o arquivo escolhido. O aplicativo instalado continua sendo a opção de automação completa."),
 
         t("general-data", "students", "database", "Carregar Dados Gerais", "Associe e-mail e telefone do aluno e do supervisor aos quadros da turma.", "dados gerais contato telefone email supervisor aluno informações gerais arquivo", [
             s("Clique em Dados Gerais", "Use o botão de carregamento localizado na barra superior da turma.", { text: "Dados Gerais", tags: ["label", "button"] }, "Barra de ações"),
@@ -1232,7 +1232,7 @@
                 stylesheet.href = assistantStyleUrl;
                 stylesheet.dataset.senacInhoChild = "style";
                 const script = childDocument.createElement("script");
-                script.src = ownScriptUrl || new URL("./senac-inho.js?v=1.6.0", window.location.href).href;
+                script.src = ownScriptUrl || new URL("./senac-inho.js?v=1.6.1", window.location.href).href;
                 script.dataset.senacInhoChild = "script";
                 childDocument.head.append(stylesheet);
                 childDocument.body.append(script);
