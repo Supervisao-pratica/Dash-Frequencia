@@ -561,13 +561,13 @@
             { value: 100, label: "Atende com excelência" }
         ];
         const PDI_COMPETENCY_KEYWORDS = [
-            { id: "planejamento", keywords: ["PLANEJAMENTO", "PLANO", "PRAZO", "CRONOGRAMA", "ORGANIZACAO", "PRIORIDADE"] },
-            { id: "resultados", keywords: ["RESULTADO", "META", "ENTREGA", "INDICADOR", "PRODUTIVIDADE"] },
-            { id: "visao_sistemica", keywords: ["VISAO SISTEMICA", "PROCESSO", "INSTITUCIONAL", "INTEGRACAO"] },
-            { id: "cliente", keywords: ["CLIENTE", "ALUNO", "EMPRESA", "ATENDIMENTO", "SUPERVISOR"] },
-            { id: "comunicacao", keywords: ["COMUNICACAO", "FEEDBACK", "DEVOLUTIVA", "DIALOGO", "ESCUTA"] },
-            { id: "problemas", keywords: ["PROBLEMA", "SOLUCAO", "RISCO", "DECISAO", "CONFLITO"] },
-            { id: "equipe", keywords: ["EQUIPE", "COLABORACAO", "COOPERACAO", "PARCERIA", "APOIO"] }
+            { id: "planejamento", keywords: ["PLANEJAMENTO", "PLANO", "PRAZO", "CRONOGRAMA", "ORGANIZACAO", "PRIORIDADE", "AGENDA", "ROTINA", "PREPARO", "ANTECEDENCIA", "GESTAO DO TEMPO"] },
+            { id: "resultados", keywords: ["RESULTADO", "META", "ENTREGA", "INDICADOR", "PRODUTIVIDADE", "DESEMPENHO", "QUALIDADE", "FREQUENCIA", "ATIVIDADE", "AVALIACAO", "CORRECAO"] },
+            { id: "visao_sistemica", keywords: ["VISAO SISTEMICA", "PROCESSO", "INSTITUCIONAL", "INTEGRACAO", "PROCEDIMENTO", "REGRA", "SISTEMA", "BLACKBOARD", "ORION", "CHAMADA", "DOCUMENTACAO"] },
+            { id: "cliente", keywords: ["CLIENTE", "ALUNO", "APRENDIZ", "ESTUDANTE", "EMPRESA", "ATENDIMENTO", "SUPERVISOR", "ACOLHIMENTO", "RETORNO", "SATISFACAO"] },
+            { id: "comunicacao", keywords: ["COMUNICACAO", "FEEDBACK", "DEVOLUTIVA", "DIALOGO", "ESCUTA", "LINGUAGEM", "CLAREZA", "ALINHAMENTO", "ORIENTACAO", "MENSAGEM", "E-MAIL", "EMAIL"] },
+            { id: "problemas", keywords: ["PROBLEMA", "SOLUCAO", "RISCO", "DECISAO", "CONFLITO", "OCORRENCIA", "DIFICULDADE", "PENDENCIA", "FALHA", "ERRO", "TRATATIVA", "PLANO DE ACAO"] },
+            { id: "equipe", keywords: ["EQUIPE", "COLABORACAO", "COOPERACAO", "PARCERIA", "APOIO", "COMPARTILHAMENTO", "COLEGA", "ANALISTA", "ARTICULACAO"] }
         ];
         const ANALYST_TYPE_COMPETENCY_DEFAULTS = {
             "AVALIACAO": "resultados",
@@ -578,14 +578,24 @@
         };
 
         const inferAnalystPDI = (followupType, subject, notes) => {
-            const text = normalizeText(`${followupType || ""} ${subject || ""} ${notes || ""}`);
-            const competencyRule = PDI_COMPETENCY_KEYWORDS.find(rule => rule.keywords.some(keyword => text.includes(keyword)));
+            const normalizedType = normalizeText(followupType);
+            const normalizedSubject = normalizeText(subject);
+            const normalizedNotes = normalizeText(notes);
+            const rankedCompetencies = PDI_COMPETENCY_KEYWORDS.map(rule => ({
+                ...rule,
+                weight: rule.keywords.reduce((total, keyword) => total
+                    + (normalizedSubject.includes(keyword) ? 4 : 0)
+                    + (normalizedNotes.includes(keyword) ? 2 : 0)
+                    + (normalizedType.includes(keyword) ? 1 : 0), 0)
+            })).sort((a, b) => b.weight - a.weight);
+            const competencyRule = rankedCompetencies[0] && rankedCompetencies[0].weight > 0 ? rankedCompetencies[0] : null;
+            const text = `${normalizedType} ${normalizedSubject} ${normalizedNotes}`;
             let score = null;
             if (/NAO ATENDE|CRITICO|GRAVE/.test(text)) score = 25;
             else if (/PARCIAL|DIFICULDADE|PONTO DE ATENCAO|PLANO DE ACAO/.test(text)) score = 50;
             else if (/EXCELENCIA|EXCELENTE|DESTAQUE|ELOGIO/.test(text)) score = 100;
             else if (normalizeText(followupType) === "AVALIACAO" || /ATENDE|ADEQUADO/.test(text)) score = 75;
-            const defaultCompetency = ANALYST_TYPE_COMPETENCY_DEFAULTS[normalizeText(followupType)] || "";
+            const defaultCompetency = ANALYST_TYPE_COMPETENCY_DEFAULTS[normalizedType] || "";
             return { competency: competencyRule ? competencyRule.id : defaultCompetency, score };
         };
         const NOTEBOOK_TREATMENT_STATUS_OPTIONS = [
@@ -622,6 +632,16 @@
             const raw = String(value || "").trim();
             if (normalizeInstructorIdentity(raw) === "BRUNA") return "Bruna Lorena";
             return raw;
+        };
+
+        const expandInstructorNames = value => {
+            const raw = String(value || "").trim();
+            if (!raw) return [];
+            return [...new Set(raw
+                .replace(/\([^)]*(?:FERIAS|FÉRIAS)[^)]*\)/gi, " ")
+                .split(/\s*(?:\/|;|\||\s+E\s+)\s*/i)
+                .map(name => canonicalizeInstructorName(name.trim()))
+                .filter(isValidInstructorName))];
         };
 
         const isValidInstructorName = (value) => {
@@ -774,8 +794,8 @@
             const start = `${due}T09:00:00`;
             const end = `${due}T09:30:00`;
             const url = `https://outlook.office.com/calendar/0/deeplink/compose?subject=${encodeURIComponent(subject)}&startdt=${encodeURIComponent(start)}&enddt=${encodeURIComponent(end)}&body=${encodeURIComponent(body)}&allday=false`;
-            const popup = window.open(url, "_blank", "noopener,noreferrer");
-            if (!popup) window.location.href = url;
+            const popup = window.open(url, "_blank");
+            if (!popup) alert("O navegador bloqueou a janela do Outlook. Permita pop-ups para este site e tente novamente.");
         };
 
         const normalizeNotebookNote = (note) => {
@@ -800,7 +820,11 @@
                 treatmentDays: Number.isInteger(Number(note.treatmentDays)) && Number(note.treatmentDays) > 0 ? Number(note.treatmentDays) : null,
                 treatmentDueDate: notebookDateInput(note.treatmentDueDate) || addNotebookDays(note.treatmentStartDate || note.situationDate || note.date, note.treatmentDays),
                 attachments: Array.isArray(note.attachments) ? note.attachments : [],
-                notes: String(note.notes || "")
+                notes: String(note.notes || ""),
+                sourceType: String(note.sourceType || "manual"),
+                sourceKey: String(note.sourceKey || ""),
+                sourceSheet: String(note.sourceSheet || ""),
+                dismissed: note.dismissed === true
             };
         };
 
@@ -989,6 +1013,13 @@
             }
         };
         const getDropoutDocumentMeta = record => DROPOUT_DOCUMENT_STATUS_OPTIONS.find(item => item.value === String(record && record.status || "sem_documentacao")) || DROPOUT_DOCUMENT_STATUS_OPTIONS[0];
+        const getDropoutDocumentDivergence = (student, record) => {
+            if (!student || !record) return "";
+            if (record.status === "com_documentacao" && !student.frequency_is_dropout) return "Documentação confirmada, mas a planilha de frequência ainda não identifica o aluno como evadido/desligado.";
+            if (record.status === "sem_documentacao" && student.frequency_is_dropout) return "A planilha de frequência identifica evasão/desligamento, mas o acompanhamento documental está como sem documentação.";
+            if (record.status === "com_documentacao" && !student.is_dropout) return "O acompanhamento documental indica baixa concluída, mas o aluno não está na aba de Evasão.";
+            return "";
+        };
         const nextMondayDate = () => {
             const date = new Date();
             const days = (8 - date.getDay()) % 7 || 7;
@@ -1025,7 +1056,7 @@
             const localNotes = Array.from(localMap.values()).sort((a, b) => new Date(b.date) - new Date(a.date));
             if (localNotes.length > 0) writeNotebookNotesLocal(storageKey, localNotes);
             const db = await getNotebookFirestore();
-            if (!db) return { notes: localNotes, source: "local" };
+            if (!db) return { notes: localNotes.filter(note => !note.dismissed), source: "local" };
 
             try {
                 const turmaKey = cleanNotebookKey(turma, "TURMA_DESCONHECIDA");
@@ -1049,7 +1080,8 @@
         const persistNotebookNote = async (turma, instructorName, note) => {
             const canonicalInstructorName = canonicalizeInstructorName(instructorName);
             const storageKey = makeNotebookStorageKey(turma, canonicalInstructorName);
-            const notes = [normalizeNotebookNote(note), ...readNotebookNotesLocal(storageKey)].filter(Boolean);
+            const normalizedNote = normalizeNotebookNote(note);
+            const notes = [normalizedNote, ...readNotebookNotesLocal(storageKey).filter(item => String(item.id) !== String(normalizedNote.id))].filter(Boolean);
             writeNotebookNotesLocal(storageKey, notes);
             const db = await getNotebookFirestore();
             if (!db) return { source: "local" };
@@ -1087,14 +1119,20 @@
             }
         };
 
-        const removeNotebookNote = async (turma, instructorName, noteId) => {
+        const removeNotebookNote = async (turma, instructorName, noteOrId) => {
+            const noteId = noteOrId && typeof noteOrId === "object" ? noteOrId.id : noteOrId;
+            const sourceNote = noteOrId && typeof noteOrId === "object" ? normalizeNotebookNote(noteOrId) : null;
             const storageKey = makeNotebookStorageKey(turma, instructorName);
-            const notes = readNotebookNotesLocal(storageKey).filter(note => String(note.id) !== String(noteId));
+            const isImportedObservation = sourceNote && sourceNote.sourceType === "frequency_observation";
+            const notes = isImportedObservation
+                ? readNotebookNotesLocal(storageKey).map(note => String(note.id) === String(noteId) ? normalizeNotebookNote({ ...note, dismissed: true }) : note)
+                : readNotebookNotesLocal(storageKey).filter(note => String(note.id) !== String(noteId));
             writeNotebookNotesLocal(storageKey, notes);
             const db = await getNotebookFirestore();
             if (!db) return { source: "local" };
             try {
-                await db.collection("instructor_notes").doc(String(noteId)).delete();
+                if (isImportedObservation) await db.collection("instructor_notes").doc(String(noteId)).set({ dismissed: true }, { merge: true });
+                else await db.collection("instructor_notes").doc(String(noteId)).delete();
                 return { source: "cloud" };
             } catch (error) {
                 console.error("Erro ao excluir nota do Firebase", error);
@@ -1125,7 +1163,7 @@
                 trackingStatus: ANALYST_TRACKING_STATUS_OPTIONS.some(item => item.value === note.trackingStatus) ? note.trackingStatus : "em_acompanhamento",
                 reminderDate: notebookDateInput(note.reminderDate || note.periodEnd),
                 notes: String(note.notes || "").trim(),
-                visibleToInstructor: note.visibleToInstructor === true,
+                visibleToInstructor: true,
                 createdAt: String(note.createdAt || new Date().toISOString()),
                 ownerEmail: String(note.ownerEmail || getCurrentAuthenticatedEmail()).toLowerCase()
             };
@@ -1175,7 +1213,7 @@
                     const score = privateEvaluation && privateEvaluation.score !== undefined ? privateEvaluation.score : legacyScore;
                     const note = normalizeAnalystNote({ id: doc.id, ...publicData, score });
                     if (note) merged.set(note.id, note);
-                    if (note && note.visibleToInstructor) {
+                    if (note) {
                         const sharedNote = { ...note, score: null };
                         delete sharedNote.ownerEmail;
                         legacyMigrations.push(db.collection("analyst_shared_notes").doc(doc.id).set({ ...sharedNote, ownerEmail }, { merge: true }));
@@ -1196,10 +1234,10 @@
                 if (legacyMigrations.length) await Promise.allSettled(legacyMigrations);
                 const notes = Array.from(merged.values()).sort((a, b) => String(b.date).localeCompare(String(a.date)) || String(b.createdAt).localeCompare(String(a.createdAt)));
                 writeAnalystNotesLocal(turma, canonicalAnalyst, notes);
-                return { notes, source: "cloud" };
+                return { notes: notes.filter(note => !note.dismissed), source: "cloud" };
             } catch (error) {
                 console.error("Erro ao carregar o caderno do analista; usando dados locais", error);
-                return { notes: localNotes, source: "local" };
+                return { notes: localNotes.filter(note => !note.dismissed), source: "local" };
             }
         };
 
@@ -1220,11 +1258,9 @@
                     updatedAt: new Date().toISOString()
                 };
                 const writes = [db.collection("analyst_notes").doc(normalized.id).set(publicNote, { merge: true })];
-                if (normalized.visibleToInstructor) {
-                    const sharedNote = { ...publicNote };
-                    delete sharedNote.score;
-                    writes.push(db.collection("analyst_shared_notes").doc(normalized.id).set(sharedNote, { merge: true }));
-                } else writes.push(db.collection("analyst_shared_notes").doc(normalized.id).delete().catch(() => null));
+                const sharedNote = { ...publicNote, visibleToInstructor: true };
+                delete sharedNote.score;
+                writes.push(db.collection("analyst_shared_notes").doc(normalized.id).set(sharedNote, { merge: true }));
                 if (normalized.score === null) writes.push(db.collection("analyst_evaluations").doc(normalized.id).delete().catch(() => null));
                 else writes.push(db.collection("analyst_evaluations").doc(normalized.id).set(evaluation, { merge: true }));
                 await Promise.all(writes);
@@ -1262,7 +1298,7 @@
                     const key = localStorage.key(index);
                     if (!key || !key.startsWith(`${ANALYST_NOTE_STORAGE_PREFIX}${turmaKey}_`)) continue;
                     const parsed = JSON.parse(localStorage.getItem(key) || "[]");
-                    if (Array.isArray(parsed)) notes.push(...parsed.map(normalizeAnalystNote).filter(note => note && note.visibleToInstructor && instructorKeys.has(note.instructorKey)).map(note => ({ ...note, score: null })));
+                    if (Array.isArray(parsed)) notes.push(...parsed.map(normalizeAnalystNote).filter(note => note && instructorKeys.has(note.instructorKey)).map(note => ({ ...note, score: null, visibleToInstructor: true })));
                 }
             } catch (error) {}
             return Array.from(new Map(notes.map(note => [note.id, note])).values());
@@ -1322,6 +1358,7 @@
             const [isSaving, setIsSaving] = useState(false);
             const [storageSource, setStorageSource] = useState("local");
             const [saveNotice, setSaveNotice] = useState("");
+            const [editingNoteId, setEditingNoteId] = useState("");
 
             const storageKey = useMemo(() => makeNotebookStorageKey(turma, instructorName), [turma, instructorName]);
 
@@ -1341,6 +1378,35 @@
                 setSelectedSituationTypes(current => current.includes(value) ? current.filter(item => item !== value) : [...current, value]);
             };
 
+            const resetNotebookForm = () => {
+                setTargetScope("student");
+                setSelectedStudentId("");
+                setNotes("");
+                setUrgency("normal");
+                setSelectedSituationTypes([]);
+                setSituationDate("");
+                setTreatmentDays("");
+                setTreatmentStatus("em_tratativa");
+                setResponsibleAnalyst("");
+                setAttachments([]);
+                setEditingNoteId("");
+            };
+
+            const editNote = note => {
+                setTargetScope(note.scope === "class" ? "class" : "student");
+                setSelectedStudentId(note.scope === "class" ? "" : String(note.studentId || ""));
+                setNotes(note.notes || "");
+                setUrgency(note.urgency || "normal");
+                setSelectedSituationTypes(note.situationTypes || []);
+                setSituationDate(note.situationDate || note.treatmentStartDate || "");
+                setTreatmentDays(note.treatmentDays ? String(note.treatmentDays) : "");
+                setTreatmentStatus(note.treatmentStatus || "em_tratativa");
+                setResponsibleAnalyst(note.responsibleAnalyst || "");
+                setAttachments(note.attachments || []);
+                setEditingNoteId(note.id);
+                setSaveNotice("Editando a anotação selecionada.");
+            };
+
             const handleSave = async () => {
                 if (targetScope === "student" && !selectedStudentId) {
                     alert("Selecione um aluno ou altere o alcance para Turma toda.");
@@ -1355,9 +1421,12 @@
                 const createdAt = new Date().toISOString();
                 const treatmentStartDate = notebookDateInput(situationDate || createdAt);
                 const parsedTreatmentDays = Number.parseInt(treatmentDays, 10);
+                const existingNote = editingNoteId ? allNotes.find(note => note.id === editingNoteId) : null;
                 const newNote = {
-                    id: `note_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-                    date: createdAt,
+                    ...(existingNote || {}),
+                    id: editingNoteId || `note_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+                    date: existingNote && existingNote.date || createdAt,
+                    updatedAt: createdAt,
                     scope: targetScope,
                     studentId: targetScope === "student" ? parseInt(selectedStudentId) : null,
                     studentIds: targetScope === "class" ? students.map(s => s.id) : [parseInt(selectedStudentId)],
@@ -1378,21 +1447,16 @@
                     ownerEmail: getCurrentAuthenticatedEmail()
                 };
 
-                const updatedNotes = [normalizeNotebookNote(newNote), ...allNotes].filter(Boolean);
+                const updatedNotes = [normalizeNotebookNote(newNote), ...allNotes.filter(note => note.id !== newNote.id)].filter(Boolean);
                 setAllNotes(updatedNotes);
-                const saved = await persistNotebookNote(turma, instructorName, newNote);
+                const saved = editingNoteId ? await updateNotebookNote(turma, instructorName, newNote) : await persistNotebookNote(turma, instructorName, newNote);
                 setStorageSource(saved.source);
                 if (typeof onNotesChanged === "function") onNotesChanged();
 
                 // Reset fields
-                setNotes("");
-                setSelectedSituationTypes([]);
-                setSituationDate("");
-                setTreatmentDays("");
-                setTreatmentStatus("em_tratativa");
-                setResponsibleAnalyst("");
-                setAttachments([]);
-                setSaveNotice(newNote.treatmentDueDate
+                const wasEditing = Boolean(editingNoteId);
+                resetNotebookForm();
+                setSaveNotice(wasEditing ? "Anotação atualizada com sucesso." : newNote.treatmentDueDate
                     ? `Anotação salva. ${getNotebookTreatmentLabel(newNote)}. Use "Abrir no Outlook" para criar o lembrete na agenda.`
                     : "Anotação salva e vinculada ao quadro correspondente.");
 
@@ -1425,8 +1489,11 @@
                 body += `Enviado via Dashboard de Frequência.`;
 
                 const outlookUrl = `https://outlook.office.com/mail/deeplink/compose?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-                const outlookWindow = window.open(outlookUrl, "_blank", "noopener,noreferrer");
-                if (!outlookWindow) window.location.href = outlookUrl;
+                const outlookWindow = window.open(outlookUrl, "_blank");
+                if (!outlookWindow) {
+                    alert("O navegador bloqueou a janela do Outlook. Permita pop-ups para este site e tente novamente.");
+                    return;
+                }
 
                 if (attachments.length > 0) {
                     alert("⚠️ AVISO DE SEGURANÇA:\n\nDevido a restrições técnicas dos navegadores web, arquivos NÃO podem ser anexados automaticamente ao programa de e-mail.\n\nO texto do e-mail foi gerado, mas você deve ARRASTAR OS ARQUIVOS MANUALMENTE para o e-mail.");
@@ -1456,11 +1523,12 @@
                 if (typeof onNotesChanged === "function") onNotesChanged();
             };
 
-            const deleteNote = (id) => {
+            const deleteNote = (note) => {
                 if(confirm("Excluir esta anotação do histórico?")) {
-                    const updated = allNotes.filter(n => n.id !== id);
+                    const updated = allNotes.filter(n => n.id !== note.id);
                     setAllNotes(updated);
-                    removeNotebookNote(turma, instructorName, id).then(result => {
+                    if (editingNoteId === note.id) resetNotebookForm();
+                    removeNotebookNote(turma, instructorName, note).then(result => {
                         setStorageSource(result.source);
                         if (typeof onNotesChanged === "function") onNotesChanged();
                     });
@@ -1612,14 +1680,14 @@
                                 )}
                             </div>
 
-                            <div className="flex justify-between items-center mb-6">
+                            <div className="flex flex-wrap justify-between items-center gap-2 mb-6">
                                 <button onClick={handleSendEmail} className="bg-white border border-senac-orange text-senac-orange hover:bg-orange-50 px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-2 shadow-sm">
                                     <IconMail className="w-4 h-4"/> Enviar por E-mail (Outlook)
                                 </button>
-                                <button onClick={handleSave} className="px-6 py-2 bg-senac-blue text-white hover:bg-blue-700 rounded-lg font-bold text-sm shadow flex items-center gap-2">
+                                <div className="flex gap-2">{editingNoteId && <button type="button" onClick={resetNotebookForm} className="px-4 py-2 rounded-lg border border-gray-300 bg-white text-gray-600 font-bold text-sm hover:bg-gray-50">Cancelar edição</button>}<button onClick={handleSave} className="px-6 py-2 bg-senac-blue text-white hover:bg-blue-700 rounded-lg font-bold text-sm shadow flex items-center gap-2">
                                     {isSaving ? <IconRefreshCw className="w-4 h-4 animate-spin"/> : <IconSave className="w-4 h-4"/>}
-                                    Salvar Nota
-                                </button>
+                                    {editingNoteId ? "Salvar alterações" : "Salvar Nota"}
+                                </button></div>
                             </div>
 
                             {/* HISTÓRICO DE NOTAS */}
@@ -1628,8 +1696,8 @@
                                     <h4 className="text-sm font-bold text-gray-700 mb-3 flex items-center gap-2"><IconClock className="w-4 h-4"/> Histórico Recente</h4>
                                     <div className="space-y-3">
                                         {allNotes.map(note => (
-                                            <div key={note.id} className="bg-white p-3 rounded-lg border border-gray-200 shadow-sm text-sm relative group">
-                                                <button onClick={() => deleteNote(note.id)} className="absolute top-2 right-2 text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"><IconTrash2 className="w-4 h-4"/></button>
+                                            <div key={note.id} className={`bg-white p-3 rounded-lg border shadow-sm text-sm relative group ${editingNoteId === note.id ? "border-senac-blue ring-2 ring-blue-100" : "border-gray-200"}`}>
+                                                <div className="absolute top-2 right-2 flex gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity"><button type="button" onClick={() => editNote(note)} title="Editar anotação" className="text-gray-400 hover:text-senac-blue"><IconEdit3 className="w-4 h-4"/></button><button type="button" onClick={() => deleteNote(note)} title="Excluir anotação" className="text-gray-300 hover:text-red-500"><IconTrash2 className="w-4 h-4"/></button></div>
                                                 <div className="flex justify-between items-start mb-1">
                                                     <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${note.urgency === 'critical' ? 'bg-red-100 text-red-700' : note.urgency === 'warning' ? 'bg-yellow-100 text-yellow-700' : 'bg-green-100 text-green-700'}`}>{note.urgency}</span>
                                                     <span className="text-xs text-gray-400">{new Date(note.date).toLocaleDateString()}</span>
@@ -1874,8 +1942,8 @@
             const subject = `Acompanhamento: ${note.followupType} - ${note.instructorName}`;
             const body = [`Turma: ${turma}`, `Instrutor: ${note.instructorName}`, `Analista: ${note.analystName}`, `Situação: ${note.followupType}`, `Assunto: ${note.subject || "Não informado"}`, `Status: ${getAnalystTrackingMeta(note).label}`, "", note.notes || "Sem descrição adicional."].join("\n");
             const url = `https://outlook.office.com/calendar/0/deeplink/compose?subject=${encodeURIComponent(subject)}&startdt=${encodeURIComponent(`${due}T09:00:00`)}&enddt=${encodeURIComponent(`${due}T09:30:00`)}&body=${encodeURIComponent(body)}&allday=false`;
-            const popup = window.open(url, "_blank", "noopener,noreferrer");
-            if (!popup) window.location.href = url;
+            const popup = window.open(url, "_blank");
+            if (!popup) alert("O navegador bloqueou a janela do Outlook. Permita pop-ups para este site e tente novamente.");
         };
         const createAnalystDraft = followupType => ({
             id: `draft_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
@@ -1894,7 +1962,6 @@
             const [periodEnd, setPeriodEnd] = useState("");
             const [date, setDate] = useState(() => notebookDateInput(new Date()));
             const [drafts, setDrafts] = useState([]);
-            const [visibleToInstructor, setVisibleToInstructor] = useState(false);
             const [showEvaluations, setShowEvaluations] = useState(false);
             const [trackingEnabled, setTrackingEnabled] = useState(false);
             const [trackingStatus, setTrackingStatus] = useState("em_acompanhamento");
@@ -1903,6 +1970,7 @@
             const [storageSource, setStorageSource] = useState("local");
             const [isSaving, setIsSaving] = useState(false);
             const [saveNotice, setSaveNotice] = useState("");
+            const [editingNoteId, setEditingNoteId] = useState("");
 
             useEffect(() => {
                 let current = true;
@@ -1929,9 +1997,44 @@
             const scoreLabel = value => value === null ? "Sem avaliação" : `${(PDI_SCORE_OPTIONS.find(item => item.value === Number(value)) || {}).label || "Avaliação"} (${value}%)`;
             const periodLabel = note => note.periodStart || note.periodEnd ? `${note.periodStart ? formatNotebookDate(note.periodStart) : "Início não informado"} a ${note.periodEnd ? formatNotebookDate(note.periodEnd) : "Em aberto"}` : "Período não informado";
 
+            const resetForm = () => {
+                setDrafts([]);
+                setPeriodStart("");
+                setPeriodEnd("");
+                setDate(notebookDateInput(new Date()));
+                setTrackingEnabled(false);
+                setTrackingStatus("em_acompanhamento");
+                setReminderDate("");
+                setEditingNoteId("");
+            };
+
+            const startEditing = note => {
+                setSelectedInstructor(note.instructorName);
+                setPeriodStart(note.periodStart || "");
+                setPeriodEnd(note.periodEnd || "");
+                setDate(note.date || notebookDateInput(new Date()));
+                setTrackingEnabled(note.trackingEnabled === true);
+                setTrackingStatus(note.trackingStatus || "em_acompanhamento");
+                setReminderDate(note.reminderDate || "");
+                setDrafts([{
+                    ...createAnalystDraft(note.followupType),
+                    subject: note.subject || "",
+                    notes: note.notes || "",
+                    manualPDI: true,
+                    manualCompetency: note.competency || "",
+                    manualScore: note.score === null || note.score === undefined ? "" : String(note.score)
+                }]);
+                setEditingNoteId(note.id);
+                setSaveNotice("Editando acompanhamento selecionado.");
+            };
+
             const save = async () => {
                 if (!selectedInstructor || drafts.length === 0 || drafts.some(item => !item.subject.trim() && !item.notes.trim())) {
                     alert("Selecione o instrutor, ao menos uma situação e informe assunto ou descrição em cada situação escolhida.");
+                    return;
+                }
+                if (editingNoteId && drafts.length !== 1) {
+                    alert("Durante a edição, mantenha somente a situação deste acompanhamento. Para registrar outras situações, conclua ou cancele a edição.");
                     return;
                 }
                 if (trackingEnabled && !reminderDate && !periodEnd) {
@@ -1946,6 +2049,8 @@
                         const competency = draft.manualPDI ? draft.manualCompetency : suggestion.competency;
                         const score = draft.manualPDI ? (draft.manualScore === "" ? null : Number(draft.manualScore)) : suggestion.score;
                         results.push(await persistAnalystNote(turma, analystName, {
+                            id: editingNoteId || undefined,
+                            createdAt: editingNoteId ? (allNotes.find(note => note.id === editingNoteId) || {}).createdAt : undefined,
                             instructorName: selectedInstructor,
                             periodStart,
                             periodEnd,
@@ -1955,7 +2060,7 @@
                             notes: draft.notes,
                             competency: competency || "",
                             score,
-                            visibleToInstructor,
+                            visibleToInstructor: true,
                             trackingEnabled,
                             trackingStatus: trackingEnabled ? trackingStatus : "em_acompanhamento",
                             reminderDate: trackingEnabled ? (reminderDate || periodEnd) : ""
@@ -1963,17 +2068,14 @@
                     }
                     setAllNotes(current => [...results.map(item => item.note), ...current.filter(note => !results.some(item => item.note.id === note.id))]);
                     setStorageSource(results.every(item => item.source === "cloud") ? "cloud" : "local");
-                    setDrafts([]);
-                    setVisibleToInstructor(false);
-                    setTrackingEnabled(false);
-                    setTrackingStatus("em_acompanhamento");
-                    setReminderDate("");
-                    setSaveNotice(`${results.length} situação(ões) salva(s) com sucesso.`);
+                    resetForm();
+                    setSaveNotice(editingNoteId ? "Acompanhamento atualizado com sucesso." : `${results.length} situação(ões) salva(s) com sucesso.`);
                     if (typeof onChanged === "function") onChanged();
                 } finally { setIsSaving(false); }
             };
             const remove = async noteId => {
                 if (!confirm("Excluir este acompanhamento do instrutor?")) return;
+                if (editingNoteId === noteId) resetForm();
                 setAllNotes(current => current.filter(note => note.id !== noteId));
                 const result = await removeAnalystNote(turma, analystName, noteId);
                 setStorageSource(result.source);
@@ -2005,13 +2107,13 @@
                     <div className="mt-4 space-y-3">{drafts.map(draft => { const suggestion = suggestionFor(draft); return <section key={draft.id} className="rounded-lg border border-gray-200 bg-gray-50 p-3"><div className="mb-2 flex items-center justify-between"><strong className="text-sm text-senac-blue">{draft.followupType}</strong><button type="button" onClick={() => toggleType(draft.followupType)} className="text-gray-400 hover:text-red-600"><IconXCircle className="h-4 w-4" /></button></div><label className="block text-xs font-bold text-gray-600">Assunto<input value={draft.subject} onChange={event => updateDraft(draft.id, { subject: event.target.value })} className="mt-1 w-full rounded border border-gray-300 bg-white p-2 font-normal" placeholder="Assunto específico desta situação" /></label><label className="mt-2 block text-xs font-bold text-gray-600">Descrição<textarea value={draft.notes} onChange={event => updateDraft(draft.id, { notes: event.target.value })} className="mt-1 h-20 w-full resize-none rounded border border-gray-300 bg-white p-2 font-normal" placeholder="Fatos, evidências e encaminhamentos" /></label><div className="mt-2 rounded border border-orange-200 bg-orange-50 p-2 text-xs"><div className="flex justify-between gap-2"><strong className="text-orange-900">Classificação PDI</strong><button type="button" onClick={() => updateDraft(draft.id, draft.manualPDI ? { manualPDI: false } : { manualPDI: true, manualCompetency: suggestion.competency || "", manualScore: suggestion.score === null ? "" : String(suggestion.score) })} className="font-bold text-senac-blue">{draft.manualPDI ? "Usar automática" : "Ajustar"}</button></div>{draft.manualPDI ? <div className="mt-2 space-y-2"><select value={draft.manualCompetency} onChange={event => updateDraft(draft.id, { manualCompetency: event.target.value })} className="w-full rounded border border-gray-300 bg-white p-2"><option value="">Não se aplica</option>{PDI_COMPETENCIES.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}</select>{showEvaluations && <select value={draft.manualScore} onChange={event => updateDraft(draft.id, { manualScore: event.target.value })} className="w-full rounded border border-gray-300 bg-white p-2"><option value="">Sem avaliação</option>{PDI_SCORE_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label} ({option.value}%)</option>)}</select>}</div> : <div className="mt-2 text-gray-700"><strong>Competência:</strong> {competenceLabel(suggestion.competency)}{showEvaluations && <div className="mt-1"><strong>Avaliação:</strong> {scoreLabel(suggestion.score)}</div>}</div>}</div></section>; })}{drafts.length === 0 && <p className="rounded-lg border border-dashed border-gray-300 p-4 text-center text-xs text-gray-400">Selecione uma ou mais situações para abrir os campos de registro.</p>}</div>
                     <label className="mt-4 flex cursor-pointer items-start gap-2 rounded-lg border border-purple-200 bg-purple-50 p-3 text-xs text-purple-900"><input type="checkbox" checked={trackingEnabled} onChange={event => setTrackingEnabled(event.target.checked)} className="mt-0.5 rounded text-purple-600" /><span><strong className="block">Criar status para acompanhamento</strong>Ativa prazo, alertas e acompanhamento no Outlook.</span></label>
                     {trackingEnabled && <div className="mt-3 grid grid-cols-1 gap-2 rounded-lg border border-purple-200 p-3"><label className="text-xs font-bold text-gray-600">Status<select value={trackingStatus} onChange={event => setTrackingStatus(event.target.value)} className="mt-1 w-full rounded border border-gray-300 p-2 font-normal">{ANALYST_TRACKING_STATUS_OPTIONS.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label><label className="text-xs font-bold text-gray-600">Data do lembrete<input type="date" min={date || undefined} value={reminderDate} onChange={event => setReminderDate(event.target.value)} className="mt-1 w-full rounded border border-gray-300 p-2 font-normal" /></label></div>}
-                    <label className="mt-4 flex cursor-pointer items-start gap-2 rounded-lg border border-blue-200 bg-blue-50 p-3 text-xs text-blue-900"><input type="checkbox" checked={visibleToInstructor} onChange={event => setVisibleToInstructor(event.target.checked)} className="mt-0.5 rounded text-senac-blue" /><span><strong className="block">Permitir visualização pelo instrutor</strong>A avaliação percentual nunca é compartilhada.</span></label>
-                    <button onClick={save} disabled={isSaving || !selectedInstructor || drafts.length === 0} className="mt-4 flex w-full items-center justify-center gap-2 rounded-md bg-senac-blue px-4 py-2.5 text-sm font-bold text-white disabled:opacity-50"><IconSave className="h-4 w-4" /> {isSaving ? "Salvando..." : `Salvar ${drafts.length || ""} situação(ões)`}</button>{saveNotice && <p className="mt-2 text-center text-xs font-semibold text-green-700">{saveNotice}</p>}<p className="mt-1 text-center text-[10px] text-gray-400">{storageSource === "cloud" ? "Sincronizado com o Firebase" : "Salvo neste dispositivo"}</p>
+                    <div className="mt-4 rounded-lg border border-blue-200 bg-blue-50 p-3 text-xs text-blue-900"><strong className="block">Visível ao instrutor</strong>Todos os acompanhamentos são compartilhados. A avaliação percentual continua restrita ao analista.</div>
+                    <div className="mt-4 flex gap-2">{editingNoteId && <button type="button" onClick={resetForm} className="rounded-md border border-gray-300 px-4 py-2.5 text-sm font-bold text-gray-600 hover:bg-gray-50">Cancelar</button>}<button onClick={save} disabled={isSaving || !selectedInstructor || drafts.length === 0} className="flex flex-1 items-center justify-center gap-2 rounded-md bg-senac-blue px-4 py-2.5 text-sm font-bold text-white disabled:opacity-50"><IconSave className="h-4 w-4" /> {isSaving ? "Salvando..." : editingNoteId ? "Salvar alterações" : `Salvar ${drafts.length || ""} situação(ões)`}</button></div>{saveNotice && <p className="mt-2 text-center text-xs font-semibold text-green-700">{saveNotice}</p>}<p className="mt-1 text-center text-[10px] text-gray-400">{storageSource === "cloud" ? "Sincronizado com o Firebase" : "Salvo neste dispositivo"}</p>
                 </div><div className="space-y-4 p-5">
                     {trackedAlerts.length > 0 && <section className="rounded-lg border border-orange-200 bg-orange-50 p-4"><h3 className="text-sm font-bold text-orange-900">Acompanhamentos pendentes</h3><div className="mt-2 space-y-2">{trackedAlerts.slice(0, 8).map(note => <div key={note.id} className="flex flex-wrap items-center justify-between gap-2 rounded bg-white p-2 text-xs"><span><strong>{note.followupType}:</strong> {note.subject || "Sem assunto"} | {note.reminderDate ? formatNotebookDate(note.reminderDate) : "Sem prazo"}</span><button type="button" onClick={() => openAnalystTrackingInOutlook(note, turma)} className="font-bold text-senac-blue">Abrir no Outlook</button></div>)}</div></section>}
                     <div className={`grid grid-cols-2 gap-3 ${showEvaluations ? "md:grid-cols-4" : "md:grid-cols-3"}`}><div className="rounded-lg border border-gray-200 bg-white p-3"><div className="text-[10px] font-bold uppercase text-gray-400">Registros</div><div className="mt-1 text-2xl font-bold text-senac-blue">{instructorNotes.length}</div></div><div className="rounded-lg border border-gray-200 bg-white p-3"><div className="text-[10px] font-bold uppercase text-gray-400">Em acompanhamento</div><div className="mt-1 text-2xl font-bold text-purple-700">{trackedAlerts.length}</div></div>{showEvaluations && <><div className="rounded-lg border border-gray-200 bg-white p-3"><div className="text-[10px] font-bold uppercase text-gray-400">Indicador PDI</div><div className="mt-1 text-2xl font-bold text-senac-orange">{pdi.average === null ? "--" : `${pdi.average}%`}</div></div><div className="rounded-lg border border-gray-200 bg-white p-3"><div className="text-[10px] font-bold uppercase text-gray-400">Competências avaliadas</div><div className="mt-1 text-2xl font-bold text-green-700">{pdi.strengths.length + pdi.opportunities.length}</div></div></>}</div>
                     {showEvaluations ? <><HistoryBars title="Evolução das avaliações do instrutor" history={graphHistory} getValue={item => item.score} color="#004587" /><div className="rounded-lg border border-gray-200 bg-white p-4"><div className="mb-3 flex items-center justify-between"><h3 className="text-sm font-bold text-gray-800">PDI consolidado</h3><button onClick={printPDI} disabled={pdi.average === null} className="rounded border border-senac-blue px-2 py-1 text-xs font-bold text-senac-blue disabled:opacity-40">Emitir PDI</button></div><div className="grid gap-4 md:grid-cols-2"><div><h4 className="text-xs font-bold uppercase text-green-700">Pontos fortes</h4>{pdi.strengths.length ? <ul className="mt-2 space-y-2 text-xs">{pdi.strengths.map(item => <li key={item.id}><strong>{item.label}:</strong> {item.note.subject || item.note.notes}</li>)}</ul> : <p className="mt-2 text-xs text-gray-400">Sem avaliações positivas.</p>}</div><div><h4 className="text-xs font-bold uppercase text-red-700">Oportunidades e ações</h4>{pdi.opportunities.length ? <ul className="mt-2 space-y-2 text-xs">{pdi.opportunities.map(item => <li key={item.id}><strong>{item.label}:</strong> {item.note.subject || item.note.notes}</li>)}</ul> : <p className="mt-2 text-xs text-gray-400">Sem oportunidades avaliadas.</p>}</div></div></div></> : <div className="rounded-lg border border-dashed border-gray-300 bg-white p-5 text-center text-sm text-gray-500"><IconEye className="mx-auto mb-2 h-5 w-5" />Avaliações, percentuais, gráfico e PDI estão ocultos. Use “Mostrar avaliações” quando precisar consultá-los.</div>}
-                    <div className="rounded-lg border border-gray-200 bg-white p-4"><h3 className="mb-3 text-sm font-bold text-gray-800">Histórico do acompanhamento</h3><div className="max-h-[480px] space-y-2 overflow-y-auto">{instructorNotes.length === 0 ? <p className="py-8 text-center text-xs text-gray-400">Nenhum acompanhamento para este instrutor.</p> : [...instructorNotes].reverse().map(note => <div key={note.id} className="relative rounded-lg border border-gray-200 p-3 text-xs"><button onClick={() => remove(note.id)} className="absolute right-2 top-2 text-gray-300 hover:text-red-600"><IconTrash2 className="h-4 w-4" /></button><div className="flex flex-wrap items-center gap-2 pr-6"><span className="font-bold text-senac-blue">{note.subject || note.followupType}</span><span className="rounded bg-orange-50 px-2 py-0.5 text-orange-800">{note.followupType}</span>{note.competency && <span className="rounded bg-blue-50 px-2 py-0.5 text-blue-700">{competenceLabel(note.competency)}</span>}{showEvaluations && note.score !== null && <span className="rounded bg-gray-100 px-2 py-0.5 font-bold text-gray-600">{note.score}%</span>}{note.visibleToInstructor ? <span className="rounded bg-green-100 px-2 py-0.5 text-green-800">Visível ao instrutor</span> : <span className="rounded bg-gray-100 px-2 py-0.5 text-gray-600">Restrito</span>}</div><div className="mt-1 text-gray-400">{formatNotebookDate(note.date)} | {periodLabel(note)}</div>{note.notes && <p className="mt-2 whitespace-pre-wrap text-gray-700">{note.notes}</p>}{note.trackingEnabled && <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-gray-100 pt-2"><select value={note.trackingStatus} onChange={event => changeTrackingStatus(note, event.target.value)} className={`rounded border px-2 py-1 text-xs font-bold ${getAnalystTrackingMeta(note).className}`}>{ANALYST_TRACKING_STATUS_OPTIONS.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}</select>{note.reminderDate && <span className={getAnalystTrackingState(note) === "overdue" ? "font-bold text-red-700" : "text-gray-500"}>Lembrete: {formatNotebookDate(note.reminderDate)}</span>}<button type="button" onClick={() => openAnalystTrackingInOutlook(note, turma)} className="font-bold text-senac-blue">Abrir no Outlook</button></div>}</div>)}</div></div>
+                    <div className="rounded-lg border border-gray-200 bg-white p-4"><h3 className="mb-3 text-sm font-bold text-gray-800">Histórico do acompanhamento</h3><div className="max-h-[480px] space-y-2 overflow-y-auto">{instructorNotes.length === 0 ? <p className="py-8 text-center text-xs text-gray-400">Nenhum acompanhamento para este instrutor.</p> : [...instructorNotes].reverse().map(note => <div key={note.id} className={`relative rounded-lg border p-3 text-xs ${editingNoteId === note.id ? "border-senac-blue bg-blue-50" : "border-gray-200"}`}><div className="absolute right-2 top-2 flex gap-1"><button type="button" onClick={() => startEditing(note)} title="Editar acompanhamento" className="text-gray-400 hover:text-senac-blue"><IconEdit3 className="h-4 w-4" /></button><button type="button" onClick={() => remove(note.id)} title="Excluir acompanhamento" className="text-gray-300 hover:text-red-600"><IconTrash2 className="h-4 w-4" /></button></div><div className="flex flex-wrap items-center gap-2 pr-12"><span className="font-bold text-senac-blue">{note.subject || note.followupType}</span><span className="rounded bg-orange-50 px-2 py-0.5 text-orange-800">{note.followupType}</span>{note.competency && <span className="rounded bg-blue-50 px-2 py-0.5 text-blue-700">{competenceLabel(note.competency)}</span>}{showEvaluations && note.score !== null && <span className="rounded bg-gray-100 px-2 py-0.5 font-bold text-gray-600">{note.score}%</span>}<span className="rounded bg-green-100 px-2 py-0.5 text-green-800">Visível ao instrutor</span></div><div className="mt-1 text-gray-400">{formatNotebookDate(note.date)} | {periodLabel(note)}</div>{note.notes && <p className="mt-2 whitespace-pre-wrap text-gray-700">{note.notes}</p>}{note.trackingEnabled && <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-gray-100 pt-2"><select value={note.trackingStatus} onChange={event => changeTrackingStatus(note, event.target.value)} className={`rounded border px-2 py-1 text-xs font-bold ${getAnalystTrackingMeta(note).className}`}>{ANALYST_TRACKING_STATUS_OPTIONS.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}</select>{note.reminderDate && <span className={getAnalystTrackingState(note) === "overdue" ? "font-bold text-red-700" : "text-gray-500"}>Lembrete: {formatNotebookDate(note.reminderDate)}</span>}<button type="button" onClick={() => openAnalystTrackingInOutlook(note, turma)} className="font-bold text-senac-blue">Abrir no Outlook</button></div>}</div>)}</div></div>
                 </div></div><div className="flex shrink-0 justify-end border-t border-gray-200 bg-white p-4"><button onClick={onClose} className="rounded-md border border-gray-300 px-4 py-2 text-sm font-bold text-gray-600">Fechar</button></div>
             </div></div>;
         };
@@ -2028,10 +2130,24 @@
             useEffect(() => {
                 let isCurrent = true;
                 setIsLoading(true);
-                Promise.all((instructors || []).map(async instructorName => {
+                Promise.all([...(instructors || []).map(async instructorName => {
                     const loaded = await loadNotebookNotes(turma, instructorName);
                     return loaded.notes.map(note => ({ ...note, instructorSource: note.instructorName || instructorName }));
-                })).then(groups => {
+                }), loadVisibleAnalystNotes(turma, instructors || []).then(analystNotes => analystNotes.map(note => normalizeNotebookNote({
+                    ...note,
+                    id: `analyst_report_${note.id}`,
+                    scope: "class",
+                    studentName: `Instrutor acompanhado: ${note.instructorName}`,
+                    situationTypes: [note.followupType],
+                    responsibleAnalyst: note.analystName,
+                    treatmentStatus: note.trackingStatus === "resolvido" ? "concluida" : note.trackingStatus === "aguardando_retorno" ? "aguardando_retorno" : note.trackingStatus === "cancelado" ? "cancelada" : "em_tratativa",
+                    treatmentStartDate: note.periodStart || note.date,
+                    treatmentDueDate: note.reminderDate || note.periodEnd,
+                    notes: [note.subject, note.notes].filter(Boolean).join("\n\n"),
+                    instructorSource: note.instructorName,
+                    sourceType: "analyst_followup",
+                    score: null
+                }))).then(items => items.filter(Boolean))]).then(groups => {
                     if (!isCurrent) return;
                     const unique = new Map();
                     groups.flat().forEach(note => unique.set(`${note.instructorSource}_${note.id}`, note));
@@ -2136,7 +2252,6 @@
                 supervisorContact: false,
                 justifications: false,
                 academic: false,
-                observations: false,
                 notebook: false,
                 activities: false
             }));
@@ -2146,7 +2261,6 @@
                 ["supervisorContact", "Atualização de contato do supervisor", "Nome, telefone e e-mail do supervisor."],
                 ["justifications", "Justificativas e faltas NA", "Registros NA, status da justificativa e motivo informado."],
                 ["academic", "Frequência, desempenho e situação", "Status cadastral, frequência e detalhamento por UC."],
-                ["observations", "Observações das planilhas", "Observações organizadas das abas e comentários da chamada."],
                 ["notebook", "Anotações do caderno do instrutor", "Chamados, pontos de atenção e tratativas."],
                 ["activities", "Atividades do upload atual", "NC, em branco e requer avaliação. Não fica gravado na turma."]
             ];
@@ -2185,7 +2299,7 @@
             const [selectedIds, setSelectedIds] = useState([]);
             const [search, setSearch] = useState("");
             const [statusFilter, setStatusFilter] = useState("all");
-            const [reportOptions, setReportOptions] = useState({ academic: true, activities: true, attendance: true, observations: true, notebook: true });
+            const [reportOptions, setReportOptions] = useState({ academic: true, activities: true, attendance: true, notebook: true });
 
             useEffect(() => {
                 if (ucOptions.length > 0) {
@@ -2239,7 +2353,7 @@
                             <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm mb-4">
                                 <label className="block text-xs font-bold text-gray-500 uppercase mb-2">Filtros do relatório</label>
                                 <select value={statusFilter} onChange={event => setStatusFilter(event.target.value)} className="mb-3 w-full rounded border border-gray-300 p-2 text-sm"><option value="all">Todas as situações</option><option value="active">Alunos ativos</option><option value="attention">Somente pontos de atenção</option><option value="process">Em processo de desligamento</option><option value="dropout">Evadidos/desligados</option></select>
-                                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">{[["academic", "Frequência e desempenho"], ["activities", "Atividades"], ["attendance", "Chamada e NA"], ["observations", "Observações"], ["notebook", "Caderno do instrutor"]].map(([key, label]) => <label key={key} className="flex cursor-pointer items-center gap-2 rounded border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-700"><input type="checkbox" checked={Boolean(reportOptions[key])} onChange={() => setReportOptions(current => ({ ...current, [key]: !current[key] }))} className="rounded text-senac-blue" />{label}</label>)}</div>
+                                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">{[["academic", "Frequência e desempenho"], ["activities", "Atividades"], ["attendance", "Chamada e NA"], ["notebook", "Caderno do instrutor"]].map(([key, label]) => <label key={key} className="flex cursor-pointer items-center gap-2 rounded border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-700"><input type="checkbox" checked={Boolean(reportOptions[key])} onChange={() => setReportOptions(current => ({ ...current, [key]: !current[key] }))} className="rounded text-senac-blue" />{label}</label>)}</div>
                             </div>
                             <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm mb-4">
                                 <label className="block text-xs font-bold text-gray-500 uppercase mb-2">Alcance do relatório</label>
@@ -3473,7 +3587,10 @@
 
         const SAVED_CLASSES_INDEX_KEY = "saved_classes_v1_index";
         const SAVED_CLASS_DATA_PREFIX = "saved_class_v1_";
+        const USER_CLASS_ACCESS_PREFIX = "user_class_access_v1_";
         const getSavedClassKey = (turma) => cleanNotebookKey(turma, "TURMA_DESCONHECIDA");
+        const getUserClassAccessStorageKey = () => `${USER_CLASS_ACCESS_PREFIX}${cleanNotebookKey(getCurrentAuthenticatedEmail(), "USUARIO_LOCAL")}`;
+        const getUserClassAccessDocId = turmaKey => `${cleanNotebookKey(getCurrentAuthenticatedEmail(), "USUARIO_LOCAL")}_${turmaKey}`;
         const cleanForStorage = (value) => JSON.parse(JSON.stringify(value, (key, item) => item === undefined ? null : item));
         const savedArray = (value) => Array.isArray(value) ? value : [];
         const savedRecord = (value) => value && typeof value === "object" && !Array.isArray(value) ? value : {};
@@ -3495,6 +3612,9 @@
                 uc_scores: ucScores,
                 is_dropout: Boolean(source.is_dropout),
                 is_process_dropout: Boolean(source.is_process_dropout),
+                frequency_is_dropout: Boolean(source.frequency_is_dropout),
+                frequency_is_process_dropout: Boolean(source.frequency_is_process_dropout),
+                frequency_dropout_reason: String(source.frequency_dropout_reason || ""),
                 needs_recuperacao: Boolean(source.needs_recuperacao),
                 needs_conselho: Boolean(source.needs_conselho)
             };
@@ -3526,6 +3646,7 @@
                 tutor1: String(source.tutor1 || "Não Identificado"),
                 tutor2: String(source.tutor2 || "Não Identificado"),
                 instructors: savedArray(source.instructors).map(String),
+                sheetInstructors: Object.fromEntries(Object.entries(savedRecord(source.sheetInstructors)).map(([key, value]) => [String(key), Array.isArray(value) ? value.map(String) : expandInstructorNames(value)])),
                 ucs: savedArray(source.ucs).map(String),
                 courseDates: savedArray(source.courseDates).map(toDashboardDate).filter(Boolean),
                 attendanceWarnings,
@@ -3561,9 +3682,62 @@
             catch (error) { console.warn("Não foi possível atualizar o índice local de turmas", error); }
         };
 
-        const synchronizeSavedClassSummaries = documents => {
-            const cloudClasses = (documents || []).map(document => ({ turmaKey: document.id, ...document.data(), cloudSynced: true })).filter(canAccessSavedClass);
-            const pendingLocal = readSavedClassesLocal().filter(item => item.cloudSynced === false && canAccessSavedClass(item));
+        const readUserClassAccessLocal = () => {
+            try {
+                const parsed = JSON.parse(localStorage.getItem(getUserClassAccessStorageKey()) || "[]");
+                const explicitKeys = Array.isArray(parsed) ? parsed.map(String) : [];
+                const email = getCurrentAuthenticatedEmail();
+                const locallyOpenedKeys = explicitKeys.length === 0 ? readSavedClassesLocal()
+                    .filter(item => String(item.updatedBy || "").toLowerCase() === email && localStorage.getItem(`${SAVED_CLASS_DATA_PREFIX}${item.turmaKey}`))
+                    .map(item => item.turmaKey) : [];
+                return [...new Set([...explicitKeys, ...locallyOpenedKeys])];
+            } catch (error) { return []; }
+        };
+
+        const writeUserClassAccessLocal = keys => {
+            try { localStorage.setItem(getUserClassAccessStorageKey(), JSON.stringify([...new Set((keys || []).map(String))])); }
+            catch (error) { console.warn("Não foi possível salvar a lista pessoal de turmas", error); }
+        };
+
+        const markSavedClassAccess = async (turmaOrKey) => {
+            const turmaKey = getSavedClassKey(turmaOrKey);
+            if (!turmaKey) return { source: "local" };
+            writeUserClassAccessLocal([turmaKey, ...readUserClassAccessLocal()]);
+            const db = await getNotebookFirestore();
+            const email = getCurrentAuthenticatedEmail();
+            if (!db || !email) return { source: "local" };
+            try {
+                await db.collection("user_class_access").doc(getUserClassAccessDocId(turmaKey)).set({
+                    userEmail: email,
+                    turmaKey,
+                    lastAccessedAt: new Date().toISOString()
+                }, { merge: true });
+                return { source: "cloud" };
+            } catch (error) {
+                console.error("Erro ao registrar acesso à turma", error);
+                return { source: "local" };
+            }
+        };
+
+        const loadUserClassAccess = async () => {
+            const localKeys = readUserClassAccessLocal();
+            const db = await getNotebookFirestore();
+            const email = getCurrentAuthenticatedEmail();
+            if (!db || !email) return new Set(localKeys);
+            try {
+                const snapshot = await db.collection("user_class_access").where("userEmail", "==", email).get();
+                const keys = [...new Set([...localKeys, ...snapshot.docs.map(doc => String(doc.data().turmaKey || "")).filter(Boolean)])];
+                writeUserClassAccessLocal(keys);
+                return new Set(keys);
+            } catch (error) {
+                console.error("Erro ao carregar a lista pessoal de turmas", error);
+                return new Set(localKeys);
+            }
+        };
+
+        const synchronizeSavedClassSummaries = (documents, accessedKeys = new Set(readUserClassAccessLocal())) => {
+            const cloudClasses = (documents || []).map(document => ({ turmaKey: document.id, ...document.data(), cloudSynced: true })).filter(item => accessedKeys.has(item.turmaKey));
+            const pendingLocal = readSavedClassesLocal().filter(item => item.cloudSynced === false && accessedKeys.has(item.turmaKey));
             const merged = new Map(cloudClasses.map(item => [item.turmaKey, item]));
             pendingLocal.forEach(item => { if (!merged.has(item.turmaKey)) merged.set(item.turmaKey, item); });
             const classes = Array.from(merged.values()).sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
@@ -3593,16 +3767,8 @@
             const turmaKey = summary && summary.turmaKey;
             if (!turmaKey) throw new Error("Turma inválida.");
             const db = await getNotebookFirestore();
-            if (db) {
-                const studentSnapshot = await db.collection("saved_class_students").where("turmaKey", "==", turmaKey).get();
-                const references = studentSnapshot.docs.map(document => document.ref);
-                references.push(db.collection("saved_classes").doc(turmaKey));
-                for (let start = 0; start < references.length; start += 450) {
-                    const batch = db.batch();
-                    references.slice(start, start + 450).forEach(reference => batch.delete(reference));
-                    await batch.commit();
-                }
-            }
+            if (db && getCurrentAuthenticatedEmail()) await db.collection("user_class_access").doc(getUserClassAccessDocId(turmaKey)).delete().catch(() => null);
+            writeUserClassAccessLocal(readUserClassAccessLocal().filter(key => key !== turmaKey));
             removeSavedClassLocal(turmaKey);
             return { source: db ? "cloud" : "local" };
         };
@@ -3615,12 +3781,13 @@
         };
 
         const loadSavedClasses = async () => {
-            const local = readSavedClassesLocal().filter(canAccessSavedClass);
+            const accessedKeys = await loadUserClassAccess();
+            const local = readSavedClassesLocal().filter(item => accessedKeys.has(item.turmaKey));
             const db = await getNotebookFirestore();
             if (!db) return { classes: local, source: "local" };
             try {
                 const snapshot = await db.collection("saved_classes").get();
-                return { classes: synchronizeSavedClassSummaries(snapshot.docs), source: "cloud" };
+                return { classes: synchronizeSavedClassSummaries(snapshot.docs, accessedKeys), source: "cloud" };
             } catch (error) {
                 console.error("Erro ao carregar turmas salvas", error);
                 return { classes: local, source: "local", error };
@@ -3630,6 +3797,7 @@
         const persistSavedClass = async (data, source = {}) => {
             if (!data || !data.turma || !Array.isArray(data.students)) return { source: "local", summary: null };
             const summary = { ...makeSavedClassSummary(data, source), cloudSynced: false };
+            await markSavedClassAccess(summary.turmaKey);
             writeSavedClassLocal(summary, data);
             const db = await getNotebookFirestore();
             if (!db) return { source: "local", summary };
@@ -3640,6 +3808,7 @@
                 const operations = [];
                 operations.push({ type: "set", ref: db.collection("saved_classes").doc(summary.turmaKey), data: cleanForStorage({
                     ...syncedSummary,
+                    sheetInstructors: data.sheetInstructors || {},
                     courseDates: (data.courseDates || []).map(value => value instanceof Date ? value.toISOString() : String(value || "")),
                     attendanceWarnings: data.attendanceWarnings || []
                 }) });
@@ -3684,6 +3853,7 @@
                             tutor1: meta.tutor1,
                             tutor2: meta.tutor2,
                             instructors: meta.instructors || [],
+                            sheetInstructors: meta.sheetInstructors || {},
                             ucs: meta.ucs || [],
                             courseDates: (meta.courseDates || []).map(value => new Date(value)).filter(value => !Number.isNaN(value.getTime())),
                             attendanceWarnings: meta.attendanceWarnings || [],
@@ -3831,12 +4001,23 @@
                     .filter(Boolean)
                     .sort((a, b) => a.number - b.number || a.sheetIndex - b.sheetIndex)
                     .map(item => ({ ...item, metadata: findMetadata(workbook.Sheets[item.sheetName]) }));
+                const sheetInstructors = {};
+                sheetNames.forEach(sheetName => {
+                    const metadata = findMetadata(workbook.Sheets[sheetName]);
+                    const responsibleInstructors = expandInstructorNames(metadata && metadata.tutor)
+                        .filter(instructor => normalizeName(instructor) !== normalizeName("Não Identificado"));
+                    if (responsibleInstructors.length === 0) return;
+                    sheetInstructors[sheetName] = responsibleInstructors;
+                    const ucMatch = String(sheetName).match(/UC\s*(\d+)/i);
+                    if (ucMatch) sheetInstructors[`UC${ucMatch[1]}`] = responsibleInstructors;
+                });
 
                 const instructors = [];
                 ucMetadata.forEach(({ metadata }) => {
-                    const tutor = canonicalizeInstructorName(metadata && metadata.tutor);
-                    if (!isValidInstructorName(tutor) || normalizeName(tutor) === normalizeName("Não Identificado")) return;
-                    if (!instructors.some(existing => normalizeName(existing) === normalizeName(tutor))) instructors.push(tutor);
+                    expandInstructorNames(metadata && metadata.tutor).forEach(tutor => {
+                        if (normalizeName(tutor) === normalizeName("Não Identificado")) return;
+                        if (!instructors.some(existing => normalizeName(existing) === normalizeName(tutor))) instructors.push(tutor);
+                    });
                     if (turma === "Turma não identificada" && metadata.turma) turma = metadata.turma;
                     if ((!course || course.includes("não")) && metadata.curso) course = metadata.curso;
                 });
@@ -3845,8 +4026,9 @@
                 if (instructors.length === 0) {
                     sheetNames.forEach(sheetName => {
                         const metadata = findMetadata(workbook.Sheets[sheetName]);
-                        const tutor = canonicalizeInstructorName(metadata && metadata.tutor);
-                        if (isValidInstructorName(tutor) && normalizeName(tutor) !== normalizeName("Não Identificado") && !instructors.some(existing => normalizeName(existing) === normalizeName(tutor))) instructors.push(tutor);
+                        expandInstructorNames(metadata && metadata.tutor).forEach(tutor => {
+                            if (normalizeName(tutor) !== normalizeName("Não Identificado") && !instructors.some(existing => normalizeName(existing) === normalizeName(tutor))) instructors.push(tutor);
+                        });
                         if (turma === "Turma não identificada" && metadata.turma) turma = metadata.turma;
                         if ((!course || course.includes("não")) && metadata.curso) course = metadata.curso;
                     });
@@ -4194,9 +4376,14 @@
                     }
                 });
 
+                students.forEach(student => {
+                    student.frequency_is_dropout = Boolean(student.is_dropout);
+                    student.frequency_is_process_dropout = Boolean(student.is_process_dropout);
+                    student.frequency_dropout_reason = String(student.dropout_reason || "");
+                });
                 const attendanceWarnings = analyzeAttendanceWarnings(workbook, students);
                 const naAlerts = analyzeNAWarnings(workbook, students);
-                return { course, turma, tutor1, tutor2, instructors, students, ucs: Array.from(allFoundUCs).sort(), courseDates: rawDates, attendanceWarnings, naAlerts };
+                return { course, turma, tutor1, tutor2, instructors, sheetInstructors, students, ucs: Array.from(allFoundUCs).sort(), courseDates: rawDates, attendanceWarnings, naAlerts };
             } catch (error) {
                 console.error(error);
                 alert("Erro ao ler o arquivo: " + error.message);
@@ -4208,6 +4395,49 @@
             let hash = 0; if (str.length === 0) return "0000";
             for (let i = 0; i < str.length; i++) { const char = str.charCodeAt(i); hash = ((hash << 5) - hash) + char; hash = hash & hash; }
             return Math.abs(hash).toString(16).toUpperCase().substring(0, 8);
+        };
+
+        const syncFrequencyObservationsToNotebooks = async data => {
+            if (!data || !data.turma || !Array.isArray(data.students)) return { created: 0, skipped: 0 };
+            const grouped = new Map();
+            data.students.forEach(student => {
+                (student.all_observations || []).forEach(observation => {
+                    const responsibleValue = data.sheetInstructors && (data.sheetInstructors[observation.sheet] || data.sheetInstructors[observation.uc]);
+                    const responsibleInstructors = Array.isArray(responsibleValue)
+                        ? responsibleValue.map(canonicalizeInstructorName).filter(isValidInstructorName)
+                        : expandInstructorNames(responsibleValue);
+                    if (responsibleInstructors.length === 0) return;
+                    const sourceKey = [data.turma, student.name, observation.sheet, observation.uc, observation.column, observation.date, observation.header, observation.text].join("|");
+                    responsibleInstructors.forEach(instructorName => {
+                        const instructorSourceKey = `${sourceKey}|${instructorName}`;
+                        const note = normalizeNotebookNote({
+                            id: `freqobs_${generateHash(instructorSourceKey)}_${generateHash(instructorSourceKey.split("").reverse().join(""))}`,
+                            date: new Date().toISOString(), scope: "student", studentId: student.id, studentIds: [student.id], studentName: student.name,
+                            notes: [observation.text, "", `Origem: ${observation.sheet || observation.uc || "Planilha de frequência"}`, observation.header ? `Campo: ${observation.header}` : "", observation.date ? `Data identificada: ${observation.date}` : ""].filter(Boolean).join("\n"),
+                            urgency: "normal", treatmentStatus: "em_tratativa", responsibleAnalyst: "", situationTypes: ["Observação da frequência"],
+                            situationDate: "", treatmentStartDate: "", treatmentDays: null, treatmentDueDate: "", attachments: [],
+                            turma: data.turma, instructorName, sourceType: "frequency_observation", sourceKey: instructorSourceKey,
+                            sourceSheet: observation.sheet || observation.uc || "", dismissed: false, ownerEmail: getCurrentAuthenticatedEmail()
+                        });
+                        if (!grouped.has(instructorName)) grouped.set(instructorName, []);
+                        grouped.get(instructorName).push(note);
+                    });
+                });
+            });
+
+            let created = 0;
+            let skipped = 0;
+            for (const [instructorName, notes] of grouped.entries()) {
+                await loadNotebookNotes(data.turma, instructorName);
+                const existing = new Map(readNotebookNotesLocal(makeNotebookStorageKey(data.turma, instructorName)).map(note => [String(note.id), note]));
+                for (const note of notes) {
+                    if (existing.has(String(note.id))) { skipped++; continue; }
+                    await persistNotebookNote(data.turma, instructorName, note);
+                    existing.set(String(note.id), note);
+                    created++;
+                }
+            }
+            return { created, skipped };
         };
 
         const maskCPF = (cpf) => {
@@ -4418,9 +4648,6 @@
                 return `<tr class="${justification ? "ok" : "attention"}"><td>${escapeReportHTML(entry.uc)}</td><td>${escapeReportHTML(entry.date)}</td><td>${escapeReportHTML(entry.sheet)}</td><td>${justification ? "Justificado" : "Pendente"}</td><td>${escapeReportHTML(justification && justification.reason || "Não informado")}</td></tr>`;
             }).join("")}</tbody></table>` : `<p class="muted">Nenhum registro NA de chamada encontrado.</p>`;
 
-            const observations = student.all_observations || [];
-            const observationsHTML = observations.length > 0 ? `<div class="observation-list">${observations.map(observation => `<div class="observation"><strong>${escapeReportHTML(getObservationGroupLabel(observation))}</strong><div>${escapeReportHTML(observation.text)}</div>${observation.date ? `<small>${escapeReportHTML(observation.date)}</small>` : ""}</div>`).join("")}</div>` : `<p class="muted">Nenhuma observação registrada nas abas.</p>`;
-
             const studentNotes = (notebookNotes || []).filter(note => note.scope === "class" || Number(note.studentId) === Number(student.id) || (note.studentIds || []).includes(Number(student.id)));
             const notesHTML = studentNotes.length > 0 ? `<div class="observation-list">${studentNotes.map(note => `<div class="observation"><strong>${escapeReportHTML(getNotebookSituationLabel(note))}</strong> <span class="pill">${escapeReportHTML(getNotebookStatusMeta(note).label)}</span><div>${escapeReportHTML(note.notes || "Sem texto")}</div><small>Instrutor: ${escapeReportHTML(note.instructorSource || note.instructorName || "Não informado")} | Analista: ${escapeReportHTML(note.responsibleAnalyst || "Não informado")} | Registro: ${escapeReportHTML(formatNotebookDate(note.date))}</small></div>`).join("")}</div>` : `<p class="muted">Nenhuma anotação do caderno vinculada.</p>`;
 
@@ -4432,7 +4659,6 @@
             if (selectedOptions.supervisorContact) sections.push(section("Contato do supervisor", supervisorContactHTML));
             if (selectedOptions.academic) sections.push(section("Frequência, desempenho e situação", academicHTML));
             if (selectedOptions.justifications) sections.push(section("Justificativas e registros NA da chamada", naHTML, "na-section"));
-            if (selectedOptions.observations) sections.push(section("Observações das planilhas", observationsHTML));
             if (selectedOptions.notebook) sections.push(section("Anotações do caderno do instrutor", notesHTML));
             if (selectedOptions.activities) sections.push(section("Atividades do upload atual", activityHTML, "activity-section"));
 
@@ -4446,7 +4672,7 @@
 
         const generateRangeReport = ({ selectedStudentIds, students, turma, course, instructors, tutor1, tutor2, activityTracking, reportData, naJustifications, notebookNotes, fromUC, toUC, options = {} }) => {
             const interval = normalizeUCInterval(fromUC, toUC);
-            const include = { academic: true, activities: true, attendance: true, observations: true, notebook: true, ...options };
+            const include = { academic: true, activities: true, attendance: true, notebook: true, ...options };
             const selected = students.filter(student => selectedStudentIds.includes(student.id));
             if (!interval || selected.length === 0) {
                 alert("Selecione a UC inicial, a UC final e pelo menos um aluno ou a turma inteira.");
@@ -4473,10 +4699,6 @@
                 const average = scores.length > 0 ? (scores.reduce((total, value) => total + (value <= 1 ? value * 100 : value), 0) / scores.length).toFixed(1) : "N/A";
                 const lowFrequency = ucEntries.filter(([, value]) => Number(value && value.score) < 0.75).map(([ucName]) => ucName);
                 const performanceIssues = ucEntries.filter(([, value]) => isNotDevelopedStatus(value && value.status)).map(([ucName]) => ucName);
-                const observations = (student.all_observations || []).filter(observation => {
-                    const number = getUCNumber(observation.source);
-                    return number === null || isUCInInterval(observation.source, interval);
-                });
                 const activitySummary = getActivityStudentSummary(activityTracking, student.name);
                 const activityEntries = activitySummary ? activitySummary.entries.filter(entry => isUCInInterval(entry.uc || entry.sheet, interval)) : [];
                 const activityAttention = activityEntries.filter(entry => isActivityAttentionStatus(entry.status));
@@ -4495,12 +4717,11 @@
                     const rowClass = Number.isNaN(score) ? "" : score < 0.75 ? "attention" : isNotDevelopedStatus(performance) ? "danger" : "";
                     return `<tr class="${rowClass}"><td>${escapeReportHTML(ucName)}</td><td>${scoreLabel}</td><td>${escapeReportHTML(performance)}</td></tr>`;
                 }).join("") : `<tr><td colspan="3" class="muted">Sem dados de frequência/desempenho no intervalo.</td></tr>`;
-                const observationHTML = observations.length > 0 ? observations.slice(0, 40).map(observation => `<li><strong>${escapeReportHTML(observation.source || "Geral")}:</strong> ${escapeReportHTML(observation.text)}</li>`).join("") : `<li class="muted">Nenhuma observação registrada.</li>`;
                 const activityHTML = activityEntries.length > 0 ? `<div class="summary-box"><strong>${activityEntries.length} registro(s) de atividades e avaliações</strong><br>${escapeReportHTML(formatActivitySummaryText(activityCounts))}</div><table class="activity-table"><thead><tr><th>UC</th><th>Tipo</th><th>Atividade ou avaliação</th><th>Situação</th></tr></thead><tbody>${buildActivityStatusRows(activityEntries) || `<tr><td colspan="4" class="muted">Nenhuma atividade identificada.</td></tr>`}</tbody></table>${activityEntries.length > 120 ? `<div class="summary-box muted">Exibidas as primeiras 120 atividades do intervalo.</div>` : ""}` : `<div class="summary-box muted">Nenhuma atividade da planilha foi encontrada no intervalo.</div>`;
                 const naHTML = naEntries.length > 0 ? `<div class="summary-box danger-box"><strong>${naEntries.length} NA pendente(s) na chamada</strong><br>${naEntries.map(entry => `${escapeReportHTML(entry.uc)} - ${escapeReportHTML(entry.date)}`).join("; ")}</div>` : `<div class="summary-box muted">Nenhum NA pendente no intervalo.</div>`;
                 const notesHTML = studentNotes.length > 0 ? studentNotes.map(note => `<div class="notebook-note"><div><strong>${escapeReportHTML(getNotebookSituationLabel(note))}</strong> <span class="status-pill">${escapeReportHTML(getNotebookStatusMeta(note).label)}</span></div><div class="meta">Instrutor: ${escapeReportHTML(note.instructorSource || note.instructorName || "Não informado")} | Analista: ${escapeReportHTML(note.responsibleAnalyst || "Não informado")} | Registro: ${escapeReportHTML(formatNotebookDate(note.date))}</div>${getNotebookTreatmentDue(note) ? `<div class="meta">${escapeReportHTML(getNotebookTreatmentLabel(note))}</div>` : ""}${note.notes ? `<p>${escapeReportHTML(note.notes)}</p>` : ""}</div>`).join("") : `<div class="summary-box muted">Nenhuma anotação de caderno vinculada.</div>`;
 
-                return `<article class="student-card"><div class="header-row"><span class="student-name">${escapeReportHTML(student.name)}</span><span style="color:${statusColor};font-weight:bold">${escapeReportHTML(student.status)}</span></div><div class="info-grid">${student.orionCode ? `<div><strong>Código Órion:</strong> ${escapeReportHTML(student.orionCode)}</div>` : ""}<div><strong>Frequência média no intervalo:</strong> ${average}%</div><div><strong>Contra Turno:</strong> ${escapeReportHTML(student.contra_turno_desc)}</div><div><strong>UCs com baixa frequência:</strong> ${escapeReportHTML(lowFrequency.join(", ") || "Nenhuma")}</div><div><strong>UCs com desempenho pendente:</strong> ${escapeReportHTML(performanceIssues.join(", ") || "Nenhuma")}</div></div>${include.academic ? `<h3>Frequência e desempenho por UC</h3><table class="uc-table"><thead><tr><th>UC</th><th>Frequência</th><th>Desempenho</th></tr></thead><tbody>${ucRows}</tbody></table>` : ""}${include.activities ? `<h3>Atividades no intervalo</h3>${activityHTML}` : ""}${include.attendance ? `<h3>Chamada e NA</h3>${naHTML}` : ""}${include.observations ? `<h3>Observações e situações</h3><ul>${observationHTML}</ul>` : ""}${include.notebook ? `<h3>Anotações do caderno</h3>${notesHTML}` : ""}</article>`;
+                return `<article class="student-card"><div class="header-row"><span class="student-name">${escapeReportHTML(student.name)}</span><span style="color:${statusColor};font-weight:bold">${escapeReportHTML(student.status)}</span></div><div class="info-grid">${student.orionCode ? `<div><strong>Código Órion:</strong> ${escapeReportHTML(student.orionCode)}</div>` : ""}<div><strong>Frequência média no intervalo:</strong> ${average}%</div><div><strong>Contra Turno:</strong> ${escapeReportHTML(student.contra_turno_desc)}</div><div><strong>UCs com baixa frequência:</strong> ${escapeReportHTML(lowFrequency.join(", ") || "Nenhuma")}</div><div><strong>UCs com desempenho pendente:</strong> ${escapeReportHTML(performanceIssues.join(", ") || "Nenhuma")}</div></div>${include.academic ? `<h3>Frequência e desempenho por UC</h3><table class="uc-table"><thead><tr><th>UC</th><th>Frequência</th><th>Desempenho</th></tr></thead><tbody>${ucRows}</tbody></table>` : ""}${include.activities ? `<h3>Atividades no intervalo</h3>${activityHTML}` : ""}${include.attendance ? `<h3>Chamada e NA</h3>${naHTML}` : ""}${include.notebook ? `<h3>Anotações do caderno</h3>${notesHTML}` : ""}</article>`;
             }).join("");
 
             const htmlContent = `<html lang="pt-BR"><head><meta charset="UTF-8"><title>${escapeReportHTML(reportSubject)}</title><style>body{font-family:Arial,sans-serif;padding:20px;color:#243447;background:#fff;margin:0}.report-menu{background:#004587;padding:10px 20px;display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;z-index:10;box-shadow:0 2px 5px rgba(0,0,0,.2)}.menu-title{color:#fff;font-weight:bold;font-size:14px}.menu-actions{display:flex;gap:8px;flex-wrap:wrap}.btn,.recipient-select{border:0;border-radius:4px;padding:8px 10px;font-size:12px;font-weight:bold}.btn{cursor:pointer;color:#fff;background:#F5821F}.recipient-select{color:#123}.report-header{text-align:center;margin:18px 0 22px}.report-header img{width:80px}.report-header h1{font-size:20px;color:#004587;margin:8px 0}.report-header h2{font-size:14px;color:#666;margin:4px}.student-card{border:1px solid #d9e2ec;border-left:4px solid #F5821F;border-radius:8px;padding:16px;margin:0 0 18px;break-inside:avoid}.header-row{display:flex;justify-content:space-between;gap:12px;border-bottom:2px solid #F5821F;padding-bottom:7px;margin-bottom:10px}.student-name{font-size:17px;font-weight:bold}.info-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px;margin-bottom:12px}.student-card h3{font-size:12px;color:#004587;border-bottom:1px solid #e6edf4;padding-bottom:4px;margin:14px 0 7px}.uc-table{width:100%;border-collapse:collapse;font-size:11px}.uc-table th,.uc-table td{border:1px solid #d9e2ec;padding:6px;text-align:left}.uc-table th{background:#eef5fb;color:#004587}.uc-table .attention{background:#fff7ed;color:#9a3412}.uc-table .danger{background:#fef2f2;color:#b91c1c}.summary-box{background:#f8fafc;border-left:3px solid #F5821F;padding:8px;font-size:11px;margin:6px 0}.danger-box{border-left-color:#dc2626;background:#fef2f2;color:#991b1b}.muted{color:#6b7280;font-style:italic}.student-card ul{font-size:11px;margin:5px 0 8px;padding-left:18px}.notebook-note{border:1px solid #d9e2ec;border-left:3px solid #004587;padding:8px;margin:6px 0;font-size:11px}.status-pill{display:inline-block;border-radius:4px;background:#eef5fb;color:#004587;padding:2px 5px;font-size:10px}.meta{color:#64748b;font-size:10px;margin-top:4px}@media(max-width:760px){.report-menu{align-items:flex-start;flex-direction:column;gap:8px}.info-grid{grid-template-columns:1fr}}@media print{.report-menu{display:none!important}}</style></head><body><div class="report-menu"><div class="menu-title">Relatório completo por UCs</div><div class="menu-actions"><select id="report-recipient" class="recipient-select"><option value="student">Enviar para estudante(s)</option><option value="supervisor">Enviar para supervisor(es)</option></select><button class="btn" onclick="sendReportEmail()">Enviar por Outlook</button><button class="btn" onclick="copyReport()">Copiar para e-mail</button><button class="btn" onclick="window.print()">Imprimir / PDF</button></div></div><div id="report-content"><div class="report-header"><img src="https://upload.wikimedia.org/wikipedia/commons/thumb/8/86/Senac_logo.svg/500px-Senac_logo.svg.png" alt="Senac"/><h1>Relatório completo da turma/aluno</h1><h2>${escapeReportHTML(course)}</h2><div><strong>Turma:</strong> ${escapeReportHTML(turma)} | <strong>Intervalo:</strong> ${escapeReportHTML(rangeLabel)} | <strong>Emitido em:</strong> ${dateStr}<br><strong>Instrutores:</strong> ${escapeReportHTML(tutor1)} / ${escapeReportHTML(tutor2)}</div></div>${studentHTML}</div><script>const studentRecipients=${JSON.stringify(studentRecipients)};const supervisorRecipients=${JSON.stringify(supervisorRecipients)};const subject=${JSON.stringify(reportSubject)};function copyReport(afterCopy){const content=document.getElementById('report-content');if(!content)return;const done=()=>{if(typeof afterCopy==='function')afterCopy();else alert('Relatório copiado. Cole no Outlook ou em outro documento.');};if(navigator.clipboard&&window.ClipboardItem){const item=new ClipboardItem({'text/html':new Blob([content.outerHTML],{type:'text/html'}),'text/plain':new Blob([content.innerText],{type:'text/plain'})});navigator.clipboard.write([item]).then(done).catch(()=>fallbackCopy(done));}else fallbackCopy(done);}function fallbackCopy(done){const range=document.createRange();range.selectNodeContents(document.getElementById('report-content'));const selection=window.getSelection();selection.removeAllRanges();selection.addRange(range);try{document.execCommand('copy');done();}finally{selection.removeAllRanges();}}function sendReportEmail(){const type=document.getElementById('report-recipient').value;const list=type==='supervisor'?supervisorRecipients:studentRecipients;const emails=[...new Set(list.map(item=>String(item.email||'').trim()).filter(Boolean))];if(emails.length===0){alert(type==='supervisor'?'Nenhum e-mail de supervisor foi informado.':'Nenhum e-mail de estudante foi informado.');return;}copyReport(()=>{alert('Relatório copiado. Cole no corpo do Outlook com Ctrl+V para manter o layout.');window.location.href='mailto:'+emails.join(';')+'?subject='+encodeURIComponent(subject)+'&body='+encodeURIComponent(document.getElementById('report-content').innerText);});}<\/script></body></html>`;
@@ -4705,8 +4926,8 @@
             }
         }
 
-        const DESKTOP_APP_VERSION = "1.1.7";
-        const DESKTOP_APP_DOWNLOAD_URL = "https://github.com/Supervisao-pratica/Dash-Frequencia/releases/download/v1.1.7/Dashboard-Senac-Setup-1.1.7.zip";
+        const DESKTOP_APP_VERSION = "1.1.8";
+        const DESKTOP_APP_DOWNLOAD_URL = "https://github.com/Supervisao-pratica/Dash-Frequencia/releases/download/v1.1.8/Dashboard-Senac-Setup-1.1.8.zip";
         const DesktopAppOffer = () => {
             const storageKey = `desktop_app_download_started_${DESKTOP_APP_VERSION}`;
             const [downloadStarted, setDownloadStarted] = useState(() => {
@@ -4895,9 +5116,11 @@
                 let unsubscribe = null;
                 getNotebookFirestore().then(db => {
                     if (!db || stopped) return;
-                    unsubscribe = db.collection("saved_classes").onSnapshot(snapshot => {
+                    unsubscribe = db.collection("saved_classes").onSnapshot(async snapshot => {
                         if (stopped) return;
-                        setSavedClasses(synchronizeSavedClassSummaries(snapshot.docs));
+                        const accessedKeys = await loadUserClassAccess();
+                        if (stopped) return;
+                        setSavedClasses(synchronizeSavedClassSummaries(snapshot.docs, accessedKeys));
                         setSavedClassesSource("cloud");
                         setSavedClassesLastSync(new Date().toISOString());
                         setSavedClassesLoading(false);
@@ -4921,6 +5144,7 @@
             const openSavedClass = async (summary) => {
                 setClassSyncMessage("Abrindo turma salva...");
                 try {
+                    await markSavedClassAccess(summary.turmaKey);
                     const loaded = await loadSavedClassData(summary);
                     setData(loaded.data);
                     setActivityTracking(null);
@@ -4959,8 +5183,7 @@
                 if (!summary || !summary.turmaKey || deletingClassKey) return;
                 const confirmed = window.confirm(
                     `Excluir a turma ${summary.turma} de "Minhas turmas"?\n\n` +
-                    "A chamada e os alunos salvos serão removidos do Firebase e deste computador para todos os usuários. " +
-                    "Cadernos, contatos, justificativas e histórico serão preservados."
+                    "Ela será removida apenas da sua lista. Os dados compartilhados, cadernos, contatos, justificativas e históricos serão preservados para os demais usuários."
                 );
                 if (!confirmed) return;
                 setDeletingClassKey(summary.turmaKey);
@@ -5185,13 +5408,24 @@
                 setClassSyncMessage("Salvando turma...");
                 captureDashboardHistory(processed, null, {}, trigger).catch(error => console.error("Erro ao registrar histórico da frequência", error));
                 seedImportedStudentContacts(processed.turma, processed.students).catch(error => console.error("Erro ao sincronizar contatos importados", error));
+                const observationSync = await syncFrequencyObservationsToNotebooks(processed).catch(error => {
+                    console.error("Erro ao direcionar observações para os cadernos", error);
+                    return { created: 0, skipped: 0 };
+                });
+                const refreshedInstructorNames = currentAnalystName ? (processed.instructors || []) : filterInstructorNamesForCurrentUser(processed.instructors || []);
+                const refreshedNotebookGroups = await Promise.all(refreshedInstructorNames.map(async instructorName => {
+                    const loaded = await loadNotebookNotes(processed.turma, instructorName);
+                    return (loaded.notes || []).map(note => ({ ...note, instructorSource: instructorName }));
+                }));
+                setClassNotebookNotes(refreshedNotebookGroups.flat().sort((a, b) => new Date(b.date) - new Date(a.date)));
                 if (file) {
                     rememberElectronClassSource(processed.turma, file);
                     if (isElectronDesktop()) setFrequencySourceRevision(value => value + 1);
                 }
                 const saved = await persistSavedClass(processed, source);
                 setActiveClassUpdatedAt(saved.summary && saved.summary.updatedAt || new Date().toISOString());
-                setClassSyncMessage(saved.source === "cloud" ? `Turma ${processed.turma} salva e sincronizada.` : `Turma ${processed.turma} salva somente neste dispositivo.`);
+                const observationMessage = observationSync.created > 0 ? ` ${observationSync.created} observação(ões) enviada(s) aos cadernos responsáveis.` : "";
+                setClassSyncMessage((saved.source === "cloud" ? `Turma ${processed.turma} salva e sincronizada.` : `Turma ${processed.turma} salva somente neste dispositivo.`) + observationMessage);
                 await refreshSavedClasses();
                 if (processed.attendanceWarnings && processed.attendanceWarnings.length > 0 && trigger !== "atualização automática") {
                     setTimeout(() => alert(summarizeAttendanceWarnings(processed.attendanceWarnings)), 100);
@@ -5601,6 +5835,43 @@
                 }
             };
 
+            const revertDropoutDocumentation = async student => {
+                if (!data || !student) return;
+                if (!window.confirm(`Reverter a movimentação documental de ${student.name}?\n\nO aluno voltará à situação identificada na última planilha de frequência.`)) return;
+                const studentKey = normalizeName(student.name);
+                const saved = await persistDropoutDocument(data.turma, {
+                    studentKey,
+                    studentName: student.name,
+                    status: "sem_documentacao",
+                    source: "reversao_manual",
+                    fileCount: 0,
+                    folderName: "",
+                    detectedAt: ""
+                });
+                const restoredStudent = {
+                    ...student,
+                    is_dropout: Boolean(student.frequency_is_dropout),
+                    is_process_dropout: Boolean(student.frequency_is_process_dropout),
+                    dropout_reason: String(student.frequency_dropout_reason || "")
+                };
+                if (restoredStudent.is_dropout) restoredStudent.status = "Evadido/Desligado";
+                else if (restoredStudent.is_process_dropout) restoredStudent.status = "Em Processo de Desligamento";
+                else if (restoredStudent.needs_recuperacao) restoredStudent.status = "Não Desenvolveu";
+                else if (restoredStudent.needs_conselho) restoredStudent.status = "Conselho de Classe";
+                else restoredStudent.status = "Desenvolveu";
+                const updatedData = { ...data, students: data.students.map(item => item.id === student.id ? restoredStudent : item) };
+                setDropoutDocuments(current => ({ ...current, [studentKey]: saved.record }));
+                setDropoutDocumentSource(saved.source || "local");
+                setData(updatedData);
+                setSelectedStudentForModal(restoredStudent);
+                setDropoutDocumentNotice(restoredStudent.is_dropout
+                    ? `${student.name} continua em Evasão porque a própria planilha de frequência ainda indica desligamento. Corrija a chamada para concluir a reversão.`
+                    : `${student.name} foi revertido para a situação da última planilha de frequência.`);
+                const persisted = await persistSavedClass(updatedData, { name: "Reversão da baixa documental" });
+                setActiveClassUpdatedAt(persisted.summary && persisted.summary.updatedAt || "");
+                refreshSavedClasses();
+            };
+
             const scanDropoutDocumentsForClass = async ({ silent = false } = {}) => {
                 if (!data || !isElectronDesktop() || !window.senacDesktop || typeof window.senacDesktop.scanDropoutDocuments !== "function") {
                     if (!silent) setDropoutDocumentNotice("A busca automática nas pastas da rede está disponível no aplicativo instalado.");
@@ -5691,6 +5962,8 @@
             const processStudentsWithoutDocuments = data ? data.students.filter(student => student.is_process_dropout && !student.is_dropout && (!dropoutDocuments[normalizeName(student.name)] || dropoutDocuments[normalizeName(student.name)].status !== "com_documentacao")) : [];
             const selectedDropoutDocument = selectedStudentForModal ? dropoutDocuments[normalizeName(selectedStudentForModal.name)] : null;
             const selectedDropoutDocumentMeta = getDropoutDocumentMeta(selectedDropoutDocument);
+            const selectedDropoutDivergence = selectedStudentForModal ? getDropoutDocumentDivergence(selectedStudentForModal, selectedDropoutDocument) : "";
+            const dropoutDivergences = data ? data.students.map(student => ({ student, message: getDropoutDocumentDivergence(student, dropoutDocuments[normalizeName(student.name)]) })).filter(item => item.message) : [];
             const selectedObservationGroups = useMemo(() => {
                 if (!selectedStudentForModal) return [];
                 const groups = new Map();
@@ -5828,7 +6101,9 @@
                                                         </select>
                                                     </label>
                                                     {isElectronDesktop() && <button type="button" onClick={() => scanDropoutDocumentsForClass()} disabled={dropoutDocumentScanning} className="rounded-md border border-purple-300 bg-white px-3 py-2 text-xs font-bold text-purple-800 hover:bg-purple-100 disabled:opacity-60"><IconRefreshCw className={`mr-1 inline h-3.5 w-3.5 ${dropoutDocumentScanning ? "animate-spin" : ""}`} /> {dropoutDocumentScanning ? "Verificando..." : "Verificar pasta na rede"}</button>}
+                                                    {selectedDropoutDocument && selectedDropoutDocument.status === "com_documentacao" && <button type="button" onClick={() => revertDropoutDocumentation(selectedStudentForModal)} className="rounded-md border border-red-300 bg-white px-3 py-2 text-xs font-bold text-red-700 hover:bg-red-50"><IconRefreshCw className="mr-1 inline h-3.5 w-3.5" /> Reverter movimentação</button>}
                                                 </div>
+                                                {selectedDropoutDivergence && <div className="rounded-md border border-yellow-300 bg-yellow-50 px-3 py-2 text-xs text-yellow-900"><strong>Divergência identificada:</strong> {selectedDropoutDivergence}</div>}
                                                 {selectedDropoutDocument && selectedDropoutDocument.status === "com_documentacao" ? <div className="rounded-md border border-orange-200 bg-orange-50 px-3 py-2 text-xs text-orange-900"><strong>Próxima ação:</strong> pinte a célula do nome de laranja na chamada e dê baixa no sistema Senac.{selectedDropoutDocument.fileCount > 0 ? ` Foram localizado(s) ${selectedDropoutDocument.fileCount} arquivo(s) na pasta ${selectedDropoutDocument.folderName}.` : ""}</div> : <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800">Este aluno continuará no alerta semanal até a documentação ser confirmada.</div>}
                                             </div>
                                         </div>
@@ -5956,11 +6231,7 @@
                                     )}
 
                                     <div className="mb-6"><h3 className="text-sm font-bold text-gray-700 mb-3 flex items-center gap-2"><IconBarChart2 className="w-4 h-4"/> Detalhamento por UC</h3><div className="grid grid-cols-2 sm:grid-cols-4 gap-2">{Object.entries(selectedStudentForModal.uc_scores || {}).map(([ucName, data]) => ( <div key={ucName} className={`p-2 rounded border text-center ${data.score < 0.75 ? 'bg-red-50 border-red-200' : 'bg-gray-50 border-gray-100'}`}><div className="text-xs font-bold text-gray-500">{ucName}</div><div className={`font-bold ${data.score < 0.75 ? 'text-red-700' : 'text-gray-800'}`}>{(data.score*100).toFixed(0)}%</div></div> ))}{Object.keys(selectedStudentForModal.uc_scores || {}).length === 0 && <span className="text-xs text-gray-400 italic col-span-4">Sem dados detalhados.</span>}</div></div>
-                                    <div className="mb-6">
-                                        <div className="flex flex-wrap items-center justify-between gap-2 mb-3"><h3 className="text-sm font-bold text-gray-700 flex items-center gap-2"><IconMessageSquare className="w-4 h-4"/> Observações organizadas da planilha</h3>{selectedStudentForModal.all_observations && selectedStudentForModal.all_observations.length > 0 && <span className="rounded bg-blue-50 px-2 py-1 text-[10px] font-bold text-blue-700">{selectedStudentForModal.all_observations.length} registro(s)</span>}</div>
-                                        {selectedObservationGroups.length > 0 ? <div className="space-y-3 max-h-80 overflow-y-auto pr-2 custom-scrollbar">{selectedObservationGroups.map(([groupLabel, observations]) => <div key={groupLabel} className="overflow-hidden rounded-lg border border-gray-200 bg-gray-50"><div className="flex items-center justify-between gap-2 border-b border-gray-200 bg-gray-100 px-3 py-2"><span className="text-xs font-bold text-gray-700">{groupLabel}</span><span className="text-[10px] font-semibold uppercase text-gray-500">{observations.length} registro(s)</span></div><div className="divide-y divide-gray-100">{observations.map((observation, index) => <ObservationEntry key={`${groupLabel}-${observation.column || ""}-${observation.date || ""}-${index}`} observation={observation} />)}</div></div>)}</div> : <div className="rounded-lg border-2 border-dashed border-gray-200 bg-gray-50 p-6 text-center"><p className="text-gray-400 text-sm italic">Nenhuma observação ou anotação encontrada nas abas.</p></div>}
-                                    </div>
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6"><div className="bg-slate-50 p-4 rounded-xl border border-slate-100"><h3 className="text-sm font-bold text-gray-700 mb-2">Pendências Acadêmicas</h3><ul className="space-y-2 text-sm">{selectedStudentForModal.low_freq_ucs.length > 0 && (<li className="flex items-start gap-2 text-yellow-700"><IconAlertTriangle className="w-4 h-4 mt-0.5 shrink-0"/> <span>Baixa Frequência: <strong>{selectedStudentForModal.low_freq_ucs.join(", ")}</strong></span></li>)}{selectedStudentForModal.failed_perf_ucs.length > 0 && (<li className="flex items-start gap-2 text-red-700"><IconXCircle className="w-4 h-4 mt-0.5 shrink-0"/> <span>Dificuldade Desempenho: <strong>{selectedStudentForModal.failed_perf_ucs.join(", ")}</strong></span></li>)}{selectedStudentForModal.low_freq_ucs.length === 0 && selectedStudentForModal.failed_perf_ucs.length === 0 && (<li className="text-gray-400 italic">Nenhuma pendência registrada.</li>)}</ul></div><div className="bg-blue-50 p-4 rounded-xl border border-blue-100"><div className="flex items-center justify-between gap-2 mb-2"><h3 className="text-sm font-bold text-blue-800 flex items-center gap-2"><IconMessageSquare className="w-4 h-4"/> Observação Pedagógica (Principal)</h3>{selectedPrimaryPedagogicalObservation && <span className="text-[10px] font-bold uppercase text-blue-600">{selectedPrimaryPedagogicalObservation.source || "Pedagógico"}</span>}</div><p className="text-sm text-blue-900 italic whitespace-pre-wrap">{selectedPrimaryPedagogicalObservation ? selectedPrimaryPedagogicalObservation.text : "Sem registro pedagógico principal nas planilhas carregadas."}</p>{selectedPrimaryPedagogicalObservation && selectedPrimaryPedagogicalObservation.date && <p className="mt-2 text-[10px] text-blue-700">Data identificada: {selectedPrimaryPedagogicalObservation.date}</p>}</div></div>
+                                    <div className="mb-6 bg-slate-50 p-4 rounded-xl border border-slate-100"><h3 className="text-sm font-bold text-gray-700 mb-2">Pendências Acadêmicas</h3><ul className="space-y-2 text-sm">{selectedStudentForModal.low_freq_ucs.length > 0 && (<li className="flex items-start gap-2 text-yellow-700"><IconAlertTriangle className="w-4 h-4 mt-0.5 shrink-0"/> <span>Baixa Frequência: <strong>{selectedStudentForModal.low_freq_ucs.join(", ")}</strong></span></li>)}{selectedStudentForModal.failed_perf_ucs.length > 0 && (<li className="flex items-start gap-2 text-red-700"><IconXCircle className="w-4 h-4 mt-0.5 shrink-0"/> <span>Dificuldade Desempenho: <strong>{selectedStudentForModal.failed_perf_ucs.join(", ")}</strong></span></li>)}{selectedStudentForModal.low_freq_ucs.length === 0 && selectedStudentForModal.failed_perf_ucs.length === 0 && (<li className="text-gray-400 italic">Nenhuma pendência registrada.</li>)}</ul></div>
                                 </div>
                                 <div className="bg-gray-50 p-4 border-t border-gray-100 text-right"><button onClick={() => setSelectedStudentForModal(null)} className="px-6 py-2 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-lg font-medium transition-colors">Fechar</button></div>
                             </div>
@@ -5968,21 +6239,23 @@
                     )}
                     
                     <header className="bg-white border-b-4 border-senac-orange shadow-sm sticky top-0 z-20">
-                        <div className="max-w-7xl mx-auto px-4 py-3 flex flex-col xl:flex-row xl:items-start justify-between gap-5">
+                        <div className="mx-auto flex max-w-[1600px] flex-col justify-between gap-5 px-4 py-3 xl:flex-row xl:items-start">
                             <div className="flex min-w-0 items-start gap-3 xl:w-[390px] xl:shrink-0"><img src="https://upload.wikimedia.org/wikipedia/commons/thumb/8/86/Senac_logo.svg/500px-Senac_logo.svg.png" className="h-12 w-auto shrink-0 object-contain" /><div className="min-w-0 flex-1"><h1 className="text-lg md:text-xl font-bold text-senac-blue leading-tight">Gestão de Frequência - Relatório e ATA</h1><div className="mt-1 max-w-full break-words text-xs font-bold text-senac-orange uppercase leading-tight">{data.course}</div><div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs"><span className="font-medium text-gray-500">Turma: {data.turma}</span><button onClick={() => { setData(null); setActivityTracking(null); refreshSavedClasses(); }} className="inline-flex shrink-0 items-center gap-1 rounded-full bg-blue-50 px-2 py-1 text-senac-blue transition-colors hover:underline"><IconUsers className="w-3 h-3" /> Minhas turmas</button><span className="text-gray-300">|</span><span className="max-w-full break-all text-gray-500">Usuário: {getCurrentAuthenticatedEmail() || "Acesso Livre"}</span><button onClick={() => {if(confirm("Reiniciar sistema?")) window.location.reload()}} className="inline-flex shrink-0 items-center gap-1 rounded-md border border-red-200 bg-red-50 px-2 py-1 font-semibold text-red-600 hover:bg-red-100"><IconLogOut className="w-3 h-3"/> Sair</button></div></div></div>
-                            <div className="w-full min-w-0 flex-1 flex flex-wrap items-stretch justify-start gap-2 xl:justify-end">
+                            <div className="flex w-full min-w-0 flex-1 flex-col gap-3 2xl:flex-row 2xl:items-start 2xl:justify-end">
+                                <section className="min-w-0 rounded-lg border border-blue-100 bg-blue-50/60 p-2"><div className="mb-1 px-1 text-[10px] font-bold uppercase text-senac-blue">Atualizar dados</div><div className="flex flex-wrap gap-2">
                                 <button type="button" onClick={updateFrequencyCall} disabled={updatingFrequency} className="bg-white border border-senac-blue text-senac-blue hover:bg-blue-50 disabled:cursor-wait disabled:opacity-60 px-4 py-2 rounded-lg flex items-center gap-2 shadow transition-all active:scale-95 text-sm font-medium min-h-[54px] min-w-[116px] max-w-[160px] justify-center whitespace-normal text-center leading-tight" title={isElectronDesktop() ? "Localizar e atualizar automaticamente a chamada desta turma na rede" : (webFrequencyHandle ? "Reler a planilha vinculada desta turma" : "Selecionar e lembrar a planilha desta turma")}><IconRefreshCw className={`w-4 h-4 ${updatingFrequency ? "animate-spin" : ""}`} /> {updatingFrequency ? "Atualizando..." : "Atualizar chamada"}</button><input id="updateFrequencyInput" type="file" className="hidden" accept=".xlsx,.xlsm,.xls" onChange={handleManualFrequencyUpdate} />
                                 <label className="cursor-pointer bg-white border border-senac-blue text-senac-blue hover:bg-blue-50 px-4 py-2 rounded-lg flex items-center gap-2 shadow transition-all active:scale-95 text-sm font-medium min-h-[54px] min-w-[116px] max-w-[160px] justify-center whitespace-normal text-center leading-tight" title="Ler a aba DADOS GERAIS"><IconUploadCloud className="w-4 h-4" /> Dados Gerais <input type="file" className="hidden" accept=".xlsx,.xlsm,.xls" onChange={(e) => { handleGeneralDataFile(e.target.files[0]); e.target.value = ''; }} /></label>
                                 <label className="cursor-pointer bg-white border border-senac-orange text-senac-orange hover:bg-orange-50 px-4 py-2 rounded-lg flex items-center gap-2 shadow transition-all active:scale-95 text-sm font-medium min-h-[54px] min-w-[116px] max-w-[160px] justify-center whitespace-normal text-center leading-tight" title="Ler uma ou várias planilhas de atividades por UC"><IconUploadCloud className="w-4 h-4" /> Ler atividades{activityTracking && activityTracking.uploads ? ` (${activityTracking.uploads.length})` : ""} <input type="file" multiple className="hidden" accept=".xlsx,.xlsm,.xls" onChange={(e) => { handleActivityFiles(e.target.files); e.target.value = ''; }} /></label>
-                                <button onClick={() => setShowNotebookReport(true)} className="bg-white border border-senac-orange text-senac-orange hover:bg-orange-50 px-4 py-2 rounded-lg flex items-center gap-2 shadow transition-all active:scale-95 text-sm font-medium min-h-[54px] min-w-[116px] max-w-[160px] justify-center whitespace-normal text-center leading-tight"><IconBookOpen className="w-4 h-4" /> Relatório de Anotações</button>
-                                <button onClick={() => setShowUCIntervalReport(true)} className="bg-white border border-senac-blue text-senac-blue hover:bg-blue-50 px-4 py-2 rounded-lg flex items-center gap-2 shadow transition-all active:scale-95 text-sm font-medium min-h-[54px] min-w-[116px] max-w-[160px] justify-center whitespace-normal text-center leading-tight"><IconFileText className="w-4 h-4" /> Relatório por UCs</button>
-                                <button onClick={() => setShowDashboardHistory(true)} className="bg-white border border-senac-blue text-senac-blue hover:bg-blue-50 px-4 py-2 rounded-lg flex items-center gap-2 shadow transition-all active:scale-95 text-sm font-medium min-h-[54px] min-w-[116px] max-w-[160px] justify-center whitespace-normal text-center leading-tight" title={`Histórico ${historyStorageSource === "cloud" ? "compartilhado" : "local"}`}><IconBarChart2 className="w-4 h-4" /> Histórico</button>
-                                <button onClick={() => generateReport(reportSelection, data.students, data.turma, data.course, tutor1Name, tutor2Name, activityTracking, data, naJustifications)} className="bg-white border border-senac-blue text-senac-blue hover:bg-blue-50 px-4 py-2 rounded-lg flex items-center gap-2 shadow transition-all active:scale-95 text-sm font-medium min-h-[54px] min-w-[116px] max-w-[160px] justify-center whitespace-normal text-center leading-tight disabled:opacity-50 disabled:cursor-not-allowed" disabled={reportSelection.length === 0}><IconPrinter className="w-4 h-4" /> Gerar Relatório {reportSelection.length > 0 && `(${reportSelection.length})`}</button>
-                                <button onClick={() => setShowAtaModal(!showAtaModal)} className="bg-senac-blue hover:bg-blue-800 text-white px-4 py-2 rounded-lg flex items-center gap-2 shadow transition-all active:scale-95 text-sm font-medium min-h-[54px] min-w-[116px] max-w-[160px] justify-center whitespace-normal text-center leading-tight"><IconFileText className="w-4 h-4" /> Gerar ATA</button>
+                                </div></section>
+                                <section className="min-w-0 rounded-lg border border-orange-100 bg-orange-50/50 p-2"><div className="mb-1 px-1 text-[10px] font-bold uppercase text-orange-700">Relatórios e documentos</div><div className="flex flex-wrap gap-2">
+                                    <details className="group relative"><summary className="flex min-h-[54px] min-w-[150px] cursor-pointer list-none items-center justify-center gap-2 rounded-lg border border-senac-blue bg-white px-4 py-2 text-center text-sm font-medium text-senac-blue shadow hover:bg-blue-50"><IconFileText className="h-4 w-4" /> Relatórios</summary><div className="absolute right-0 top-[60px] z-50 grid w-64 gap-1 rounded-lg border border-gray-200 bg-white p-2 shadow-xl"><button onClick={() => setShowNotebookReport(true)} className="flex items-center gap-2 rounded px-3 py-2 text-left text-xs font-bold text-orange-700 hover:bg-orange-50"><IconBookOpen className="h-4 w-4" /> Relatório de anotações</button><button onClick={() => setShowUCIntervalReport(true)} className="flex items-center gap-2 rounded px-3 py-2 text-left text-xs font-bold text-senac-blue hover:bg-blue-50"><IconFileText className="h-4 w-4" /> Relatório por UCs</button><button onClick={() => generateReport(reportSelection, data.students, data.turma, data.course, tutor1Name, tutor2Name, activityTracking, data, naJustifications)} disabled={reportSelection.length === 0} className="flex items-center gap-2 rounded px-3 py-2 text-left text-xs font-bold text-senac-blue hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-40"><IconPrinter className="h-4 w-4" /> Selecionados {reportSelection.length > 0 && `(${reportSelection.length})`}</button></div></details>
+                                    <button onClick={() => setShowDashboardHistory(true)} className="flex min-h-[54px] min-w-[120px] items-center justify-center gap-2 rounded-lg border border-senac-blue bg-white px-4 py-2 text-sm font-medium text-senac-blue shadow hover:bg-blue-50" title={`Histórico ${historyStorageSource === "cloud" ? "compartilhado" : "local"}`}><IconBarChart2 className="h-4 w-4" /> Histórico</button>
+                                    <button onClick={() => setShowAtaModal(!showAtaModal)} className="flex min-h-[54px] min-w-[120px] items-center justify-center gap-2 rounded-lg bg-senac-blue px-4 py-2 text-sm font-medium text-white shadow hover:bg-blue-800"><IconFileText className="h-4 w-4" /> Gerar ATA</button>
+                                </div></section>
                             </div>
                         </div>
                         <div className="bg-white border-t border-gray-100">
-                            <div className="max-w-7xl mx-auto px-4 py-2 flex flex-wrap items-center gap-x-5 gap-y-1 text-xs text-gray-600">
+                            <div className="mx-auto flex max-w-[1600px] flex-wrap items-center gap-x-5 gap-y-1 px-4 py-2 text-xs text-gray-600">
                                 {classSyncMessage && <span className="flex items-center gap-1 text-[10px] text-gray-500"><IconRefreshCw className="h-3 w-3" /> {classSyncMessage}</span>}
                                 {currentAnalystName ? <>
                                     <span className="flex items-center gap-2 font-bold whitespace-nowrap text-senac-orange"><IconUser className="w-3.5 h-3.5" /> Analista (clique para acompanhar):</span>
@@ -6007,10 +6280,22 @@
                                 <div className="mt-3 text-xs">{analystTrackingAlerts.slice(0, 8).map(note => `${note.instructorName}: ${note.subject || note.followupType}${note.reminderDate ? ` (${formatNotebookDate(note.reminderDate)})` : ""}`).join("; ")}{analystTrackingAlerts.length > 8 ? `; e mais ${analystTrackingAlerts.length - 8}` : ""}</div>
                             </div>
                         )}
+                        {!currentAnalystName && visibleAnalystNotes.length > 0 && (
+                            <div className="mb-6 rounded-lg border border-blue-200 border-l-4 border-l-senac-blue bg-blue-50 p-4 text-sm text-blue-900 shadow-sm">
+                                <div className="flex flex-wrap items-center justify-between gap-3"><div><div className="flex items-center gap-2 font-bold"><IconEye className="h-4 w-4" /> Acompanhamentos registrados pela análise</div><div className="mt-1 text-xs">{visibleAnalystNotes.length} anotação(ões) estão disponíveis no seu caderno nesta turma. As avaliações percentuais permanecem ocultas.</div></div><button type="button" onClick={() => setSelectedInstructorForNotes((visibleAnalystNotes[0] && visibleAnalystNotes[0].instructorName) || activeInstructorNames[0])} className="rounded-md border border-blue-300 bg-white px-3 py-2 text-xs font-bold text-senac-blue hover:bg-blue-100">Abrir caderno</button></div>
+                                <div className="mt-3 text-xs">{visibleAnalystNotes.slice(0, 8).map(note => `${note.subject || note.followupType} (${note.analystName || "Análise"})`).join("; ")}{visibleAnalystNotes.length > 8 ? `; e mais ${visibleAnalystNotes.length - 8}` : ""}</div>
+                            </div>
+                        )}
                         {dropoutDocumentNotice && (
                             <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-orange-300 bg-orange-50 px-4 py-3 text-sm text-orange-900 shadow-sm">
                                 <span className="font-medium">{dropoutDocumentNotice}</span>
                                 <button type="button" onClick={() => setDropoutDocumentNotice("")} className="text-xs font-bold text-orange-800 hover:underline">Dispensar</button>
+                            </div>
+                        )}
+                        {dropoutDivergences.length > 0 && (
+                            <div className="mb-4 rounded-lg border border-yellow-300 border-l-4 border-l-yellow-600 bg-yellow-50 px-4 py-3 text-sm text-yellow-900 shadow-sm">
+                                <div className="flex items-center gap-2 font-bold"><IconAlertTriangle className="h-4 w-4" /> Divergência entre frequência e documentação</div>
+                                <div className="mt-2 text-xs">{dropoutDivergences.slice(0, 10).map(item => `${item.student.name}: ${item.message}`).join("; ")}{dropoutDivergences.length > 10 ? `; e mais ${dropoutDivergences.length - 10}` : ""}</div>
                             </div>
                         )}
                         {processStudentsWithoutDocuments.length > 0 && (
@@ -6144,7 +6429,7 @@
                                     <div key={student.id} className={`bg-white rounded-xl shadow-sm border ${borderColor} hover:shadow-md relative group ${isDropout ? 'bg-orange-50/30' : isProcess ? 'bg-purple-50/30' : ''}`}>
                                         <div className="absolute top-4 left-3 z-10" onClick={(e) => e.stopPropagation()}><input type="checkbox" checked={isSelected} onChange={() => toggleStudentSelection(student.id)} className="w-5 h-5 rounded border-gray-300 text-senac-blue focus:ring-senac-blue cursor-pointer" /></div>
                                         <div className="p-5 pl-10 cursor-pointer" onClick={() => setSelectedStudentForModal(student)}>
-                                            <div className="flex justify-between items-start mb-3 gap-2"><div><h3 className="font-bold text-gray-800 text-sm leading-snug">{student.name}</h3>{student.orionCode && <div className="mt-1 text-[10px] font-bold text-senac-blue">Órion: {student.orionCode}</div>}</div><div className="flex items-center gap-2">{studentNotebookNotes.length > 0 && (<div className="text-senac-orange" title={`Há ${studentNotebookNotes.length} anotação(ões) no caderno`}><IconBookOpen className="w-4 h-4" /></div>)}{(student.conselho_text || (student.comments || []).length > 0 || (student.all_observations || []).length > 0) && (<div className="text-senac-blue" title="Obs"><IconMessageSquare className="w-4 h-4" /></div>)}<div className="flex-shrink-0">{statusBadge}</div></div></div>
+                                            <div className="flex justify-between items-start mb-3 gap-2"><div><h3 className="font-bold text-gray-800 text-sm leading-snug">{student.name}</h3>{student.orionCode && <div className="mt-1 text-[10px] font-bold text-senac-blue">Órion: {student.orionCode}</div>}</div><div className="flex items-center gap-2">{studentNotebookNotes.length > 0 && (<div className="text-senac-orange" title={`Há ${studentNotebookNotes.length} anotação(ões) no caderno`}><IconBookOpen className="w-4 h-4" /></div>)}<div className="flex-shrink-0">{statusBadge}</div></div></div>
                                             <div className="flex justify-between items-end mb-1"><span className="text-xs text-gray-400 font-medium uppercase tracking-wider">{selectedUC === 'all' ? 'Frequência Global' : `Frequência ${selectedUC}`}</span><span className={`text-lg font-bold ${displayFreq !== "N/A" && parseFloat(displayFreq) < 75 ? 'text-yellow-600' : 'text-gray-700'}`}>{displayFreq}%</span></div>
                                             <ProgressBar value={displayFreq === "N/A" ? 0 : displayFreq} />
                                             {activitySummary && activitySummary.total > 0 && (

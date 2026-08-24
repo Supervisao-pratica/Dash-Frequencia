@@ -204,6 +204,22 @@ service cloud.firestore {
         && request.resource.data.updatedBy == request.auth.token.email;
     }
 
+    match /user_class_access/{accessId} {
+      allow read, delete: if isSenacUser()
+        && resource.data.userEmail == request.auth.token.email;
+
+      allow create: if isSenacUser()
+        && request.resource.data.userEmail == request.auth.token.email
+        && request.resource.data.turmaKey is string
+        && request.resource.data.lastAccessedAt is string;
+
+      allow update: if isSenacUser()
+        && resource.data.userEmail == request.auth.token.email
+        && request.resource.data.userEmail == request.auth.token.email
+        && request.resource.data.turmaKey == resource.data.turmaKey
+        && request.resource.data.lastAccessedAt is string;
+    }
+
     match /saved_class_students/{studentId} {
       allow read, delete: if isSenacUser();
 
