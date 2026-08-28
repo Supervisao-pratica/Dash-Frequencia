@@ -153,7 +153,7 @@
             db.collection("saved_class_students").get(),
             db.collection("dashboard_history").get(),
             db.collection("analyst_recoveries").get(),
-            db.collection("analyst_shared_notes").get(),
+            db.collection("analyst_shared_notes").where("visibleToInstructor", "==", true).get(),
             db.collection("analyst_class_overrides").get()
         ]);
 
