@@ -8,6 +8,43 @@ service cloud.firestore {
           || request.auth.token.email.matches('.*@docente\\.pr\\.senac\\.br'));
     }
 
+    function isAnalystKeyForEmail(analystKey) {
+      return (analystKey == 'MICHEL' && request.auth.token.email.matches('^michel[._-]?.*@.*senac\\.br'))
+        || (analystKey == 'MARIANA' && request.auth.token.email.matches('^mariana[._-]?.*@.*senac\\.br'))
+        || (analystKey == 'BRUNA_CUNHA' && request.auth.token.email.matches('^bruna[._-].*cunha.*@.*senac\\.br'))
+        || (analystKey == 'BIANCA' && request.auth.token.email.matches('^bianca[._-]?.*@.*senac\\.br'));
+    }
+
+    function isAnalyst() {
+      return isSenacUser()
+        && exists(/databases/$(database)/documents/analyst_profiles/$(request.auth.uid))
+        && get(/databases/$(database)/documents/analyst_profiles/$(request.auth.uid)).data.email == request.auth.token.email;
+    }
+
+    match /analyst_profiles/{userId} {
+      allow read: if isSenacUser();
+
+      allow create, update: if isSenacUser()
+        && request.auth.uid == userId
+        && request.resource.data.email == request.auth.token.email
+        && request.resource.data.fullName is string
+        && request.resource.data.analystKey in ['MICHEL', 'MARIANA', 'BRUNA_CUNHA', 'BIANCA']
+        && isAnalystKeyForEmail(request.resource.data.analystKey);
+    }
+
+    match /analyst_recoveries/{recoveryId} {
+      allow read, create, update, delete: if isAnalyst();
+    }
+
+    match /analyst_class_overrides/{turmaKey} {
+      allow read, create, update: if isAnalyst()
+        && request.resource.data.start is string
+        && request.resource.data.end is string
+        && request.resource.data.ucs is list
+        && request.resource.data.orion is map
+        && request.resource.data.updatedBy == request.auth.token.email;
+    }
+
     match /instructor_profiles/{userId} {
       allow create, read, update: if request.auth != null
         && request.auth.uid == userId

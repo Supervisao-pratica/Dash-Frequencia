@@ -1,0 +1,302 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Central do Analista | Gestão de Frequência</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="./analista.css?v=2.0.0">
+    <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore-compat.js"></script>
+    <script src="./firebase-config.js"></script>
+</head>
+<body>
+    <div id="centralLoading" style="position:fixed;inset:0;z-index:20000;display:grid;place-content:center;gap:10px;text-align:center;background:#f4f7fa;color:#004587;font-family:Inter,sans-serif"><strong>Carregando a Central do Analista...</strong><span style="font-size:12px;color:#64748b">Sincronizando turmas, históricos e acompanhamentos.</span></div>
+    <div class="prototype-ribbon">
+        <span><i data-lucide="shield-check"></i> Perfil Analista</span>
+        <strong>Visão consolidada das turmas sincronizadas pelos instrutores.</strong>
+    </div>
+
+    <header class="app-header">
+        <div class="brand-block">
+            <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/8/86/Senac_logo.svg/500px-Senac_logo.svg.png" alt="Senac" class="brand-logo">
+            <div>
+                <h1>Gestão de Frequência</h1>
+                <p>Central do Analista</p>
+            </div>
+        </div>
+        <div class="header-search">
+            <i data-lucide="search"></i>
+            <input id="globalSearch" type="search" placeholder="Buscar turma, instrutor, aluno ou Órion">
+            <kbd>Ctrl K</kbd>
+        </div>
+        <div class="header-user">
+            <div class="mode-stack">
+                <span class="mode-label">Visualização</span>
+                <div class="mode-switcher" role="group" aria-label="Alterar visualização">
+                    <button class="active" data-profile-mode="analyst" aria-pressed="true"><i data-lucide="chart-no-axes-combined"></i> Analista</button>
+                    <button data-profile-mode="instructor" aria-pressed="false" title="Abrir o Dashboard original do instrutor"><i data-lucide="presentation"></i> Instrutor</button>
+                </div>
+                <select id="previewInstructor" class="preview-instructor" aria-label="Instrutor visualizado" hidden></select>
+            </div>
+            <div class="avatar" id="profileAvatar">MF</div>
+            <div class="profile-copy">
+                <strong id="analystProfileName">Analista</strong>
+                <span id="profileRoleLabel">Perfil Analista</span>
+            </div>
+            <button class="icon-button" id="resetDemo" title="Sincronizar dados" aria-label="Sincronizar dados">
+                <i data-lucide="refresh-cw"></i>
+            </button>
+        </div>
+    </header>
+
+    <nav class="primary-nav" aria-label="Navegação principal">
+        <button class="nav-item active" data-view="overview"><i data-lucide="layout-dashboard"></i><span id="overviewNavLabel">Visão geral</span></button>
+        <button class="nav-item" data-view="classes"><i data-lucide="school"></i><span id="classesNavLabel">Turmas</span></button>
+        <button class="nav-item" data-view="monitoring"><i data-lucide="clipboard-check"></i><span id="monitoringNavLabel">Monitoramento</span><b id="monitoringNavCount">0</b></button>
+        <button class="nav-item" data-view="recoveries"><i data-lucide="book-open-check"></i><span>Recuperações</span><b id="recoveryNavCount">0</b></button>
+        <button class="nav-item" data-view="workflow"><i data-lucide="columns-3"></i><span>Tratativas</span></button>
+        <button class="nav-item" data-view="calendar"><i data-lucide="calendar-days"></i><span>Calendário</span></button>
+        <button class="nav-item" data-view="reports"><i data-lucide="chart-no-axes-combined"></i><span id="reportsNavLabel">Relatórios</span></button>
+        <button class="nav-item instructor-only" data-view="instructor-notes" hidden><i data-lucide="notebook-tabs"></i><span>Anotações recebidas</span><b id="notesNavCount">0</b></button>
+    </nav>
+
+    <main>
+        <section class="alert-strip" id="alertStrip">
+            <div class="alert-icon"><i data-lucide="bell-ring"></i></div>
+            <div>
+                <strong id="alertTitle">Carregando alertas...</strong>
+                <p id="alertText"></p>
+            </div>
+            <button class="text-button" data-open-view="calendar">Ver agenda <i data-lucide="arrow-right"></i></button>
+        </section>
+
+        <section class="filter-band" aria-label="Filtros globais">
+            <div class="filter-heading">
+                <i data-lucide="list-filter"></i>
+                <div><strong>Filtros globais</strong><span>Aplicados a toda a central</span></div>
+            </div>
+            <label>Instrutor
+                <select id="instructorFilter"><option value="all">Todos os instrutores</option></select>
+            </label>
+            <label>Analista
+                <select id="analystFilter"><option value="all">Todos os analistas</option></select>
+            </label>
+            <label>Turma
+                <select id="classFilter"><option value="all">Todas as turmas</option></select>
+            </label>
+            <label>UC
+                <select id="ucFilter"><option value="all">Todas as UCs</option></select>
+            </label>
+            <button class="secondary-button" id="clearFilters"><i data-lucide="filter-x"></i> Limpar</button>
+        </section>
+
+        <section class="instructor-context" id="instructorContext" hidden>
+            <div><i data-lucide="eye"></i><span><strong id="instructorContextTitle">Visualização do instrutor</strong><small>Você continua autenticado como analista e pode retornar à visão global a qualquer momento.</small></span></div>
+            <span class="privacy-note"><i data-lucide="shield-check"></i> Avaliações percentuais permanecem restritas aos analistas.</span>
+        </section>
+
+        <section class="view active" id="view-overview">
+            <div class="page-heading">
+                <div><span class="eyebrow" id="overviewEyebrow">Panorama compartilhado</span><h2 id="overviewTitle">Acompanhamento das turmas</h2><p id="overviewDescription">Dados consolidados das chamadas abertas pelos instrutores.</p></div>
+                <button class="primary-button" data-open-recovery><i data-lucide="plus"></i> Nova recuperação</button>
+            </div>
+            <div class="metric-grid" id="metrics"></div>
+            <div class="dashboard-grid">
+                <section class="panel chart-panel">
+                    <div class="panel-heading"><div><h3>Recuperações por instrutor</h3><p>Quantidade aberta e concluída no período</p></div><span class="legend"><i></i>Abertas <i></i>Concluídas</span></div>
+                    <div id="instructorChart" class="bar-chart"></div>
+                </section>
+                <section class="panel attention-panel">
+                    <div class="panel-heading"><div><h3>Prioridades de hoje</h3><p>Ordenadas por prazo e impacto</p></div><button class="icon-button" data-open-view="calendar" title="Abrir calendário"><i data-lucide="calendar"></i></button></div>
+                    <div id="priorityList" class="priority-list"></div>
+                </section>
+            </div>
+            <section class="table-section">
+                <div class="panel-heading"><div><h3>Turmas que exigem atenção</h3><p>Indicadores de frequência, recuperação e desligamento</p></div><button class="text-button" data-open-view="classes">Ver todas <i data-lucide="arrow-right"></i></button></div>
+                <div class="table-wrap"><table><thead><tr><th>Turma</th><th>Instrutor</th><th>UC atual</th><th>Recuperações</th><th>Prazo crítico</th><th>Frequência</th><th></th></tr></thead><tbody id="attentionClasses"></tbody></table></div>
+            </section>
+            <section class="instructor-notes-preview" id="instructorNotesPreview" hidden>
+                <div class="panel-heading"><div><h3>Anotações recebidas do analista</h3><p>Registros de acompanhamento compartilhados com o instrutor.</p></div><button class="text-button" data-open-view="instructor-notes">Abrir caderno <i data-lucide="arrow-right"></i></button></div>
+                <div id="instructorNotesPreviewList" class="note-list compact-list"></div>
+            </section>
+        </section>
+
+        <section class="view" id="view-classes">
+            <div class="page-heading">
+                <div><span class="eyebrow">Visão por turma</span><h2>Turmas compartilhadas</h2><p>Somente turmas abertas e sincronizadas pelos instrutores.</p></div>
+                <button class="secondary-button analyst-only" id="simulateImport"><i data-lucide="files"></i> Simular leitura múltipla</button>
+            </div>
+            <div class="info-note"><i data-lucide="shield-check"></i><span>Nesta demonstração, a leitura múltipla apenas exibe o fluxo. Nenhuma planilha será aberta ou alterada.</span></div>
+            <section class="table-section no-top-gap">
+                <div class="table-wrap"><table><thead><tr><th>Turma / curso</th><th>Instrutor</th><th>Período</th><th>UC atual</th><th>Alunos</th><th>Recuperações</th><th>Situação</th><th></th></tr></thead><tbody id="classesTable"></tbody></table></div>
+            </section>
+        </section>
+
+        <section class="view" id="view-monitoring">
+            <div class="page-heading">
+                <div><span class="eyebrow" id="monitoringEyebrow">Gestão da chamada</span><h2 id="monitoringTitle">Monitoramento acadêmico global</h2><p id="monitoringDescription">Situação de frequência, atividades, recuperação e lançamento no Órion.</p></div>
+                <div class="button-row"><button class="secondary-button" id="copyMonitoringReport"><i data-lucide="copy"></i> Copiar resumo</button><button class="primary-button" id="printMonitoringReport"><i data-lucide="printer"></i> Emitir relatório</button></div>
+            </div>
+            <div class="metric-grid monitoring-metrics" id="monitoringMetrics"></div>
+
+            <section class="monitoring-alerts" id="monitoringAlertsPanel">
+                <div class="panel-heading"><div><h3>Pontos de atenção gerados automaticamente</h3><p>O sistema cria um alerta quando encontra pendência sem acompanhamento.</p></div><span class="badge red" id="monitoringAlertBadge">0 alertas</span></div>
+                <div id="monitoringAlertList" class="monitoring-alert-list"></div>
+            </section>
+
+            <div class="analyst-monitoring-layout analyst-only">
+                <section class="panel"><div class="panel-heading"><div><h3>Conformidade por instrutor</h3><p>Frequência, diário, correções e Órion consolidados</p></div></div><div id="monitoringInstructorChart" class="horizontal-chart"></div></section>
+                <section class="panel"><div class="panel-heading"><div><h3>Distribuição por analista</h3><p>Construída conforme as situações e tratativas registradas por cada analista</p></div></div><div id="monitoringAnalystChart" class="analyst-workload"></div></section>
+                <section class="panel"><div class="panel-heading"><div><h3>Pendências por turma</h3><p>Volume de itens que ainda exigem atuação</p></div></div><div id="monitoringClassChart" class="horizontal-chart"></div></section>
+                <section class="panel"><div class="panel-heading"><div><h3>Pendências por UC</h3><p>Comparação entre unidades curriculares e PI</p></div></div><div id="monitoringUcStatusChart" class="horizontal-chart"></div></section>
+            </div>
+
+            <section class="instructor-monitoring-layout instructor-only" hidden>
+                <div class="panel-heading"><div><h3>Minha rotina acadêmica</h3><p>Etapas que precisam ser concluídas em cada UC.</p></div></div>
+                <div id="instructorMonitoringCards" class="routine-grid"></div>
+            </section>
+
+            <section class="table-section monitoring-table-section">
+                <div class="panel-heading"><div><h3>Detalhamento por turma e UC</h3><p>Último retrato registrado da chamada e das atividades.</p></div><div class="segmented compact-segments" id="monitoringSegments"><button class="active" data-monitoring-filter="all">Todas <span></span></button><button data-monitoring-filter="attention">Com atenção <span></span></button><button data-monitoring-filter="orion">Órion pendente <span></span></button><button data-monitoring-filter="regular">Regular <span></span></button></div></div>
+                <div class="table-wrap"><table><thead><tr><th>Turma / UC</th><th>Responsáveis</th><th>Frequência</th><th>Diário da Prática</th><th>Correção das atividades</th><th>Recuperação</th><th>Órion</th><th>Ponto de atenção</th></tr></thead><tbody id="monitoringTable"></tbody></table></div>
+            </section>
+        </section>
+
+        <section class="view" id="view-recoveries">
+            <div class="page-heading">
+                <div><span class="eyebrow">Acompanhamento individual</span><h2>Recuperações</h2><p>Cada abertura recebe um número e mantém seu próprio histórico.</p></div>
+                <button class="primary-button" data-open-recovery><i data-lucide="plus"></i> Nova recuperação</button>
+            </div>
+            <div class="segmented" id="recoverySegments">
+                <button class="active" data-recovery-filter="all">Todas <span></span></button>
+                <button data-recovery-filter="open">Abertas <span></span></button>
+                <button data-recovery-filter="critical">Prazo crítico <span></span></button>
+                <button data-recovery-filter="closed">Concluídas <span></span></button>
+            </div>
+            <section class="table-section no-top-gap">
+                <div class="table-wrap"><table><thead><tr><th>Aluno</th><th>Turma / UC</th><th>Registro</th><th>Motivo</th><th>Período</th><th>Status</th><th>Resultado</th><th></th></tr></thead><tbody id="recoveriesTable"></tbody></table></div>
+            </section>
+        </section>
+
+        <section class="view" id="view-workflow">
+            <div class="page-heading">
+                <div><span class="eyebrow">Fluxo de tratativas</span><h2>Quadro de acompanhamento</h2><p>Arraste os cartões para registrar o avanço entre responsáveis.</p></div>
+                <button class="primary-button" data-open-recovery><i data-lucide="plus"></i> Nova tratativa</button>
+            </div>
+            <div class="kanban" id="kanbanBoard"></div>
+        </section>
+
+        <section class="view" id="view-calendar">
+            <div class="page-heading">
+                <div><span class="eyebrow">Prazos acadêmicos</span><h2>Calendário de UCs e alertas</h2><p>O alerta é criado sete dias antes do término da UC.</p></div>
+                <button class="secondary-button" id="exportCalendar"><i data-lucide="calendar-plus"></i> Abrir lembretes no Outlook</button>
+            </div>
+            <div class="calendar-layout">
+                <section class="timeline" id="calendarTimeline"></section>
+                <aside class="calendar-summary">
+                    <h3>Regra de alerta</h3>
+                    <div class="rule-flow"><span>Término da UC</span><i data-lucide="arrow-left"></i><strong>7 dias</strong><i data-lucide="bell"></i><span>Instrutor + analistas</span></div>
+                    <p>Recuperações abertas entram na prioridade. “Vencida” é calculada automaticamente e não depende de alteração manual.</p>
+                    <div id="calendarStats"></div>
+                </aside>
+            </div>
+        </section>
+
+        <section class="view" id="view-reports">
+            <div class="page-heading">
+                <div><span class="eyebrow" id="reportsEyebrow">Gestão e qualidade</span><h2 id="reportsTitle">Relatório global do analista</h2><p id="reportsDescription">Comparativos por instrutor, turma, UC, motivo e resultado.</p></div>
+                <div class="button-row"><button class="secondary-button" id="copyReport"><i data-lucide="copy"></i> Copiar resumo</button><button class="primary-button" id="printReport"><i data-lucide="printer"></i> Imprimir / PDF</button></div>
+            </div>
+            <div class="metric-grid compact" id="reportMetrics"></div>
+            <div class="reports-grid">
+                <section class="panel"><div class="panel-heading"><div><h3>Quantidade</h3><p>Aberturas por UC</p></div></div><div id="ucChart" class="horizontal-chart"></div></section>
+                <section class="panel"><div class="panel-heading"><div><h3>Qualidade da tratativa</h3><p>Resultado registrado ao encerrar</p></div></div><div id="qualityChart" class="donut-layout"></div></section>
+                <section class="panel full-span"><div class="panel-heading"><div><h3>Indicadores da planilha de chamada</h3><p>Frequência, Diário da Prática, correções, recuperações e lançamento no Órion.</p></div></div><div id="monitoringReportCharts" class="report-monitoring-grid"></div><div class="report-breakdown"><div><h4>Pendências por turma</h4><div id="monitoringReportClassChart" class="horizontal-chart"></div></div><div><h4>Pendências por UC</h4><div id="monitoringReportUcChart" class="horizontal-chart"></div></div></div><div class="table-wrap"><table><thead><tr><th>Turma / UC</th><th>Frequência</th><th>Diário</th><th>Correções</th><th>Recuperações abertas</th><th>Órion</th><th>Alertas</th></tr></thead><tbody id="monitoringReportTable"></tbody></table></div></section>
+                <section class="panel full-span"><div class="panel-heading"><div><h3>Motivos recorrentes</h3><p>Onde concentrar ações preventivas</p></div></div><div id="reasonTable"></div></section>
+            </div>
+        </section>
+
+        <section class="view" id="view-instructor-notes">
+            <div class="page-heading">
+                <div><span class="eyebrow">Compartilhado pelo analista</span><h2>Caderno de acompanhamento</h2><p>Registros disponíveis ao instrutor selecionado, sem a avaliação percentual.</p></div>
+                <span class="badge blue"><i data-lucide="shield-check"></i> Conteúdo protegido por perfil</span>
+            </div>
+            <section class="notes-summary" id="notesSummary"></section>
+            <section class="instructor-notes-page">
+                <div class="panel-heading"><div><h3>Histórico de anotações</h3><p>Elogios, orientações, pontos de atenção e planos de ação.</p></div></div>
+                <div id="instructorNotesList" class="note-list"></div>
+            </section>
+        </section>
+    </main>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+    <div class="modal-backdrop" id="recoveryModal" hidden>
+        <section class="modal" role="dialog" aria-modal="true" aria-labelledby="recoveryModalTitle">
+            <header><div><span class="eyebrow">Registro individual</span><h2 id="recoveryModalTitle">Nova recuperação</h2></div><button class="icon-button" data-close-modal="recoveryModal" aria-label="Fechar"><i data-lucide="x"></i></button></header>
+            <form id="recoveryForm">
+                <input type="hidden" id="recoveryId">
+                <div class="form-grid">
+                    <label class="span-2">Aluno<select id="recoveryStudent" required></select></label>
+                    <label>Turma<select id="recoveryClass" required></select></label>
+                    <label>Unidade curricular<select id="recoveryUc" required></select></label>
+                    <label class="span-2">Motivo<select id="recoveryReason" required><option value="">Selecione</option><option>Atividades não concluídas</option><option>Desempenho não desenvolvido</option><option>Frequência abaixo do mínimo</option><option>Recorrência de pendências</option><option>Outro</option></select></label>
+                    <label>Data de abertura<input id="recoveryStart" type="date" required></label>
+                    <label>Prazo para conclusão<input id="recoveryEnd" type="date" required></label>
+                    <label>Status<select id="recoveryStatus"><option value="triage">Planejada</option><option value="open">Aberta</option><option value="contacted">Contato realizado</option><option value="waiting">Aguardando estudante</option><option value="evaluation">Em avaliação</option><option value="closed">Concluída</option><option value="cancelled">Cancelada</option></select></label>
+                    <label>Resultado<select id="recoveryOutcome"><option value="pending">Ainda não avaliado</option><option value="developed">Desenvolveu</option><option value="not-developed">Não desenvolveu</option><option value="reopened">Reaberta</option></select></label>
+                    <label class="span-2">Atividades e orientações<textarea id="recoveryNotes" rows="4" placeholder="Ex.: Semana 1, Dia 1; Semana 2, Dia 3..."></textarea></label>
+                </div>
+                <div class="message-preview" id="messagePreview"></div>
+                <footer><button type="button" class="secondary-button" id="copyRecoveryMessage"><i data-lucide="copy"></i> Copiar mensagem</button><button type="button" class="secondary-button" id="openRecoveryOutlook"><i data-lucide="mail"></i> Abrir no Outlook</button><span></span><button type="button" class="ghost-button" data-close-modal="recoveryModal">Cancelar</button><button class="primary-button" type="submit"><i data-lucide="save"></i> Salvar recuperação</button></footer>
+            </form>
+        </section>
+    </div>
+
+    <div class="modal-backdrop" id="classModal" hidden>
+        <section class="modal wide" role="dialog" aria-modal="true" aria-labelledby="classModalTitle">
+            <header><div><span class="eyebrow">Calendário acadêmico</span><h2 id="classModalTitle">Editar datas da turma</h2></div><button class="icon-button" data-close-modal="classModal" aria-label="Fechar"><i data-lucide="x"></i></button></header>
+            <form id="classForm">
+                <input type="hidden" id="classId">
+                <div class="class-date-row"><label>Início da turma<input id="classStart" type="date" required></label><label>Término da turma<input id="classEnd" type="date" required></label><div><span>Instrutor responsável</span><strong id="classInstructor"></strong></div></div>
+                <div class="uc-editor-heading"><div><h3>Período das unidades curriculares</h3><p>Datas editáveis e compartilhadas no modelo definitivo.</p></div><button type="button" class="secondary-button" id="addUc"><i data-lucide="plus"></i> Adicionar UC</button></div>
+                <div id="ucEditor" class="uc-editor"></div>
+                <footer><span></span><span></span><span></span><button type="button" class="ghost-button" data-close-modal="classModal">Cancelar</button><button class="primary-button" type="submit"><i data-lucide="save"></i> Salvar calendário</button></footer>
+            </form>
+        </section>
+    </div>
+
+    <div class="modal-backdrop" id="importModal" hidden>
+        <section class="modal compact-modal" role="dialog" aria-modal="true" aria-labelledby="importModalTitle">
+            <header><div><span class="eyebrow">Fluxo demonstrativo</span><h2 id="importModalTitle">Leitura de várias chamadas</h2></div><button class="icon-button" data-close-modal="importModal" aria-label="Fechar"><i data-lucide="x"></i></button></header>
+            <div class="import-drop"><i data-lucide="files"></i><strong>Selecione várias planilhas</strong><p>O modelo definitivo identifica a turma pelo número, atualiza o resumo e nunca altera o arquivo de origem.</p><input id="mockFiles" type="file" multiple accept=".xls,.xlsx,.xlsm,.xlsb"><label for="mockFiles" class="secondary-button"><i data-lucide="folder-open"></i> Escolher arquivos</label></div>
+            <div id="mockFileList" class="mock-file-list"></div>
+            <footer><span></span><span></span><span></span><button type="button" class="ghost-button" data-close-modal="importModal">Fechar</button><button type="button" class="primary-button" id="finishMockImport" disabled><i data-lucide="check"></i> Concluir simulação</button></footer>
+        </section>
+    </div>
+
+    <div class="modal-backdrop" id="orionModal" hidden>
+        <section class="modal compact-modal" role="dialog" aria-modal="true" aria-labelledby="orionModalTitle">
+            <header><div><span class="eyebrow">Confirmação manual</span><h2 id="orionModalTitle">Lançamento de resultado no Órion</h2></div><button class="icon-button" data-close-modal="orionModal" aria-label="Fechar"><i data-lucide="x"></i></button></header>
+            <form id="orionForm">
+                <input type="hidden" id="orionClassId"><input type="hidden" id="orionUcName">
+                <div class="orion-context" id="orionContext"></div>
+                <div class="form-grid">
+                    <label>Status<select id="orionStatus" required><option value="pending">Não lançado</option><option value="partial">Parcialmente lançado</option><option value="launched">Concluído no Órion</option></select></label>
+                    <label>Data da atualização<input id="orionUpdatedAt" type="date" required></label>
+                    <label class="span-2">Observação<textarea id="orionNotes" rows="4" placeholder="Informe, se necessário, o que ainda precisa ser concluído."></textarea></label>
+                </div>
+                <div class="info-note"><i data-lucide="user-check"></i><span>O status é confirmado manualmente pelo usuário e fica associado à turma, UC, data e responsável.</span></div>
+                <footer><span></span><span></span><span></span><button type="button" class="ghost-button" data-close-modal="orionModal">Cancelar</button><button class="primary-button" type="submit"><i data-lucide="save"></i> Salvar status</button></footer>
+            </form>
+        </section>
+    </div>
+
+    <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
+    <script src="./analista-bootstrap.js?v=2.0.0"></script>
+</body>
+</html>

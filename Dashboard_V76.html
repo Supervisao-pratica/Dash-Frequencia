@@ -528,14 +528,13 @@
         ];
 
         const NOTEBOOK_STORAGE_PREFIX = "instructor_notes_v3_";
-        const NOTEBOOK_ANALYST_OPTIONS = ["Bianca", "Bruna Cunha", "Mariana", "Michel", "Juliana Severo"];
+        const NOTEBOOK_ANALYST_OPTIONS = ["Michel Farias", "Mariana", "Bruna Cunha", "Bianca"];
         const ANALYST_NOTE_STORAGE_PREFIX = "analyst_notes_v1_";
         const ANALYST_PROFILES = [
-            { name: "Bianca", tokens: ["BIANCA"] },
-            { name: "Bruna Cunha", tokens: ["BRUNA", "CUNHA"] },
-            { name: "Mariana", tokens: ["MARIANA"] },
-            { name: "Michel", tokens: ["MICHEL"] },
-            { name: "Juliana Severo", tokens: ["JULIANA", "SEVERO"] }
+            { key: "MICHEL", fallbackName: "Michel Farias", tokens: ["MICHEL"] },
+            { key: "MARIANA", fallbackName: "Mariana", tokens: ["MARIANA"] },
+            { key: "BRUNA_CUNHA", fallbackName: "Bruna Cunha", tokens: ["BRUNA", "CUNHA"] },
+            { key: "BIANCA", fallbackName: "Bianca", tokens: ["BIANCA"] }
         ];
         const ANALYST_FOLLOWUP_TYPES = ["Avaliação", "Acompanhamento", "Ponto de atenção", "Elogio", "Plano de ação"];
         const ANALYST_TRACKING_STATUS_OPTIONS = [
@@ -652,11 +651,23 @@
             return !invalidLabels.some(label => normalized === label || normalized.startsWith(`${label} `));
         };
 
-        const getCurrentAnalystName = () => {
-            const identity = normalizeName(`${getCurrentAuthenticatedEmail().split("@")[0]} ${window.SENAC_CURRENT_USER && window.SENAC_CURRENT_USER.displayName || ""}`);
+        const getAnalystProfileForUser = user => {
+            const identity = normalizeName(`${String(user && user.email || "").split("@")[0]} ${user && user.displayName || ""}`);
             if (!identity) return "";
-            const profile = ANALYST_PROFILES.find(item => item.tokens.every(token => identity.includes(token)));
-            return profile ? profile.name : "";
+            return ANALYST_PROFILES.find(item => item.tokens.every(token => identity.includes(token))) || null;
+        };
+
+        const getAnalystDisplayName = (user, profile = getAnalystProfileForUser(user)) => {
+            if (!profile) return "";
+            const displayName = String(user && user.displayName || "").trim();
+            if (displayName.split(/\s+/).length >= 2) return displayName;
+            const localName = String(user && user.email || "").split("@")[0].split(/[._-]+/).filter(Boolean).map(part => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase()).join(" ");
+            return localName.split(/\s+/).length >= 2 ? localName : profile.fallbackName;
+        };
+
+        const getCurrentAnalystName = () => {
+            const user = window.SENAC_CURRENT_USER || (window.firebase && firebase.auth ? firebase.auth().currentUser : null);
+            return getAnalystDisplayName(user);
         };
 
         const getLegacyInstructorNames = (value) => normalizeInstructorIdentity(canonicalizeInstructorName(value)) === "BRUNA LORENA"
@@ -665,7 +676,12 @@
 
         const canonicalizeAnalystName = (value) => {
             const raw = String(value || "").trim();
-            return normalizeName(raw) === "BRUNA" ? "Bruna Cunha" : raw;
+            const normalized = normalizeName(raw);
+            if (normalized === "BRUNA" || normalized === "BRUNA CUNHA") return "Bruna Cunha";
+            if (normalized === "MICHEL" || normalized === "MICHEL FARIAS") return "Michel";
+            if (normalized.startsWith("MARIANA")) return "Mariana";
+            if (normalized.startsWith("BIANCA")) return "Bianca";
+            return raw;
         };
 
         const getInstructorIdentityTokens = (value) => normalizeInstructorIdentity(value)
@@ -4986,7 +5002,15 @@
 
             const logout = async () => { await auth.signOut(); setUser(null); window.SENAC_CURRENT_USER = null; };
 
-            if (user && isAllowedSenacEmail(user.email)) return <App />;
+            if (user && isAllowedSenacEmail(user.email)) {
+                const analystProfile = getAnalystProfileForUser(user);
+                const instructorViewRequested = new URLSearchParams(window.location.search).get("perfil") === "instrutor";
+                if (analystProfile && !instructorViewRequested) {
+                    window.location.replace("./analista.html");
+                    return <div className="min-h-screen flex items-center justify-center bg-slate-100 text-slate-600">Abrindo Central do Analista...</div>;
+                }
+                return <App />;
+            }
 
             if (user && !isAllowedSenacEmail(user.email)) return <div className="min-h-screen flex items-center justify-center bg-slate-100 p-4"><div className="bg-white rounded-xl shadow p-8 max-w-md text-center"><h1 className="text-xl font-bold text-red-700">E-mail não autorizado</h1><p className="text-sm text-slate-600 mt-3">Use um e-mail institucional terminado em @pr.senac.br ou @docente.pr.senac.br.</p><button onClick={logout} className="mt-5 text-sm text-senac-blue hover:underline">Sair</button></div></div>;
 

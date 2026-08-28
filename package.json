@@ -24,6 +24,10 @@
     },
     "files": [
       "Dashboard_V76.html",
+      "analista.html",
+      "analista.js",
+      "analista.css",
+      "analista-bootstrap.js",
       "senac-inho.js",
       "senac-inho.css",
       "assets/senac-inho.png",
