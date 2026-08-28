@@ -3,9 +3,9 @@
 
     const ANALYST_SEEDS = [
         { key: "MICHEL", tokens: ["michel"], fallbackName: "Michel Farias" },
-        { key: "MARIANA", tokens: ["mariana"], fallbackName: "Mariana" },
+        { key: "MARIANA", tokens: ["mariana"], fallbackName: "Mariana Mello" },
         { key: "BRUNA_CUNHA", tokens: ["bruna", "cunha"], fallbackName: "Bruna Cunha" },
-        { key: "BIANCA", tokens: ["bianca"], fallbackName: "Bianca" }
+        { key: "BIANCA", tokens: ["bianca"], fallbackName: "Bianca Aresta" }
     ];
     const DAY = 86400000;
 

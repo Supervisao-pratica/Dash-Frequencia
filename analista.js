@@ -31,7 +31,7 @@
         { id: "evaluation", label: "Em avaliação", tone: "#6d3cb4" },
         { id: "closed", label: "Concluída", tone: "#078847" }
     ];
-    const ANALYST_NAMES = Array.isArray(window.SENAC_ANALYST_NAMES) ? window.SENAC_ANALYST_NAMES : ["Michel Farias", "Mariana", "Bruna Cunha", "Bianca"];
+    const ANALYST_NAMES = Array.isArray(window.SENAC_ANALYST_NAMES) ? window.SENAC_ANALYST_NAMES : ["Michel Farias", "Mariana Mello", "Bruna Cunha", "Bianca Aresta"];
 
     const prototypeData = loadData();
     const state = {
