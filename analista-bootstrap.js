@@ -147,13 +147,16 @@
             updatedAt: new Date().toISOString()
         }, { merge: true });
 
-        const [profiles, classes, students, histories, recoveries, sharedNotes, overrides] = await Promise.all([
+        const ownerEmail = String(user.email || "").toLowerCase();
+        const [profiles, classes, students, histories, recoveries, sharedNotes, ownNotes, ownEvaluations, overrides] = await Promise.all([
             db.collection("analyst_profiles").get(),
             db.collection("saved_classes").get(),
             db.collection("saved_class_students").get(),
             db.collection("dashboard_history").get(),
             db.collection("analyst_recoveries").get(),
             db.collection("analyst_shared_notes").where("visibleToInstructor", "==", true).get(),
+            db.collection("analyst_notes").where("ownerEmail", "==", ownerEmail).get(),
+            db.collection("analyst_evaluations").where("ownerEmail", "==", ownerEmail).get(),
             db.collection("analyst_class_overrides").get()
         ]);
 
@@ -168,8 +171,12 @@
         }).sort((a, b) => b.id.localeCompare(a.id));
 
         const recoveryData = recoveries.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        const noteData = sharedNotes.docs.map(doc => {
+        const evaluationMap = new Map(ownEvaluations.docs.map(doc => [doc.id, doc.data()]));
+        const noteDocuments = new Map(sharedNotes.docs.map(doc => [doc.id, doc]));
+        ownNotes.docs.forEach(doc => noteDocuments.set(doc.id, doc));
+        const noteData = [...noteDocuments.values()].map(doc => {
             const note = doc.data() || {};
+            const evaluation = evaluationMap.get(doc.id);
             return {
                 id: doc.id,
                 classId: String(note.turmaKey || ""),
@@ -179,9 +186,15 @@
                 subject: String(note.subject || "Acompanhamento"),
                 notes: String(note.notes || ""),
                 competency: String(note.competency || ""),
-                evaluationPercent: null,
+                evaluationPercent: evaluation && Number.isFinite(Number(evaluation.score)) ? Number(evaluation.score) : null,
                 author: String(note.analystName || note.analystKey || "Análise"),
-                status: String(note.trackingStatus || "Em acompanhamento")
+                ownerEmail: String(note.ownerEmail || "").toLowerCase(),
+                trackingEnabled: note.trackingEnabled === true,
+                trackingStatus: String(note.trackingStatus || "em_acompanhamento"),
+                reminderDate: String(note.reminderDate || note.periodEnd || "").slice(0, 10),
+                periodStart: String(note.periodStart || note.date || "").slice(0, 10),
+                periodEnd: String(note.periodEnd || "").slice(0, 10),
+                status: String(note.trackingStatus || "em_acompanhamento")
             };
         });
 
@@ -193,7 +206,7 @@
         document.getElementById("analystProfileName").textContent = currentName;
         document.getElementById("profileAvatar").textContent = currentName.split(/\s+/).map(part => part[0]).slice(0, 2).join("").toUpperCase();
         const script = document.createElement("script");
-        script.src = `./analista.js?v=2.0.0`;
+        script.src = `./analista.js?v=2.1.0`;
         script.onload = () => loading?.remove();
         script.onerror = () => { if (loading) loading.innerHTML = "Não foi possível carregar a Central do Analista."; };
         document.body.appendChild(script);
@@ -228,6 +241,16 @@
                     const oldPayload = oldClass ? { start: oldClass.start, end: oldClass.end, currentUc: oldClass.currentUc, ucs: oldClass.ucs, orion: Object.fromEntries((oldClass.monitoring || []).map(record => [record.uc, record.orion])) } : null;
                     const comparable = { start: payload.start, end: payload.end, currentUc: payload.currentUc, ucs: payload.ucs, orion: payload.orion };
                     if (JSON.stringify(comparable) !== JSON.stringify(oldPayload)) writes.push(db.collection("analyst_class_overrides").doc(classItem.id).set(payload, { merge: true }));
+                });
+                const previousNotes = new Map((previous.analystNotes || []).map(item => [item.id, item]));
+                (data.analystNotes || []).forEach(note => {
+                    const oldNote = previousNotes.get(note.id);
+                    const isOwner = String(note.ownerEmail || "").toLowerCase() === String(user.email || "").toLowerCase();
+                    const trackingChanged = oldNote && (note.trackingStatus !== oldNote.trackingStatus || note.trackingEnabled !== oldNote.trackingEnabled);
+                    if (!isOwner || !trackingChanged) return;
+                    const statusUpdate = { trackingEnabled: note.trackingEnabled === true, trackingStatus: note.trackingStatus, updatedAt: new Date().toISOString() };
+                    writes.push(db.collection("analyst_notes").doc(note.id).set(statusUpdate, { merge: true }));
+                    writes.push(db.collection("analyst_shared_notes").doc(note.id).set(statusUpdate, { merge: true }));
                 });
                 try {
                     await Promise.all(writes);

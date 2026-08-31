@@ -24,10 +24,20 @@
         reopened: { label: "Reaberta", className: "purple" }
     };
 
+    const competencyLabels = {
+        planejamento: "Planejamento",
+        resultados: "Foco em Resultados",
+        visao_sistemica: "Visão Sistêmica",
+        cliente: "Foco no Cliente",
+        comunicacao: "Comunicação",
+        problemas: "Solução de Problemas",
+        equipe: "Trabalho em Equipe"
+    };
+
     const workflowColumns = [
         { id: "triage", label: "A organizar", tone: "#6b7786" },
-        { id: "contacted", label: "Contato realizado", tone: "#1976b8" },
-        { id: "waiting", label: "Aguardando estudante", tone: "#d17b08" },
+        { id: "contacted", label: "Em acompanhamento", tone: "#1976b8" },
+        { id: "waiting", label: "Aguardando retorno", tone: "#d17b08" },
         { id: "evaluation", label: "Em avaliação", tone: "#6d3cb4" },
         { id: "closed", label: "Concluída", tone: "#078847" }
     ];
@@ -40,9 +50,10 @@
         profileMode: "analyst",
         previewInstructor: prototypeData.classes[0]?.instructor || "",
         recoveryFilter: "all",
+        workflowFilter: "all",
         monitoringFilter: "all",
         filters: { instructor: "all", analyst: "all", classId: "all", uc: "all", search: "" },
-        draggedRecoveryId: null,
+        draggedWorkflowCard: null,
         classDraft: null
     };
 
@@ -466,7 +477,7 @@
         (state.data.analystNotes || []).forEach(note => {
             const analyst = canonicalAnalyst(note.author);
             const classIds = note.classId ? [note.classId] : state.data.classes.filter(item => instructorNamesForClass(item).includes(note.instructor)).map(item => item.id);
-            if (analyst) classIds.forEach(classId => activities.push({ analyst, classId, uc: note.uc || null, type: note.type || "Caderno do Analista", active: note.status !== "Concluído", date: note.date, sourceId: note.id }));
+            if (analyst) classIds.forEach(classId => activities.push({ analyst, classId, uc: note.uc || null, type: note.type || "Caderno do Analista", active: analystNoteWorkflow(note) !== "closed", date: note.date, sourceId: note.id }));
         });
         state.data.classes.forEach(classItem => (classItem.monitoring || []).forEach(record => {
             const analyst = canonicalAnalyst(record.orion.updatedBy);
@@ -504,6 +515,50 @@
             const searchOk = matchesSearch([recovery.classId, recovery.uc, recovery.reason, student?.name, student?.orion]);
             return allowedClasses.has(recovery.classId) && ucOk && searchOk;
         });
+    }
+
+    function filteredAnalystNotes() {
+        const allowedClasses = new Set(filteredClasses().map(item => item.id));
+        return (state.data.analystNotes || []).filter(note => {
+            const analystOk = state.profileMode === "instructor" || state.filters.analyst === "all" || canonicalAnalyst(note.author) === state.filters.analyst;
+            const classOk = !note.classId || allowedClasses.has(note.classId);
+            const instructorOk = state.profileMode !== "instructor" || note.instructor === state.previewInstructor;
+            const ucOk = state.filters.uc === "all" || !note.uc || note.uc === state.filters.uc;
+            const searchOk = matchesSearch([note.classId, note.instructor, note.author, note.type, note.subject, note.notes, note.competency]);
+            return analystOk && classOk && instructorOk && ucOk && searchOk;
+        });
+    }
+
+    function analystNoteWorkflow(note) {
+        if (!note.trackingEnabled) return "triage";
+        if (["resolvido", "suspenso", "cancelado"].includes(note.trackingStatus)) return "closed";
+        if (note.trackingStatus === "aguardando_retorno") return "waiting";
+        if (note.trackingStatus === "em_avaliacao") return "evaluation";
+        return "contacted";
+    }
+
+    function analystTrackingLabel(note) {
+        if (!note.trackingEnabled) return "A organizar";
+        return ({
+            em_acompanhamento: "Em acompanhamento",
+            aguardando_retorno: "Aguardando retorno",
+            em_avaliacao: "Em avaliação",
+            resolvido: "Resolvido",
+            suspenso: "Suspenso",
+            cancelado: "Cancelado"
+        })[note.trackingStatus] || "Em acompanhamento";
+    }
+
+    function analystCompetencyLabel(value) {
+        return competencyLabels[value] || String(value || "").replaceAll("_", " ").replace(/\b\w/g, letter => letter.toUpperCase());
+    }
+
+    function canEditAnalystNote(note) {
+        return String(note.ownerEmail || "").toLowerCase() === String(window.SENAC_CENTRAL_USER?.email || "").toLowerCase();
+    }
+
+    function isAnalystNoteCritical(note) {
+        return analystNoteWorkflow(note) !== "closed" && Boolean(note.reminderDate) && daysUntil(note.reminderDate) <= 7;
     }
 
     function refreshIcons() {
@@ -585,7 +640,8 @@
 
     function instructorNoteCard(note) {
         const meta = noteTone(note.type);
-        return `<article class="note-card" style="--note-tone:${meta.tone}"><header><div>${badge(note.type, meta.badge)}<h4>${escapeHTML(note.subject)}</h4></div><time>${formatDate(note.date)}</time></header><p>${escapeHTML(note.notes)}</p><div class="note-meta">${badge(note.competency, "blue")}${badge(note.status, note.status === "Concluído" ? "green" : "amber")}<span class="badge gray">Analista: ${escapeHTML(note.author)}</span></div><div class="note-confidential"><i data-lucide="shield-check"></i> A avaliação interna do analista não é exibida nesta visualização.</div></article>`;
+        const statusLabel = analystTrackingLabel(note);
+        return `<article class="note-card" style="--note-tone:${meta.tone}"><header><div>${badge(note.type, meta.badge)}<h4>${escapeHTML(note.subject)}</h4></div><time>${formatDate(note.date)}</time></header><p>${escapeHTML(note.notes)}</p><div class="note-meta">${note.competency ? badge(analystCompetencyLabel(note.competency), "blue") : ""}${badge(statusLabel, analystNoteWorkflow(note) === "closed" ? "green" : "amber")}<span class="badge gray">Analista: ${escapeHTML(note.author)}</span></div><div class="note-confidential"><i data-lucide="shield-check"></i> A avaliação interna do analista não é exibida nesta visualização.</div></article>`;
     }
 
     function renderInstructorNotes() {
@@ -593,7 +649,7 @@
         document.getElementById("notesNavCount").textContent = notes.length;
         document.getElementById("instructorNotesPreviewList").innerHTML = notes.length ? notes.slice(0, 3).map(instructorNoteCard).join("") : `<div class="empty-state">Nenhuma anotação compartilhada para este instrutor.</div>`;
         document.getElementById("instructorNotesList").innerHTML = notes.length ? notes.map(instructorNoteCard).join("") : `<div class="empty-state">Nenhuma anotação compartilhada para este instrutor.</div>`;
-        const open = notes.filter(note => note.status !== "Concluído").length;
+        const open = notes.filter(note => analystNoteWorkflow(note) !== "closed").length;
         const praise = notes.filter(note => note.type === "Elogio").length;
         const plans = notes.filter(note => note.type === "Plano de ação").length;
         document.getElementById("notesSummary").innerHTML = [
@@ -709,15 +765,33 @@
 
     function renderKanban() {
         const recoveries = filteredRecoveries();
+        const notes = filteredAnalystNotes();
+        const showRecoveries = state.workflowFilter === "all" || state.workflowFilter === "student";
+        const showNotes = state.workflowFilter === "all" || state.workflowFilter === "instructor";
         const grouped = Object.fromEntries(workflowColumns.map(column => [column.id, []]));
-        recoveries.forEach(recovery => grouped[statusMeta[recovery.status]?.workflow || "triage"].push(recovery));
+        if (showRecoveries) recoveries.forEach(recovery => grouped[statusMeta[recovery.status]?.workflow || "triage"].push({ type: "student", item: recovery }));
+        if (showNotes) notes.forEach(note => grouped[analystNoteWorkflow(note)].push({ type: "instructor", item: note }));
+        const workflowCounts = { all: recoveries.length + notes.length, student: recoveries.length, instructor: notes.length };
+        document.querySelectorAll("[data-workflow-filter]").forEach(button => {
+            const key = button.dataset.workflowFilter;
+            button.classList.toggle("active", key === state.workflowFilter);
+            button.querySelector("span").textContent = workflowCounts[key];
+        });
         document.getElementById("kanbanBoard").innerHTML = workflowColumns.map(column => `
             <section class="kanban-column" data-drop-status="${column.id}" style="--tone:${column.tone}">
                 <div class="kanban-heading"><strong>${column.label}</strong><span>${grouped[column.id].length}</span></div>
-                <div class="kanban-list">${grouped[column.id].map(recovery => {
-                    const student = getStudent(recovery);
-                    const critical = isCritical(recovery);
-                    return `<article class="kanban-card" draggable="true" data-recovery-card="${recovery.id}" style="--card-tone:${critical ? "#c62828" : column.tone}"><div class="card-top">${badge(`${recovery.uc} · R${recovery.number}`, critical ? "red" : "blue")}<button class="icon-button table-action" data-edit-recovery="${recovery.id}" title="Editar"><i data-lucide="pencil"></i></button></div><h4>${escapeHTML(student?.name || "Aluno")}</h4><p>${escapeHTML(recovery.reason)}</p><div class="kanban-meta"><span>${recovery.classId} · ${dueLabel(recovery.end)}</span><span class="mini-avatar" title="${escapeHTML(recovery.assignedTo)}">${escapeHTML(initials(recovery.assignedTo))}</span></div></article>`;
+                <div class="kanban-list">${grouped[column.id].map(card => {
+                    if (card.type === "student") {
+                        const recovery = card.item;
+                        const student = getStudent(recovery);
+                        const critical = isCritical(recovery);
+                        return `<article class="kanban-card" draggable="true" data-workflow-card-type="student" data-workflow-card-id="${recovery.id}" style="--card-tone:${critical ? "#c62828" : "#004a8d"}"><div class="card-top">${badge(`Aluno · ${recovery.uc} · R${recovery.number}`, critical ? "red" : "blue")}<button class="icon-button table-action" data-edit-recovery="${recovery.id}" title="Editar recuperação"><i data-lucide="pencil"></i></button></div><h4>${escapeHTML(student?.name || "Aluno")}</h4><p>${escapeHTML(recovery.reason)}</p><span class="card-context">${escapeHTML(recovery.assignedTo)} · ${escapeHTML(statusMeta[recovery.status]?.label || "Aberta")}</span><div class="kanban-meta"><span>${recovery.classId} · ${dueLabel(recovery.end)}</span><span class="mini-avatar" title="${escapeHTML(recovery.createdBy)}">${escapeHTML(initials(recovery.createdBy))}</span></div></article>`;
+                    }
+                    const note = card.item;
+                    const editable = canEditAnalystNote(note);
+                    const critical = isAnalystNoteCritical(note);
+                    const due = note.reminderDate ? dueLabel(note.reminderDate) : "Sem lembrete";
+                    return `<article class="kanban-card instructor-card${editable ? "" : " read-only"}" draggable="${editable}" data-workflow-card-type="instructor" data-workflow-card-id="${note.id}" style="--card-tone:${critical ? "#c62828" : "#f58220"}"><div class="card-top">${badge(`Instrutor · ${note.type}`, critical ? "red" : "amber")}<span class="mini-avatar" title="${escapeHTML(note.author)}">${escapeHTML(initials(note.author))}</span></div><h4>${escapeHTML(note.instructor)}</h4><p>${escapeHTML(note.subject || note.notes || "Mediação pedagógica")}</p><span class="card-context">${note.competency ? `${escapeHTML(analystCompetencyLabel(note.competency))} · ` : ""}${escapeHTML(analystTrackingLabel(note))}</span><div class="kanban-meta"><span>${escapeHTML(note.classId || "Sem turma")} · ${escapeHTML(due)}</span><span>${editable ? "Arraste para atualizar" : "Somente leitura"}</span></div></article>`;
                 }).join("") || `<div class="empty-state">Sem tratativas</div>`}</div>
             </section>`).join("");
         bindKanbanEvents();
@@ -739,6 +813,64 @@
 
         const critical = filteredRecoveries().filter(isCritical);
         document.getElementById("calendarStats").innerHTML = `<div class="calendar-stat"><span>Alertas ativos</span><strong>${critical.length}</strong></div><div class="calendar-stat"><span>Vencidos</span><strong>${critical.filter(item => daysUntil(item.end) < 0).length}</strong></div><div class="calendar-stat"><span>Próximos 7 dias</span><strong>${critical.filter(item => daysUntil(item.end) >= 0).length}</strong></div>`;
+    }
+
+    function mediationIndicators() {
+        const classes = filteredClasses();
+        const notes = filteredAnalystNotes();
+        const recoveries = filteredRecoveries();
+        const monitoringRows = filteredMonitoringRows();
+        const evaluations = notes.filter(note => note.evaluationPercent !== null && note.evaluationPercent !== "" && Number.isFinite(Number(note.evaluationPercent))).map(note => Number(note.evaluationPercent));
+        const openMediations = notes.filter(note => analystNoteWorkflow(note) !== "closed").length;
+        const accompaniedContacts = recoveries.filter(item => ["contacted", "waiting", "evaluation", "closed"].includes(item.status)).length;
+        const correctedActivities = monitoringRows.reduce((sum, item) => sum + Number(item.record.correction?.corrected || 0), 0);
+        const practiceRows = monitoringRows.filter(item => item.record.practice?.capturedAt);
+        const practiceCompleted = practiceRows.reduce((sum, item) => sum + Number(item.record.practice?.completed || 0), 0);
+        const practiceTotal = practiceRows.reduce((sum, item) => sum + Number(item.record.practice?.totalStudents || 0), 0);
+        const closedRecoveries = recoveries.filter(item => item.status === "closed");
+        const developedRecoveries = closedRecoveries.filter(item => item.outcome === "developed").length;
+        const totalStudents = classes.reduce((sum, item) => sum + Number(item.studentsCount || 0), 0);
+        const weightedFrequency = totalStudents ? classes.reduce((sum, item) => sum + Number(item.frequency || 0) * Number(item.studentsCount || 0), 0) / totalStudents : null;
+        const dropouts = classes.reduce((sum, item) => sum + Number(item.dropouts || 0), 0);
+        const percentage = (part, total) => total ? `${Math.round(part / total * 100)}%` : "--";
+        return {
+            notes: notes.length,
+            openMediations,
+            evaluationAverage: evaluations.length ? `${Math.round(evaluations.reduce((sum, value) => sum + value, 0) / evaluations.length)}%` : "--",
+            evaluationCount: evaluations.length,
+            accompaniedContacts,
+            correctedActivities,
+            engagement: percentage(practiceCompleted, practiceTotal),
+            practiceCompleted,
+            practiceTotal,
+            recoveryDevelopment: percentage(developedRecoveries, closedRecoveries.length),
+            developedRecoveries,
+            closedRecoveries: closedRecoveries.length,
+            averageFrequency: weightedFrequency === null ? "--" : `${weightedFrequency.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`,
+            permanence: percentage(Math.max(0, totalStudents - dropouts), totalStudents),
+            dropouts,
+            totalStudents
+        };
+    }
+
+    function indicatorCard(label, value, detail, tone) {
+        return `<article class="indicator-card" style="--tone:${tone}"><span>${escapeHTML(label)}</span><strong>${escapeHTML(value)}</strong><small>${escapeHTML(detail)}</small></article>`;
+    }
+
+    function renderMediationIndicators() {
+        const data = mediationIndicators();
+        document.getElementById("instructorActionIndicators").innerHTML = [
+            indicatorCard("Mediações documentadas", data.notes, `${data.openMediations} ainda em acompanhamento`, "#f58220"),
+            indicatorCard("Média avaliativa", data.evaluationAverage, `${plural(data.evaluationCount, "avaliação interna", "avaliações internas")} sob sua responsabilidade`, "#6d3cb4"),
+            indicatorCard("Contatos acompanhados", data.accompaniedContacts, "Recuperações com interação ou encaminhamento registrado", "#1976b8"),
+            indicatorCard("Correções realizadas", data.correctedActivities, "Atividades corrigidas no último retrato disponível", "#078847")
+        ].join("");
+        document.getElementById("studentResultIndicators").innerHTML = [
+            indicatorCard("Engajamento nas atividades", data.engagement, `${data.practiceCompleted} de ${data.practiceTotal} conclusões registradas`, "#004a8d"),
+            indicatorCard("Desenvolvimento após recuperação", data.recoveryDevelopment, `${data.developedRecoveries} de ${data.closedRecoveries} recuperações concluídas`, "#078847"),
+            indicatorCard("Frequência média", data.averageFrequency, "Média ponderada das turmas filtradas", "#d17b08"),
+            indicatorCard("Permanência", data.permanence, `${data.dropouts} desligamento(s) em ${data.totalStudents} estudantes`, "#c62828")
+        ].join("");
     }
 
     function renderReports() {
@@ -773,6 +905,7 @@
         const reasons = [...new Set(recoveries.map(item => item.reason))].map(reason => ({ reason, count: recoveries.filter(item => item.reason === reason).length })).sort((a, b) => b.count - a.count);
         const maxReason = Math.max(1, ...reasons.map(item => item.count));
         document.getElementById("reasonTable").innerHTML = reasons.length ? reasons.map(item => `<div class="reason-row"><strong>${escapeHTML(item.reason)}</strong><div class="h-bar-track"><i style="--value:${item.count / maxReason * 100}%;--tone:#f58220"></i></div><span>${item.count} caso(s)</span></div>`).join("") : `<div class="empty-state">Sem dados.</div>`;
+        renderMediationIndicators();
     }
 
     function filteredMonitoringRows() {
@@ -1156,23 +1289,35 @@
     }
 
     function bindKanbanEvents() {
-        document.querySelectorAll("[data-recovery-card]").forEach(card => {
-            card.addEventListener("dragstart", () => { state.draggedRecoveryId = card.dataset.recoveryCard; });
-            card.addEventListener("dragend", () => { state.draggedRecoveryId = null; document.querySelectorAll(".kanban-column").forEach(column => column.classList.remove("drag-over")); });
+        document.querySelectorAll("[data-workflow-card-id][draggable='true']").forEach(card => {
+            card.addEventListener("dragstart", () => { state.draggedWorkflowCard = { type: card.dataset.workflowCardType, id: card.dataset.workflowCardId }; });
+            card.addEventListener("dragend", () => { state.draggedWorkflowCard = null; document.querySelectorAll(".kanban-column").forEach(column => column.classList.remove("drag-over")); });
         });
         document.querySelectorAll("[data-drop-status]").forEach(column => {
             column.addEventListener("dragover", event => { event.preventDefault(); column.classList.add("drag-over"); });
             column.addEventListener("dragleave", () => column.classList.remove("drag-over"));
             column.addEventListener("drop", event => {
                 event.preventDefault();
-                const recovery = state.data.recoveries.find(item => item.id === state.draggedRecoveryId);
                 const status = column.dataset.dropStatus;
-                if (recovery && status) {
+                const dragged = state.draggedWorkflowCard;
+                if (!dragged || !status) return;
+                if (dragged.type === "student") {
+                    const recovery = state.data.recoveries.find(item => item.id === dragged.id);
+                    if (!recovery) return;
                     recovery.status = status === "triage" ? "open" : status;
                     if (status === "closed" && recovery.outcome === "pending") recovery.outcome = "developed";
                     saveData("Tratativa atualizada.");
                     renderAll();
+                    return;
                 }
+                const note = (state.data.analystNotes || []).find(item => item.id === dragged.id);
+                if (!note || !canEditAnalystNote(note)) return showToast("Somente o analista responsável pode alterar esta mediação.");
+                const statusMap = { triage: "em_acompanhamento", contacted: "em_acompanhamento", waiting: "aguardando_retorno", evaluation: "em_avaliacao", closed: "resolvido" };
+                note.trackingEnabled = status !== "triage";
+                note.trackingStatus = statusMap[status];
+                note.status = note.trackingStatus;
+                saveData("Acompanhamento do instrutor atualizado.");
+                renderAll();
             });
         });
     }
@@ -1206,7 +1351,8 @@
         const title = state.profileMode === "instructor" ? `RELATÓRIO DO INSTRUTOR - ${state.previewInstructor.toUpperCase()}` : "RELATÓRIO GLOBAL DO ANALISTA";
         const instructorFilter = state.profileMode === "instructor" ? state.previewInstructor : state.filters.instructor;
         const monitoring = monitoringTotals();
-        return `${title}\n\nTurmas: ${filteredClasses().length}\nRecuperações registradas: ${recoveries.length}\nRecuperações abertas: ${open}\nPrazo crítico: ${critical}\nConcluídas: ${closed.length}\nConcluídas com desenvolvimento: ${developed}\n\nPLANILHA DE CHAMADA\nChamadas abertas/incompletas: ${monitoring.openCalls}\nRegistros de frequência pendentes: ${monitoring.attendancePending}\nPendências no Diário da Prática: ${monitoring.practicePending}\nCorreções pendentes: ${monitoring.correctionPending}\nResultados não concluídos no Órion: ${monitoring.orionPending}\nPontos de atenção: ${monitoring.alerts}\n\nFiltros: Analista ${state.filters.analyst}; Instrutor ${instructorFilter}; Turma ${state.filters.classId}; UC ${state.filters.uc}.`;
+        const mediation = mediationIndicators();
+        return `${title}\n\nTurmas: ${filteredClasses().length}\nRecuperações registradas: ${recoveries.length}\nRecuperações abertas: ${open}\nPrazo crítico: ${critical}\nConcluídas: ${closed.length}\nConcluídas com desenvolvimento: ${developed}\n\nAÇÃO DO INSTRUTOR\nMediações documentadas: ${mediation.notes}\nMédia avaliativa interna: ${mediation.evaluationAverage} (${mediation.evaluationCount} avaliações)\nContatos acompanhados: ${mediation.accompaniedContacts}\nCorreções realizadas: ${mediation.correctedActivities}\n\nRESULTADO DOS ALUNOS\nEngajamento nas atividades: ${mediation.engagement}\nDesenvolvimento após recuperação: ${mediation.recoveryDevelopment}\nFrequência média: ${mediation.averageFrequency}\nPermanência: ${mediation.permanence}\n\nPLANILHA DE CHAMADA\nChamadas abertas/incompletas: ${monitoring.openCalls}\nRegistros de frequência pendentes: ${monitoring.attendancePending}\nPendências no Diário da Prática: ${monitoring.practicePending}\nCorreções pendentes: ${monitoring.correctionPending}\nResultados não concluídos no Órion: ${monitoring.orionPending}\nPontos de atenção: ${monitoring.alerts}\n\nFiltros: Analista ${state.filters.analyst}; Instrutor ${instructorFilter}; Turma ${state.filters.classId}; UC ${state.filters.uc}.`;
     }
 
     function monitoringSummary() {
@@ -1294,6 +1440,7 @@
         document.getElementById("clearFilters").addEventListener("click", () => { state.filters = { instructor: state.profileMode === "instructor" ? state.previewInstructor : "all", analyst: "all", classId: "all", uc: "all", search: "" }; document.getElementById("globalSearch").value = ""; renderAll(); });
 
         document.querySelectorAll("[data-recovery-filter]").forEach(button => button.addEventListener("click", () => { state.recoveryFilter = button.dataset.recoveryFilter; renderRecoverySegments(); renderRecoveriesTable(); refreshIcons(); }));
+        document.querySelectorAll("[data-workflow-filter]").forEach(button => button.addEventListener("click", () => { state.workflowFilter = button.dataset.workflowFilter; renderKanban(); refreshIcons(); }));
         document.querySelectorAll("[data-monitoring-filter]").forEach(button => button.addEventListener("click", () => { state.monitoringFilter = button.dataset.monitoringFilter; renderMonitoring(); refreshIcons(); }));
 
         ["recoveryStudent", "recoveryUc", "recoveryReason", "recoveryStart", "recoveryEnd", "recoveryNotes"].forEach(id => document.getElementById(id).addEventListener("input", updateMessagePreview));

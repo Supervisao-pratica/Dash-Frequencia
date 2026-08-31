@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="./analista.css?v=2.0.0">
+    <link rel="stylesheet" href="./analista.css?v=2.1.0">
     <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore-compat.js"></script>
@@ -184,8 +184,16 @@
 
         <section class="view" id="view-workflow">
             <div class="page-heading">
-                <div><span class="eyebrow">Fluxo de tratativas</span><h2>Quadro de acompanhamento</h2><p>Arraste os cartões para registrar o avanço entre responsáveis.</p></div>
+                <div><span class="eyebrow">Fluxo de tratativas</span><h2>Quadro de acompanhamento</h2><p>Recuperações dos alunos e mediações dos instrutores no mesmo fluxo, sem misturar seus resultados.</p></div>
                 <button class="primary-button" data-open-recovery><i data-lucide="plus"></i> Nova tratativa</button>
+            </div>
+            <div class="workflow-toolbar">
+                <div class="segmented" id="workflowSegments">
+                    <button class="active" data-workflow-filter="all">Todas <span></span></button>
+                    <button data-workflow-filter="instructor">Mediação do instrutor <span></span></button>
+                    <button data-workflow-filter="student">Recuperação do aluno <span></span></button>
+                </div>
+                <div class="workflow-legend"><span><i class="instructor"></i> Ação do instrutor</span><span><i class="student"></i> Resultado do aluno</span></div>
             </div>
             <div class="kanban" id="kanbanBoard"></div>
         </section>
@@ -212,6 +220,14 @@
                 <div class="button-row"><button class="secondary-button" id="copyReport"><i data-lucide="copy"></i> Copiar resumo</button><button class="primary-button" id="printReport"><i data-lucide="printer"></i> Imprimir / PDF</button></div>
             </div>
             <div class="metric-grid compact" id="reportMetrics"></div>
+            <section class="mediation-section analyst-only">
+                <div class="panel-heading"><div><h3>Mediação pedagógica e resultados</h3><p>O contato só é considerado efetivo quando gera acompanhamento documentado e evolução observável.</p></div></div>
+                <div class="mediation-chain" aria-label="Cadeia de acompanhamento"><span>Ação do instrutor</span><i data-lucide="arrow-right"></i><span>Interação</span><i data-lucide="arrow-right"></i><span>Engajamento</span><i data-lucide="arrow-right"></i><span>Aprendizagem</span><i data-lucide="arrow-right"></i><span>Permanência</span></div>
+                <div class="indicator-groups">
+                    <div><header><i data-lucide="presentation"></i><span><strong>Ação do instrutor</strong><small>O que foi realizado e acompanhado</small></span></header><div id="instructorActionIndicators" class="indicator-grid"></div></div>
+                    <div><header><i data-lucide="graduation-cap"></i><span><strong>Resultado dos alunos</strong><small>O efeito observado nas turmas</small></span></header><div id="studentResultIndicators" class="indicator-grid"></div></div>
+                </div>
+            </section>
             <div class="reports-grid">
                 <section class="panel"><div class="panel-heading"><div><h3>Quantidade</h3><p>Aberturas por UC</p></div></div><div id="ucChart" class="horizontal-chart"></div></section>
                 <section class="panel"><div class="panel-heading"><div><h3>Qualidade da tratativa</h3><p>Resultado registrado ao encerrar</p></div></div><div id="qualityChart" class="donut-layout"></div></section>
@@ -297,6 +313,6 @@
     </div>
 
     <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
-    <script src="./analista-bootstrap.js?v=2.0.1"></script>
+    <script src="./analista-bootstrap.js?v=2.1.0"></script>
 </body>
 </html>
