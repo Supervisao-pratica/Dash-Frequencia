@@ -15,10 +15,18 @@ service cloud.firestore {
         || (analystKey == 'BIANCA' && request.auth.token.email.matches('^bianca[._-]?.*@.*senac\\.br'));
     }
 
+    function isRegisteredAnalystEmail() {
+      return isAnalystKeyForEmail('MICHEL')
+        || isAnalystKeyForEmail('MARIANA')
+        || isAnalystKeyForEmail('BRUNA_CUNHA')
+        || isAnalystKeyForEmail('BIANCA');
+    }
+
     function isAnalyst() {
       return isSenacUser()
-        && exists(/databases/$(database)/documents/analyst_profiles/$(request.auth.uid))
-        && get(/databases/$(database)/documents/analyst_profiles/$(request.auth.uid)).data.email == request.auth.token.email;
+        && (isRegisteredAnalystEmail()
+          || (exists(/databases/$(database)/documents/analyst_profiles/$(request.auth.uid))
+            && get(/databases/$(database)/documents/analyst_profiles/$(request.auth.uid)).data.email == request.auth.token.email));
     }
 
     match /analyst_profiles/{userId} {

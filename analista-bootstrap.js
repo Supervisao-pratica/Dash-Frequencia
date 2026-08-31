@@ -140,24 +140,39 @@
         }
         const currentName = analystFullName(user, seed);
         const db = firebase.firestore();
-        await db.collection("analyst_profiles").doc(user.uid).set({
-            analystKey: seed.key,
-            fullName: currentName,
-            email: String(user.email || "").toLowerCase(),
-            updatedAt: new Date().toISOString()
-        }, { merge: true });
+        try {
+            await db.collection("analyst_profiles").doc(user.uid).set({
+                analystKey: seed.key,
+                fullName: currentName,
+                email: String(user.email || "").toLowerCase(),
+                updatedAt: new Date().toISOString()
+            }, { merge: true });
+        } catch (error) {
+            console.warn("O perfil do analista não pôde ser atualizado; o acesso seguirá pelo e-mail institucional reconhecido.", error);
+        }
 
         const ownerEmail = String(user.email || "").toLowerCase();
+        const syncWarnings = [];
+        const safeGet = async (label, query, required = false) => {
+            try {
+                return await query.get();
+            } catch (error) {
+                console.error(`Falha ao carregar ${label}.`, error);
+                syncWarnings.push(label);
+                if (required) throw new Error(`Não foi possível consultar ${label}. Verifique as permissões do Firebase.`);
+                return { docs: [] };
+            }
+        };
         const [profiles, classes, students, histories, recoveries, sharedNotes, ownNotes, ownEvaluations, overrides] = await Promise.all([
-            db.collection("analyst_profiles").get(),
-            db.collection("saved_classes").get(),
-            db.collection("saved_class_students").get(),
-            db.collection("dashboard_history").get(),
-            db.collection("analyst_recoveries").get(),
-            db.collection("analyst_shared_notes").where("visibleToInstructor", "==", true).get(),
-            db.collection("analyst_notes").where("ownerEmail", "==", ownerEmail).get(),
-            db.collection("analyst_evaluations").where("ownerEmail", "==", ownerEmail).get(),
-            db.collection("analyst_class_overrides").get()
+            safeGet("perfis dos analistas", db.collection("analyst_profiles")),
+            safeGet("turmas sincronizadas", db.collection("saved_classes"), true),
+            safeGet("alunos das turmas", db.collection("saved_class_students"), true),
+            safeGet("histórico do dashboard", db.collection("dashboard_history")),
+            safeGet("recuperações", db.collection("analyst_recoveries")),
+            safeGet("anotações compartilhadas", db.collection("analyst_shared_notes").where("visibleToInstructor", "==", true)),
+            safeGet("caderno privado do analista", db.collection("analyst_notes").where("ownerEmail", "==", ownerEmail)),
+            safeGet("avaliações privadas", db.collection("analyst_evaluations").where("ownerEmail", "==", ownerEmail)),
+            safeGet("configurações das turmas", db.collection("analyst_class_overrides"))
         ]);
 
         const profileMap = new Map(profiles.docs.map(doc => [String(doc.data().analystKey || ""), doc.data()]));
@@ -200,6 +215,7 @@
 
         window.SENAC_CENTRAL_USER = { uid: user.uid, email: user.email, name: currentName, analystKey: seed.key };
         window.SENAC_ANALYST_NAMES = analystNames;
+        window.SENAC_CENTRAL_SYNC_WARNINGS = syncWarnings;
         window.SENAC_CENTRAL_INITIAL_DATA = { version: 2, classes: classData, recoveries: recoveryData, analystNotes: noteData };
         installPersistence(db, user, window.SENAC_CENTRAL_INITIAL_DATA);
 
