@@ -530,7 +530,7 @@
     }
 
     function analystNoteWorkflow(note) {
-        if (!note.trackingEnabled) return "triage";
+        if (!note.trackingEnabled) return ["Elogio", "Avaliação"].includes(note.type) ? "closed" : "triage";
         if (["resolvido", "suspenso", "cancelado"].includes(note.trackingStatus)) return "closed";
         if (note.trackingStatus === "aguardando_retorno") return "waiting";
         if (note.trackingStatus === "em_avaliacao") return "evaluation";
