@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="./analista.css?v=2.1.0">
+    <link rel="stylesheet" href="./analista.css?v=2.2.0">
     <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore-compat.js"></script>
@@ -61,6 +61,7 @@
         <button class="nav-item" data-view="workflow"><i data-lucide="columns-3"></i><span>Tratativas</span></button>
         <button class="nav-item" data-view="calendar"><i data-lucide="calendar-days"></i><span>Calendário</span></button>
         <button class="nav-item" data-view="reports"><i data-lucide="chart-no-axes-combined"></i><span id="reportsNavLabel">Relatórios</span></button>
+        <button class="nav-item" data-view="manual"><i data-lucide="circle-help"></i><span>Manual</span></button>
         <button class="nav-item instructor-only" data-view="instructor-notes" hidden><i data-lucide="notebook-tabs"></i><span>Anotações recebidas</span><b id="notesNavCount">0</b></button>
     </nav>
 
@@ -180,6 +181,10 @@
             <section class="table-section no-top-gap">
                 <div class="table-wrap"><table><thead><tr><th>Aluno</th><th>Turma / UC</th><th>Registro</th><th>Motivo</th><th>Período</th><th>Status</th><th>Resultado</th><th></th></tr></thead><tbody id="recoveriesTable"></tbody></table></div>
             </section>
+            <section class="table-section">
+                <div class="panel-heading"><div><h3>Desligamentos e documentação</h3><p>Alunos em processo, com ou sem documentação, e desligamentos concluídos.</p></div></div>
+                <div class="table-wrap"><table><thead><tr><th>Aluno</th><th>Turma</th><th>Instrutor</th><th>Situação</th><th>Documentação</th><th>Observação</th></tr></thead><tbody id="dropoutTrackingTable"></tbody></table></div>
+            </section>
         </section>
 
         <section class="view" id="view-workflow">
@@ -208,7 +213,7 @@
                 <aside class="calendar-summary">
                     <h3>Regra de alerta</h3>
                     <div class="rule-flow"><span>Término da UC</span><i data-lucide="arrow-left"></i><strong>7 dias</strong><i data-lucide="bell"></i><span>Instrutor + analistas</span></div>
-                    <p>Recuperações abertas entram na prioridade. “Vencida” é calculada automaticamente e não depende de alteração manual.</p>
+                    <p>A aba reúne todos os alunos identificados em recuperação: sem tratativa, em andamento, concluídos e recuperados. “Vencida” é calculada automaticamente para os registros ainda abertos.</p>
                     <div id="calendarStats"></div>
                 </aside>
             </div>
@@ -247,6 +252,20 @@
                 <div id="instructorNotesList" class="note-list"></div>
             </section>
         </section>
+
+        <section class="view" id="view-manual">
+            <div class="page-heading"><div><span class="eyebrow">Ajuda da Central</span><h2>Manual do perfil do analista</h2><p>Abra cada assunto para entender o indicador e a ação esperada.</p></div></div>
+            <div class="manual-grid">
+                <details open><summary><i data-lucide="layout-dashboard"></i><span><strong>Visão geral e filtros</strong><small>Como interpretar o panorama</small></span><i data-lucide="chevron-down"></i></summary><div><p>Os filtros de instrutor, analista, turma e UC afetam todos os quadros e relatórios. “Turmas que exigem atenção” reúne prazo crítico, frequência, recuperação e desligamento.</p><p>Use a busca para localizar turma, instrutor, aluno ou código Órion.</p></div></details>
+                <details><summary><i data-lucide="clipboard-check"></i><span><strong>Monitoramento acadêmico</strong><small>Frequência, atividades e Órion</small></span><i data-lucide="chevron-down"></i></summary><div><p>Frequência mostra chamadas abertas ou incompletas. Diário da Prática resume o último upload de atividades. Correções indicam itens ainda não avaliados. Órion depende da confirmação manual do usuário.</p><p>Os pontos de atenção são calculados por turma e UC a partir do último retrato sincronizado.</p></div></details>
+                <details><summary><i data-lucide="book-open-check"></i><span><strong>Recuperações</strong><small>Abertura, histórico e resultado</small></span><i data-lucide="chevron-down"></i></summary><div><p>Primeiro escolha a turma; a lista de alunos exibirá somente estudantes daquela chamada. Cada nova abertura recebe a sequência Recuperação 1, 2, 3 e assim por diante.</p><p>“Sem tratativa” significa que o aluno foi identificado na recuperação da chamada, mas a abertura ainda não foi registrada. Registre UC, motivo, data de abertura, prazo, status e resultado. Quando a chamada atualizada deixar de indicar recuperação para o aluno, a recuperação aberta será encerrada como “Desenvolveu”, preservando todo o histórico.</p></div></details>
+                <details><summary><i data-lucide="columns-3"></i><span><strong>Quadro de tratativas</strong><small>Fluxo estilo Trello</small></span><i data-lucide="chevron-down"></i></summary><div><p>Azul identifica recuperação de aluno e laranja identifica mediação do instrutor. Arraste cartões entre A organizar, Em acompanhamento, Aguardando retorno, Em avaliação e Concluída.</p><p>Somente o analista responsável altera suas mediações; cartões de outros analistas ficam em modo de leitura.</p></div></details>
+                <details><summary><i data-lucide="presentation"></i><span><strong>Avaliação e mediação do instrutor</strong><small>Ação não é o mesmo que resultado</small></span><i data-lucide="chevron-down"></i></summary><div><p>Os indicadores separam o que o instrutor realizou do efeito observado nos estudantes. A sequência usada é: ação, interação, engajamento, aprendizagem e permanência.</p><p>A avaliação percentual é privada e visível somente ao analista responsável. O instrutor recebe o conteúdo do acompanhamento sem a porcentagem.</p></div></details>
+                <details><summary><i data-lucide="calendar-days"></i><span><strong>Calendário e alertas</strong><small>Prazos que exigem atuação</small></span><i data-lucide="chevron-down"></i></summary><div><p>Recuperações abertas entram em alerta sete dias antes do término da UC. “Vencida” é calculada automaticamente. O botão do Outlook gera lembretes para os prazos críticos.</p></div></details>
+                <details><summary><i data-lucide="chart-no-axes-combined"></i><span><strong>Relatórios</strong><small>Quantidade, qualidade e evolução</small></span><i data-lucide="chevron-down"></i></summary><div><p>Os relatórios respeitam os filtros globais. Quantidade mostra volume de casos; qualidade mostra resultados; mediação compara ação do instrutor com engajamento, aprendizagem, frequência e permanência.</p></div></details>
+                <details><summary><i data-lucide="refresh-cw"></i><span><strong>Sincronização e origem dos dados</strong><small>O que fica gravado</small></span><i data-lucide="chevron-down"></i></summary><div><p>A Central apresenta turmas válidas, com número de nove dígitos, que foram sincronizadas pelos instrutores. Recuperações, avaliações, tratativas e datas ficam no Firebase. Atividades representam o último upload disponível.</p></div></details>
+            </div>
+        </section>
     </main>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
@@ -257,8 +276,8 @@
             <form id="recoveryForm">
                 <input type="hidden" id="recoveryId">
                 <div class="form-grid">
-                    <label class="span-2">Aluno<select id="recoveryStudent" required></select></label>
-                    <label>Turma<select id="recoveryClass" required></select></label>
+                    <label class="span-2">Turma<select id="recoveryClass" required></select></label>
+                    <label class="span-2">Aluno da turma selecionada<select id="recoveryStudent" required></select></label>
                     <label>Unidade curricular<select id="recoveryUc" required></select></label>
                     <label class="span-2">Motivo<select id="recoveryReason" required><option value="">Selecione</option><option>Atividades não concluídas</option><option>Desempenho não desenvolvido</option><option>Frequência abaixo do mínimo</option><option>Recorrência de pendências</option><option>Outro</option></select></label>
                     <label>Data de abertura<input id="recoveryStart" type="date" required></label>
@@ -313,6 +332,6 @@
     </div>
 
     <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
-    <script src="./analista-bootstrap.js?v=2.1.1"></script>
+    <script src="./analista-bootstrap.js?v=2.2.0"></script>
 </body>
 </html>

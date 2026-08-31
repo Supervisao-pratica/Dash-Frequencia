@@ -214,6 +214,7 @@
         const IconUploadCloud = (props) => <svg {...props} xmlns="http://www.w3.org/TR/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"/><path d="M12 12v9"/><path d="m16 16-4-4-4 4"/></svg>;
         const IconRefreshCw = (props) => <svg {...props} xmlns="http://www.w3.org/TR/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>;
         const IconPrinter = (props) => <svg {...props} xmlns="http://www.w3.org/TR/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>;
+        const IconPlus = (props) => <svg {...props} xmlns="http://www.w3.org/TR/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>;
         const IconSquare = (props) => <svg {...props} xmlns="http://www.w3.org/TR/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/></svg>;
         const IconCheckSquare = (props) => <svg {...props} xmlns="http://www.w3.org/TR/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>;
         const IconImage = (props) => <svg {...props} xmlns="http://www.w3.org/TR/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>;
@@ -2263,14 +2264,58 @@
             );
         };
 
-        const StudentReportOptionsModal = ({ data, student, activityTracking, naJustifications, notebookNotes, mode = "complete", onClose }) => {
+        const RECOVERY_STATUS_OPTIONS = [
+            { value: "open", label: "Aberta" }, { value: "contacted", label: "Contato realizado" }, { value: "waiting", label: "Aguardando estudante" }, { value: "evaluation", label: "Em avaliação" }, { value: "closed", label: "Concluída" }, { value: "cancelled", label: "Cancelada" }
+        ];
+        const RECOVERY_OUTCOME_OPTIONS = [
+            { value: "pending", label: "Ainda não avaliado" }, { value: "developed", label: "Recuperou / Desenvolveu" }, { value: "not-developed", label: "Não desenvolveu" }, { value: "reopened", label: "Reaberta" }
+        ];
+        const recoveryStatusLabel = value => (RECOVERY_STATUS_OPTIONS.find(item => item.value === value) || { label: value }).label;
+        const recoveryOutcomeLabel = value => (RECOVERY_OUTCOME_OPTIONS.find(item => item.value === value) || { label: value }).label;
+
+        const StudentRecoveryManager = ({ data, student, records, storageSource, onSaved }) => {
+            const studentRecords = (records || []).filter(record => recoveryBelongsToStudent(record, student)).sort((a, b) => b.number - a.number);
+            const [editing, setEditing] = useState(null);
+            const [saving, setSaving] = useState(false);
+            const nextNumber = studentRecords.reduce((max, item) => Math.max(max, Number(item.number || 0)), 0) + 1;
+            const begin = record => setEditing(record ? { ...record } : normalizeRecoveryRecord({
+                id: `recovery_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+                classId: getValidTurmaNumber(data.turma), studentId: String(student.id), studentKey: normalizeName(student.name), studentName: student.name,
+                uc: (student.failed_perf_ucs || [])[0] || data.ucs[0] || "", number: nextNumber, reason: "", start: notebookDateInput(new Date()), end: notebookDateInput(new Date(Date.now() + 7 * 86400000)), status: "open", outcome: "pending", assignedTo: (data.instructors || []).join(" / ") || data.tutor1 || ""
+            }));
+            const save = async () => {
+                if (!editing.reason.trim() || !editing.start || !editing.end) return alert("Informe o motivo e as datas da recuperação.");
+                setSaving(true);
+                const closed = editing.status === "closed" || editing.outcome === "developed";
+                const result = await persistRecoveryRecord({ ...editing, status: closed ? "closed" : editing.status, outcome: editing.outcome, closedAt: closed ? (editing.closedAt || notebookDateInput(new Date())) : "" });
+                onSaved(result.record, result.source);
+                setEditing(null);
+                setSaving(false);
+            };
+            const markRecovered = async record => {
+                setSaving(true);
+                const result = await persistRecoveryRecord({ ...record, status: "closed", outcome: "developed", closedAt: notebookDateInput(new Date()), notes: [record.notes, "Recuperação concluída com desenvolvimento."].filter(Boolean).join("\n") });
+                onSaved(result.record, result.source);
+                setSaving(false);
+            };
+            return <div className="mb-6 overflow-hidden rounded-xl border border-red-200 bg-red-50/40">
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-red-200 bg-red-50 px-4 py-3"><div><h3 className="flex items-center gap-2 text-sm font-bold text-red-800"><IconRefreshCw className="h-4 w-4" /> Histórico de recuperação</h3><p className="mt-1 text-[10px] text-red-700">Vinculado à turma {getValidTurmaNumber(data.turma)} e ao aluno. {storageSource === "cloud" ? "Compartilhado no Firebase." : "Cópia local."}</p></div><button type="button" onClick={() => begin(null)} className="rounded-md bg-red-700 px-3 py-2 text-xs font-bold text-white hover:bg-red-800"><IconPlus className="mr-1 inline h-3.5 w-3.5" /> Abrir Recuperação {nextNumber}</button></div>
+                <div className="space-y-3 p-4">
+                    {editing && <div className="rounded-lg border border-red-200 bg-white p-4"><div className="mb-3 font-bold text-red-800">Recuperação {editing.number}</div><div className="grid grid-cols-1 gap-3 md:grid-cols-2"><label className="text-xs font-bold text-gray-600">UC<select value={editing.uc} onChange={event => setEditing(current => ({ ...current, uc: event.target.value }))} className="mt-1 w-full rounded border border-gray-300 p-2 font-normal">{(data.ucs || []).map(uc => <option key={uc}>{uc}</option>)}</select></label><label className="text-xs font-bold text-gray-600">Motivo<input value={editing.reason} onChange={event => setEditing(current => ({ ...current, reason: event.target.value }))} className="mt-1 w-full rounded border border-gray-300 p-2 font-normal" placeholder="Motivo da recuperação" /></label><label className="text-xs font-bold text-gray-600">Data de abertura<input type="date" value={editing.start} onChange={event => setEditing(current => ({ ...current, start: event.target.value }))} className="mt-1 w-full rounded border border-gray-300 p-2 font-normal" /></label><label className="text-xs font-bold text-gray-600">Prazo / fechamento previsto<input type="date" value={editing.end} onChange={event => setEditing(current => ({ ...current, end: event.target.value }))} className="mt-1 w-full rounded border border-gray-300 p-2 font-normal" /></label><label className="text-xs font-bold text-gray-600">Status<select value={editing.status} onChange={event => setEditing(current => ({ ...current, status: event.target.value }))} className="mt-1 w-full rounded border border-gray-300 p-2 font-normal">{RECOVERY_STATUS_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label><label className="text-xs font-bold text-gray-600">Resultado<select value={editing.outcome} onChange={event => setEditing(current => ({ ...current, outcome: event.target.value }))} className="mt-1 w-full rounded border border-gray-300 p-2 font-normal">{RECOVERY_OUTCOME_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label><label className="text-xs font-bold text-gray-600 md:col-span-2">Orientações e observações<textarea value={editing.notes} onChange={event => setEditing(current => ({ ...current, notes: event.target.value }))} rows="3" className="mt-1 w-full rounded border border-gray-300 p-2 font-normal" /></label></div><div className="mt-3 flex justify-end gap-2"><button type="button" onClick={() => setEditing(null)} className="rounded border border-gray-300 px-3 py-2 text-xs font-bold text-gray-600">Cancelar</button><button type="button" onClick={save} disabled={saving} className="rounded bg-senac-blue px-3 py-2 text-xs font-bold text-white disabled:opacity-50"><IconSave className="mr-1 inline h-3.5 w-3.5" /> Salvar</button></div></div>}
+                    {studentRecords.length === 0 ? <div className="py-4 text-center text-xs text-gray-500">Nenhuma recuperação registrada para este aluno.</div> : studentRecords.map(record => { const open = RECOVERY_OPEN_STATUSES.includes(record.status); return <div key={record.id} className="rounded-lg border border-gray-200 bg-white p-3 text-xs"><div className="flex flex-wrap items-start justify-between gap-2"><div><strong className="text-senac-blue">Recuperação {record.number} · {record.uc || "UC não informada"}</strong><div className="mt-1 text-gray-500">{record.reason}</div></div><div className="flex gap-1"><span className={`rounded px-2 py-1 font-bold ${open ? "bg-red-100 text-red-700" : "bg-green-100 text-green-700"}`}>{recoveryStatusLabel(record.status)}</span><span className="rounded bg-gray-100 px-2 py-1 font-bold text-gray-700">{recoveryOutcomeLabel(record.outcome)}</span></div></div><div className="mt-2 text-gray-500">Abertura: {formatNotebookDate(record.start)} · Prazo: {formatNotebookDate(record.end)}{record.closedAt ? ` · Fechamento: ${formatNotebookDate(record.closedAt)}` : ""}</div>{record.notes && <div className="mt-2 whitespace-pre-wrap text-gray-700">{record.notes}</div>}<div className="mt-3 flex flex-wrap justify-end gap-2"><button type="button" onClick={() => begin(record)} className="text-xs font-bold text-senac-blue hover:underline">Editar</button>{open && <button type="button" onClick={() => markRecovered(record)} disabled={saving} className="rounded bg-green-700 px-2 py-1 text-xs font-bold text-white disabled:opacity-50">Marcar como recuperou</button>}</div></div>; })}
+                </div>
+            </div>;
+        };
+
+        const StudentReportOptionsModal = ({ data, student, activityTracking, naJustifications, notebookNotes, recoveries = [], mode = "complete", onClose }) => {
             const [options, setOptions] = useState(() => ({
                 studentContact: false,
                 supervisorContact: false,
                 justifications: false,
                 academic: false,
                 notebook: false,
-                activities: false
+                activities: false,
+                recoveries: false
             }));
             const toggleOption = key => setOptions(current => ({ ...current, [key]: !current[key] }));
             const reportOptions = [
@@ -2279,7 +2324,8 @@
                 ["justifications", "Justificativas e faltas NA", "Registros NA, status da justificativa e motivo informado."],
                 ["academic", "Frequência, desempenho e situação", "Status cadastral, frequência e detalhamento por UC."],
                 ["notebook", "Anotações do caderno do instrutor", "Chamados, pontos de atenção e tratativas."],
-                ["activities", "Atividades do upload atual", "NC, em branco e requer avaliação. Não fica gravado na turma."]
+                ["activities", "Atividades do upload atual", "NC, em branco e requer avaliação. Não fica gravado na turma."],
+                ["recoveries", "Histórico de recuperações", "Recuperação 1, 2, 3, motivos, datas, status e resultados."]
             ];
             const generate = () => {
                 generateStudentSituationReport({
@@ -2293,6 +2339,7 @@
                     reportData: data,
                     naJustifications,
                     notebookNotes,
+                    recoveries,
                     options
                 });
                 onClose();
@@ -3606,6 +3653,8 @@
         const SAVED_CLASS_DATA_PREFIX = "saved_class_v1_";
         const USER_CLASS_ACCESS_PREFIX = "user_class_access_v1_";
         const getSavedClassKey = (turma) => cleanNotebookKey(turma, "TURMA_DESCONHECIDA");
+        const getValidTurmaNumber = value => (String(value || "").match(/(?:^|\D)(\d{9})(?:\D|$)/) || [])[1] || "";
+        const isValidSavedClassSummary = summary => Boolean(getValidTurmaNumber(summary && (summary.turma || summary.turmaKey)));
         const getUserClassAccessStorageKey = () => `${USER_CLASS_ACCESS_PREFIX}${cleanNotebookKey(getCurrentAuthenticatedEmail(), "USUARIO_LOCAL")}`;
         const getUserClassAccessDocId = turmaKey => `${cleanNotebookKey(getCurrentAuthenticatedEmail(), "USUARIO_LOCAL")}_${turmaKey}`;
         const cleanForStorage = (value) => JSON.parse(JSON.stringify(value, (key, item) => item === undefined ? null : item));
@@ -3753,8 +3802,8 @@
         };
 
         const synchronizeSavedClassSummaries = (documents, accessedKeys = new Set(readUserClassAccessLocal())) => {
-            const cloudClasses = (documents || []).map(document => ({ turmaKey: document.id, ...document.data(), cloudSynced: true })).filter(item => accessedKeys.has(item.turmaKey));
-            const pendingLocal = readSavedClassesLocal().filter(item => item.cloudSynced === false && accessedKeys.has(item.turmaKey));
+            const cloudClasses = (documents || []).map(document => ({ turmaKey: document.id, ...document.data(), cloudSynced: true })).filter(item => accessedKeys.has(item.turmaKey) && isValidSavedClassSummary(item));
+            const pendingLocal = readSavedClassesLocal().filter(item => item.cloudSynced === false && accessedKeys.has(item.turmaKey) && isValidSavedClassSummary(item));
             const merged = new Map(cloudClasses.map(item => [item.turmaKey, item]));
             pendingLocal.forEach(item => { if (!merged.has(item.turmaKey)) merged.set(item.turmaKey, item); });
             const classes = Array.from(merged.values()).sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
@@ -3799,7 +3848,7 @@
 
         const loadSavedClasses = async () => {
             const accessedKeys = await loadUserClassAccess();
-            const local = readSavedClassesLocal().filter(item => accessedKeys.has(item.turmaKey));
+            const local = readSavedClassesLocal().filter(item => accessedKeys.has(item.turmaKey) && isValidSavedClassSummary(item));
             const db = await getNotebookFirestore();
             if (!db) return { classes: local, source: "local" };
             try {
@@ -3812,7 +3861,7 @@
         };
 
         const persistSavedClass = async (data, source = {}) => {
-            if (!data || !data.turma || !Array.isArray(data.students)) return { source: "local", summary: null };
+            if (!data || !getValidTurmaNumber(data.turma) || !Array.isArray(data.students)) return { source: "local", summary: null };
             const summary = { ...makeSavedClassSummary(data, source), cloudSynced: false };
             await markSavedClassAccess(summary.turmaKey);
             writeSavedClassLocal(summary, data);
@@ -3890,6 +3939,97 @@
             } catch (error) {}
             throw new Error("Os dados desta turma não estão disponíveis neste dispositivo e não puderam ser carregados do Firebase.");
         };
+
+        const RECOVERY_STORAGE_PREFIX = "student_recoveries_v1_";
+        const RECOVERY_OPEN_STATUSES = ["triage", "open", "contacted", "waiting", "evaluation"];
+        const normalizeRecoveryRecord = (record = {}) => ({
+            ...record,
+            id: String(record.id || `recovery_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`),
+            classId: getValidTurmaNumber(record.classId || record.turmaKey) || String(record.classId || record.turmaKey || ""),
+            studentId: String(record.studentId ?? ""),
+            studentKey: normalizeName(record.studentKey || record.studentName || ""),
+            studentName: String(record.studentName || "Aluno não identificado"),
+            uc: String(record.uc || ""),
+            number: Math.max(1, Number(record.number || 1)),
+            reason: String(record.reason || ""),
+            start: notebookDateInput(record.start || new Date()),
+            end: notebookDateInput(record.end),
+            closedAt: notebookDateInput(record.closedAt),
+            status: String(record.status || "open"),
+            outcome: String(record.outcome || "pending"),
+            notes: String(record.notes || ""),
+            assignedTo: String(record.assignedTo || ""),
+            createdBy: String(record.createdBy || getCurrentAuthenticatedEmail()),
+            updatedBy: String(record.updatedBy || getCurrentAuthenticatedEmail()),
+            updatedAt: String(record.updatedAt || new Date().toISOString()),
+            autoUpdatedFromFrequency: record.autoUpdatedFromFrequency === true
+        });
+        const recoveryStorageKey = turma => `${RECOVERY_STORAGE_PREFIX}${getSavedClassKey(turma)}`;
+        const writeRecoveriesLocal = (turma, records) => { try { localStorage.setItem(recoveryStorageKey(turma), JSON.stringify(records || [])); } catch (error) {} };
+        const readRecoveriesLocal = turma => { try { const parsed = JSON.parse(localStorage.getItem(recoveryStorageKey(turma)) || "[]"); return Array.isArray(parsed) ? parsed.map(normalizeRecoveryRecord) : []; } catch (error) { return []; } };
+        const loadClassRecoveries = async turma => {
+            const classId = getValidTurmaNumber(turma);
+            if (!classId) return { records: [], source: "local" };
+            const local = readRecoveriesLocal(classId);
+            const db = await getNotebookFirestore();
+            if (!db) return { records: local, source: "local" };
+            try {
+                const snapshot = await db.collection("analyst_recoveries").where("classId", "==", classId).get();
+                const records = snapshot.docs.map(doc => normalizeRecoveryRecord({ id: doc.id, ...doc.data() })).sort((a, b) => a.studentName.localeCompare(b.studentName, "pt-BR") || a.number - b.number);
+                writeRecoveriesLocal(classId, records);
+                return { records, source: "cloud" };
+            } catch (error) {
+                console.error("Erro ao carregar recuperações", error);
+                return { records: local, source: "local" };
+            }
+        };
+        const persistRecoveryRecord = async record => {
+            const normalized = normalizeRecoveryRecord({ ...record, updatedBy: getCurrentAuthenticatedEmail(), updatedAt: new Date().toISOString() });
+            const local = [normalized, ...readRecoveriesLocal(normalized.classId).filter(item => item.id !== normalized.id)];
+            writeRecoveriesLocal(normalized.classId, local);
+            const db = await getNotebookFirestore();
+            if (!db) return { record: normalized, source: "local" };
+            try {
+                const payload = { ...normalized };
+                delete payload.id;
+                await db.collection("analyst_recoveries").doc(normalized.id).set(payload, { merge: true });
+                return { record: normalized, source: "cloud" };
+            } catch (error) {
+                console.error("Erro ao salvar recuperação", error);
+                return { record: normalized, source: "local" };
+            }
+        };
+        const recoveryBelongsToStudent = (record, student) => record.studentKey === normalizeName(student && student.name) || (record.studentId && String(record.studentId) === String(student && student.id));
+        const reconcileRecoveriesWithFrequency = async (records, classData) => {
+            const updates = [];
+            for (const record of records || []) {
+                const student = (classData.students || []).find(item => recoveryBelongsToStudent(record, item));
+                if (!student || student.needs_recuperacao || !RECOVERY_OPEN_STATUSES.includes(record.status)) continue;
+                updates.push((await persistRecoveryRecord({ ...record, status: "closed", outcome: "developed", closedAt: notebookDateInput(new Date()), autoUpdatedFromFrequency: true, notes: [record.notes, "Encerrada automaticamente após atualização da chamada indicar desenvolvimento."].filter(Boolean).join("\n") })).record);
+            }
+            if (!updates.length) return records;
+            const updateMap = new Map(updates.map(item => [item.id, item]));
+            return records.map(item => updateMap.get(item.id) || item);
+        };
+
+        const loadClassOrionStatus = async (turma, ucs = []) => {
+            const classId = getSavedClassKey(turma);
+            const fallback = Object.fromEntries((ucs || []).map(uc => [uc, { status: "pending", updatedAt: null, updatedBy: null, notes: "" }]));
+            const db = await getNotebookFirestore();
+            if (!db) return fallback;
+            try {
+                const snapshot = await db.collection("analyst_class_overrides").doc(classId).get();
+                return { ...fallback, ...(snapshot.exists ? snapshot.data().orion || {} : {}) };
+            } catch (error) { console.error("Erro ao carregar o status do Órion", error); return fallback; }
+        };
+        const persistClassOrionStatus = async (data, orion) => {
+            const db = await getNotebookFirestore();
+            if (!db) throw new Error("Firebase indisponível para compartilhar o status do Órion.");
+            const ucs = (data.ucs || []).map(name => ({ name, start: "", end: "" }));
+            await db.collection("analyst_class_overrides").doc(getSavedClassKey(data.turma)).set({ start: "", end: "", currentUc: data.ucs?.[0] || "UC1", ucs, orion, updatedBy: getCurrentAuthenticatedEmail(), updatedAt: new Date().toISOString() }, { merge: true });
+        };
+
+        const OrionStatusModal = ({ data, values, onChange, onClose }) => <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/70 p-4" onClick={event => { if (event.target === event.currentTarget) onClose(); }}><div className="max-h-[90vh] w-full max-w-2xl overflow-hidden rounded-xl bg-white shadow-2xl"><div className="flex items-center justify-between bg-senac-blue p-4 text-white"><div><h2 className="text-lg font-bold">Lançamento de resultados no Órion</h2><p className="text-xs text-blue-100">Turma {data.turma} · atualização compartilhada com o analista</p></div><button onClick={onClose}><IconXCircle className="h-6 w-6" /></button></div><div className="max-h-[70vh] space-y-2 overflow-y-auto p-4">{(data.ucs || []).map(uc => { const item = values[uc] || { status: "pending", notes: "" }; return <div key={uc} className="grid gap-2 rounded-lg border border-gray-200 p-3 sm:grid-cols-[70px_190px_1fr]"><strong className="self-center text-senac-blue">{uc}</strong><select value={item.status} onChange={event => onChange(uc, { ...item, status: event.target.value })} className="rounded border border-gray-300 p-2 text-sm"><option value="pending">Não lançado</option><option value="partial">Parcialmente lançado</option><option value="launched">Concluído no Órion</option></select><input value={item.notes || ""} onChange={event => onChange(uc, { ...item, notes: event.target.value })} className="rounded border border-gray-300 p-2 text-sm" placeholder="Observação opcional" /></div>; })}</div><div className="flex justify-end border-t p-4"><button onClick={onClose} className="rounded border border-gray-300 px-4 py-2 text-sm font-bold text-gray-600">Fechar</button></div></div></div>;
 
         const isElectronDesktop = () => Boolean(window.senacDesktop && window.senacDesktop.isDesktop);
         const getElectronSourcePath = (file) => {
@@ -4625,7 +4765,7 @@
             .replace(/"/g, "&quot;")
             .replace(/'/g, "&#039;");
 
-        const generateStudentSituationReport = ({ student, turma, course, instructors, tutor1, tutor2, activityTracking, reportData, naJustifications, notebookNotes, options }) => {
+        const generateStudentSituationReport = ({ student, turma, course, instructors, tutor1, tutor2, activityTracking, reportData, naJustifications, notebookNotes, recoveries = [], options }) => {
             if (!student) return;
             const selectedOptions = options || {};
             const enabledSections = Object.values(selectedOptions).filter(Boolean).length;
@@ -4671,6 +4811,9 @@
             const activitySummary = getActivityStudentSummary(activityTracking, student.name);
             const activityHTML = activitySummary && activitySummary.total > 0 ? `<div class="status-line"><strong>Fonte:</strong> ${escapeReportHTML(activityTracking.sourceName || "Upload atual")} (não gravado na turma)<br><strong>Total:</strong> ${activitySummary.total}<br>${escapeReportHTML(formatActivitySummaryText(activitySummary))}</div><table><thead><tr><th>UC</th><th>Tipo</th><th>Atividade ou avaliação</th><th>Situação</th></tr></thead><tbody>${buildActivityStatusRows(activitySummary.entries) || `<tr><td colspan="4" class="muted">Nenhuma atividade identificada.</td></tr>`}</tbody></table>${activitySummary.entries.length > 120 ? `<p class="muted">Exibidas as primeiras 120 atividades.</p>` : ""}` : `<p class="muted">Nenhum upload de atividades disponível para este aluno.</p>`;
 
+            const studentRecoveries = (recoveries || []).filter(record => recoveryBelongsToStudent(record, student)).sort((a, b) => Number(a.number || 0) - Number(b.number || 0));
+            const recoveryHTML = studentRecoveries.length ? `<table><thead><tr><th>Recuperação</th><th>UC</th><th>Motivo</th><th>Abertura</th><th>Fechamento</th><th>Status</th><th>Resultado</th></tr></thead><tbody>${studentRecoveries.map(record => `<tr><td>${Number(record.number || 1)}</td><td>${escapeReportHTML(record.uc || "Não informada")}</td><td>${escapeReportHTML(record.reason || "Não informado")}</td><td>${escapeReportHTML(formatNotebookDate(record.start))}</td><td>${escapeReportHTML(record.closedAt ? formatNotebookDate(record.closedAt) : "Em aberto")}</td><td>${escapeReportHTML(recoveryStatusLabel(record.status))}</td><td>${escapeReportHTML(recoveryOutcomeLabel(record.outcome))}</td></tr>`).join("")}</tbody></table>` : `<p class="muted">Nenhuma recuperação registrada para este aluno.</p>`;
+
             const sections = [];
             if (selectedOptions.studentContact) sections.push(section("Contato do aluno", studentContactHTML));
             if (selectedOptions.supervisorContact) sections.push(section("Contato do supervisor", supervisorContactHTML));
@@ -4678,6 +4821,7 @@
             if (selectedOptions.justifications) sections.push(section("Justificativas e registros NA da chamada", naHTML, "na-section"));
             if (selectedOptions.notebook) sections.push(section("Anotações do caderno do instrutor", notesHTML));
             if (selectedOptions.activities) sections.push(section("Atividades do upload atual", activityHTML, "activity-section"));
+            if (selectedOptions.recoveries) sections.push(section("Histórico de recuperações", recoveryHTML, "recovery-section"));
 
             const recipientsJSON = value => JSON.stringify(value).replace(/<\/script/gi, "<\\/script");
             const htmlContent = `<html lang="pt-BR"><head><meta charset="UTF-8"><title>${escapeReportHTML(reportSubject)}</title><style>body{font-family:Arial,sans-serif;margin:0;padding:0;color:#243447;background:#fff}.menu{background:#004587;color:#fff;padding:10px 16px;display:flex;justify-content:space-between;align-items:center;gap:10px;position:sticky;top:0;z-index:5}.menu strong{font-size:14px}.actions{display:flex;gap:7px;flex-wrap:wrap}.btn,.recipient{border:0;border-radius:4px;padding:8px 10px;font-size:11px;font-weight:bold}.btn{cursor:pointer;background:#F5821F;color:#fff}.recipient{color:#123;background:#fff}.content{max-width:980px;margin:0 auto;padding:24px}.header{text-align:center;border-bottom:3px solid #F5821F;padding-bottom:16px}.header img{width:82px}.header h1{color:#004587;font-size:21px;margin:8px 0}.header p{margin:4px;font-size:12px}.student{margin-top:18px;border:1px solid #d9e2ec;border-left:4px solid #F5821F;border-radius:7px;padding:16px}.student h3{margin:0;color:#004587;font-size:17px}.student-meta{font-size:12px;color:#64748b;margin-top:6px}.report-section{margin-top:16px;border-top:1px solid #e2e8f0;padding-top:10px}.report-section h2{font-size:14px;color:#004587;margin:0 0 8px;border-bottom:1px solid #dce7f0;padding-bottom:5px}.contact-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;font-size:12px}.contact-grid>div{background:#f8fafc;border:1px solid #e2e8f0;border-radius:5px;padding:9px}.status-line{background:#f8fafc;border-left:3px solid #F5821F;padding:9px;font-size:12px;margin-bottom:8px}.report-section p,.report-section li{font-size:12px;line-height:1.45}.report-section table{width:100%;border-collapse:collapse;font-size:11px;margin:7px 0}.report-section th,.report-section td{border:1px solid #d9e2ec;padding:6px;text-align:left}.report-section th{background:#eef5fb;color:#004587}.attention{background:#fff7ed;color:#9a3412}.ok{background:#f0fdf4;color:#166534}.observation{background:#f8fafc;border-left:3px solid #F5821F;padding:8px;margin:6px 0;font-size:12px}.observation small{display:block;color:#64748b;margin-top:4px}.pill{background:#eaf2fa;color:#004587;border-radius:4px;padding:2px 5px;font-size:10px}.muted{color:#64748b;font-style:italic}@media(max-width:700px){.menu{align-items:flex-start;flex-direction:column}.contact-grid{grid-template-columns:1fr}}@media print{.menu{display:none!important}.content{padding:0}}</style></head><body><div class="menu"><strong>Relatório individual</strong><div class="actions"><select id="recipient" class="recipient"><option value="student">Enviar ao aluno</option><option value="supervisor">Enviar ao supervisor</option></select><button class="btn" onclick="sendEmail()">Enviar por Outlook</button><button class="btn" onclick="copyReport()">Copiar para e-mail</button><button class="btn" onclick="window.print()">Imprimir / PDF</button></div></div><main id="report-content" class="content"><div class="header"><img src="https://upload.wikimedia.org/wikipedia/commons/thumb/8/86/Senac_logo.svg/500px-Senac_logo.svg.png" alt="Senac"><h1>Relatório de situações</h1><p><strong>Curso:</strong> ${escapeReportHTML(course)}</p><p><strong>Turma:</strong> ${escapeReportHTML(turma)} | <strong>Emitido em:</strong> ${dateStr}</p><p><strong>Instrutores:</strong> ${escapeReportHTML(instructorLabel)}</p></div><article class="student"><h3>${escapeReportHTML(student.name)}</h3><div class="student-meta">${student.orionCode ? `Órion: ${escapeReportHTML(student.orionCode)} | ` : ""}Contra turno: ${escapeReportHTML(student.contra_turno_desc || "Não informado")} | Status: ${escapeReportHTML(student.status || "Não informado")}</div>${sections.join("")}</article></main><script>const studentRecipients=${recipientsJSON(studentRecipients)};const supervisorRecipients=${recipientsJSON(supervisorRecipients)};const subject=${JSON.stringify(reportSubject).replace(/<\/script/gi, "<\\/script")};function copyReport(afterCopy){const content=document.getElementById('report-content');if(!content)return;const done=()=>{if(typeof afterCopy==='function')afterCopy();else alert('Relatório copiado. Cole no Outlook com Ctrl+V para manter o layout.');};if(navigator.clipboard&&window.ClipboardItem){const item=new ClipboardItem({'text/html':new Blob([content.outerHTML],{type:'text/html'}),'text/plain':new Blob([content.innerText],{type:'text/plain'})});navigator.clipboard.write([item]).then(done).catch(()=>fallback(done));}else fallback(done);}function fallback(done){const range=document.createRange();range.selectNodeContents(document.getElementById('report-content'));const selection=window.getSelection();selection.removeAllRanges();selection.addRange(range);try{document.execCommand('copy');done();}finally{selection.removeAllRanges();}}function sendEmail(){const type=document.getElementById('recipient').value;const list=type==='supervisor'?supervisorRecipients:studentRecipients;const emails=[...new Set(list.map(item=>String(item.email||'').trim()).filter(Boolean))];if(emails.length===0){alert(type==='supervisor'?'Nenhum e-mail de supervisor foi informado.':'Nenhum e-mail de aluno foi informado.');return;}copyReport(()=>{alert('Relatório copiado. Cole no corpo do Outlook com Ctrl+V para manter o layout.');window.location.href='mailto:'+emails.join(';')+'?subject='+encodeURIComponent(subject)+'&body='+encodeURIComponent(document.getElementById('report-content').innerText);});}${String.fromCharCode(60)}/script></body></html>`;
@@ -5077,8 +5221,12 @@
             const [studentReportMode, setStudentReportMode] = useState("complete");
             const [classNotebookNotes, setClassNotebookNotes] = useState([]);
             const [dashboardHistory, setDashboardHistory] = useState([]);
+            const [classRecoveries, setClassRecoveries] = useState([]);
+            const [recoveryStorageSource, setRecoveryStorageSource] = useState("local");
             const [historyStorageSource, setHistoryStorageSource] = useState("local");
             const [showDashboardHistory, setShowDashboardHistory] = useState(false);
+            const [showOrionStatus, setShowOrionStatus] = useState(false);
+            const [orionStatus, setOrionStatus] = useState({});
 
             // --- FILTROS E SELEÇÃO ---
             const [filter, setFilter] = useState('all'); 
@@ -5257,6 +5405,39 @@
                 }).catch(error => console.error("Erro ao carregar histórico da turma", error));
                 return () => { isCurrent = false; };
             }, [data ? data.turma : ""]);
+
+            useEffect(() => {
+                if (!data || !getValidTurmaNumber(data.turma)) {
+                    setClassRecoveries([]);
+                    setRecoveryStorageSource("local");
+                    return undefined;
+                }
+                let isCurrent = true;
+                loadClassRecoveries(data.turma).then(async loaded => {
+                    const reconciled = await reconcileRecoveriesWithFrequency(loaded.records, data);
+                    if (!isCurrent) return;
+                    setClassRecoveries(reconciled);
+                    setRecoveryStorageSource(loaded.source);
+                }).catch(error => console.error("Erro ao carregar o histórico de recuperações", error));
+                return () => { isCurrent = false; };
+            }, [data ? data.turma : "", frequencySourceRevision]);
+
+            useEffect(() => {
+                if (!data || !data.turma) { setOrionStatus({}); return; }
+                loadClassOrionStatus(data.turma, data.ucs).then(setOrionStatus);
+            }, [data ? data.turma : "", (data?.ucs || []).join("|")]);
+
+            const updateOrionStatus = async (uc, value) => {
+                const next = { ...orionStatus, [uc]: { ...value, updatedAt: new Date().toISOString(), updatedBy: getCurrentAuthenticatedEmail() } };
+                setOrionStatus(next);
+                try { await persistClassOrionStatus(data, next); }
+                catch (error) { alert(error.message); }
+            };
+
+            const handleRecoverySaved = (record, source) => {
+                setClassRecoveries(current => [record, ...current.filter(item => item.id !== record.id)].sort((a, b) => a.studentName.localeCompare(b.studentName, "pt-BR") || Number(a.number) - Number(b.number)));
+                setRecoveryStorageSource(source || "local");
+            };
 
             const refreshVisibleAnalystNotes = async () => {
                 if (!data || !data.turma || activeInstructorNames.length === 0) { setVisibleAnalystNotes([]); return; }
@@ -6057,7 +6238,8 @@
                     {showNotebookReport && <NotebookNotesReport turma={data.turma} instructors={notebookInstructorNames} onClose={() => setShowNotebookReport(false)} />}
                     {showUCIntervalReport && <UCIntervalReportModal data={data} activityTracking={activityTracking} naJustifications={naJustifications} notebookNotes={classNotebookNotes} onClose={() => setShowUCIntervalReport(false)} />}
                     {showDashboardHistory && <DashboardHistoryModal data={data} history={dashboardHistory} onClose={() => setShowDashboardHistory(false)} />}
-                    {showStudentReportModal && selectedStudentForModal && <StudentReportOptionsModal data={data} student={selectedStudentForModal} mode={studentReportMode} activityTracking={activityTracking} naJustifications={naJustifications} notebookNotes={instructorNotesForStudent} onClose={() => setShowStudentReportModal(false)} />}
+                    {showOrionStatus && <OrionStatusModal data={data} values={orionStatus} onChange={updateOrionStatus} onClose={() => setShowOrionStatus(false)} />}
+                    {showStudentReportModal && selectedStudentForModal && <StudentReportOptionsModal data={data} student={selectedStudentForModal} mode={studentReportMode} activityTracking={activityTracking} naJustifications={naJustifications} notebookNotes={instructorNotesForStudent} recoveries={classRecoveries.filter(record => recoveryBelongsToStudent(record, selectedStudentForModal))} onClose={() => setShowStudentReportModal(false)} />}
 
                     {showAtaModal && (
                         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-fade-in" onClick={(e) => {if(e.target===e.currentTarget) setShowAtaModal(false)}}>
@@ -6111,6 +6293,8 @@
                                     <div className="mb-5 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2"><span className="text-xs text-blue-800">Escolha em um só lugar quais informações incluir.</span><button type="button" onClick={() => { setStudentReportMode("complete"); setShowStudentReportModal(true); }} className="px-3 py-2 rounded-md bg-senac-blue text-white text-xs font-bold hover:bg-blue-800 flex items-center gap-2"><IconFileText className="w-4 h-4" /> Emitir relatório</button></div>
                                     <div className="mb-6 flex justify-between items-center"><h3 className="text-sm font-bold text-gray-400 uppercase tracking-wider">Situação Atual</h3>{!selectedStudentForModal.is_dropout && <label className="flex items-center gap-2 text-xs bg-purple-50 px-2 py-1 rounded border border-purple-200 cursor-pointer hover:bg-purple-100"><input type="checkbox" checked={selectedStudentForModal.is_process_dropout} onChange={() => toggleProcessDropout(selectedStudentForModal.id)} className="rounded text-purple-600 focus:ring-purple-500" /> Marcar como "Em Processo de Desligamento"</label>}</div>
                                     <div className="flex gap-2 mb-6">{selectedStudentForModal.is_dropout ? (<div className="bg-orange-100 text-orange-800 px-4 py-2 rounded-lg font-bold flex items-center gap-2"><IconLogOut className="w-5 h-5"/> {selectedStudentForModal.dropout_reason || "Evadido"}</div>) : selectedStudentForModal.is_process_dropout ? (<div className="bg-purple-100 text-purple-800 px-4 py-2 rounded-lg font-bold flex items-center gap-2"><IconClock className="w-5 h-5"/> Em Processo de Desligamento</div>) : (<>{selectedStudentForModal.needs_recuperacao && <div className="bg-red-100 text-red-800 px-4 py-2 rounded-lg font-bold flex items-center gap-2"><IconXCircle className="w-5 h-5"/> Recuperação Necessária</div>}{selectedStudentForModal.needs_conselho && !selectedStudentForModal.needs_recuperacao && <div className="bg-yellow-100 text-yellow-800 px-4 py-2 rounded-lg font-bold flex items-center gap-2"><IconAlertTriangle className="w-5 h-5"/> Conselho de Classe</div>}{!selectedStudentForModal.needs_recuperacao && !selectedStudentForModal.needs_conselho && <div className="bg-green-100 text-green-800 px-4 py-2 rounded-lg font-bold flex items-center gap-2"><IconCheckCircle className="w-5 h-5"/> Desenvolvimento Pleno na Aba Pedagógico</div>}</>)}</div>
+
+                                    <StudentRecoveryManager data={data} student={selectedStudentForModal} records={classRecoveries} storageSource={recoveryStorageSource} onSaved={handleRecoverySaved} />
 
                                     {(selectedStudentForModal.is_process_dropout || selectedDropoutDocument) && (
                                         <div className="mb-6 overflow-hidden rounded-xl border border-purple-200 bg-purple-50">
@@ -6265,7 +6449,7 @@
                     
                     <header className="bg-white border-b-4 border-senac-orange shadow-sm sticky top-0 z-20">
                         <div className="mx-auto flex max-w-[1600px] flex-col justify-between gap-5 px-4 py-3 xl:flex-row xl:items-start">
-                            <div className="flex min-w-0 items-start gap-3 xl:w-[390px] xl:shrink-0"><img src="https://upload.wikimedia.org/wikipedia/commons/thumb/8/86/Senac_logo.svg/500px-Senac_logo.svg.png" className="h-12 w-auto shrink-0 object-contain" /><div className="min-w-0 flex-1"><h1 className="text-lg md:text-xl font-bold text-senac-blue leading-tight">Gestão de Frequência - Relatório e ATA</h1><div className="mt-1 max-w-full break-words text-xs font-bold text-senac-orange uppercase leading-tight">{data.course}</div><div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs"><span className="font-medium text-gray-500">Turma: {data.turma}</span><button onClick={() => { setData(null); setActivityTracking(null); refreshSavedClasses(); }} className="inline-flex shrink-0 items-center gap-1 rounded-full bg-blue-50 px-2 py-1 text-senac-blue transition-colors hover:underline"><IconUsers className="w-3 h-3" /> Minhas turmas</button><span className="text-gray-300">|</span><span className="max-w-full break-all text-gray-500">Usuário: {getCurrentAuthenticatedEmail() || "Acesso Livre"}</span><button onClick={() => {if(confirm("Reiniciar sistema?")) window.location.reload()}} className="inline-flex shrink-0 items-center gap-1 rounded-md border border-red-200 bg-red-50 px-2 py-1 font-semibold text-red-600 hover:bg-red-100"><IconLogOut className="w-3 h-3"/> Sair</button></div></div></div>
+                            <div className="flex min-w-0 items-start gap-3 xl:w-[420px] xl:shrink-0"><img src="https://upload.wikimedia.org/wikipedia/commons/thumb/8/86/Senac_logo.svg/500px-Senac_logo.svg.png" className="h-12 w-auto shrink-0 object-contain" /><div className="min-w-0 flex-1"><h1 className="text-lg md:text-xl font-bold text-senac-blue leading-tight">Gestão de Frequência - Relatório e ATA</h1><div className="mt-1 max-w-full break-words text-xs font-bold text-senac-orange uppercase leading-tight">{data.course}</div><div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs"><span className="font-medium text-gray-500">Turma: {data.turma}</span><button onClick={() => { setData(null); setActivityTracking(null); refreshSavedClasses(); }} className="inline-flex shrink-0 items-center gap-1 rounded-full bg-blue-50 px-2 py-1 text-senac-blue transition-colors hover:underline"><IconUsers className="w-3 h-3" /> Minhas turmas</button>{currentAnalystName && <button onClick={() => { window.location.href = "./analista.html"; }} className="inline-flex shrink-0 items-center gap-1 rounded-full bg-orange-50 px-2 py-1 font-bold text-senac-orange transition-colors hover:bg-orange-100"><IconBarChart2 className="w-3 h-3" /> Central do Analista</button>}<span className="text-gray-300">|</span><span className="max-w-full break-all text-gray-500">Usuário: {getCurrentAuthenticatedEmail() || "Acesso Livre"}</span><button onClick={() => {if(confirm("Reiniciar sistema?")) window.location.reload()}} className="inline-flex shrink-0 items-center gap-1 rounded-md border border-red-200 bg-red-50 px-2 py-1 font-semibold text-red-600 hover:bg-red-100"><IconLogOut className="w-3 h-3"/> Sair</button></div></div></div>
                             <div className="flex w-full min-w-0 flex-1 flex-col gap-3 2xl:flex-row 2xl:items-start 2xl:justify-end">
                                 <section className="min-w-0 rounded-lg border border-blue-100 bg-blue-50/60 p-2"><div className="mb-1 px-1 text-[10px] font-bold uppercase text-senac-blue">Atualizar dados</div><div className="flex flex-wrap gap-2">
                                 <button type="button" onClick={updateFrequencyCall} disabled={updatingFrequency} className="bg-white border border-senac-blue text-senac-blue hover:bg-blue-50 disabled:cursor-wait disabled:opacity-60 px-4 py-2 rounded-lg flex items-center gap-2 shadow transition-all active:scale-95 text-sm font-medium min-h-[54px] min-w-[116px] max-w-[160px] justify-center whitespace-normal text-center leading-tight" title={isElectronDesktop() ? "Localizar e atualizar automaticamente a chamada desta turma na rede" : (webFrequencyHandle ? "Reler a planilha vinculada desta turma" : "Selecionar e lembrar a planilha desta turma")}><IconRefreshCw className={`w-4 h-4 ${updatingFrequency ? "animate-spin" : ""}`} /> {updatingFrequency ? "Atualizando..." : "Atualizar chamada"}</button><input id="updateFrequencyInput" type="file" className="hidden" accept=".xlsx,.xlsm,.xls" onChange={handleManualFrequencyUpdate} />
@@ -6275,6 +6459,7 @@
                                 <section className="min-w-0 rounded-lg border border-orange-100 bg-orange-50/50 p-2"><div className="mb-1 px-1 text-[10px] font-bold uppercase text-orange-700">Relatórios e documentos</div><div className="flex flex-wrap gap-2">
                                     <details className="group relative"><summary className="flex min-h-[54px] min-w-[150px] cursor-pointer list-none items-center justify-center gap-2 rounded-lg border border-senac-blue bg-white px-4 py-2 text-center text-sm font-medium text-senac-blue shadow hover:bg-blue-50"><IconFileText className="h-4 w-4" /> Relatórios</summary><div className="absolute right-0 top-[60px] z-50 grid w-64 gap-1 rounded-lg border border-gray-200 bg-white p-2 shadow-xl"><button onClick={() => setShowNotebookReport(true)} className="flex items-center gap-2 rounded px-3 py-2 text-left text-xs font-bold text-orange-700 hover:bg-orange-50"><IconBookOpen className="h-4 w-4" /> Relatório de anotações</button><button onClick={() => setShowUCIntervalReport(true)} className="flex items-center gap-2 rounded px-3 py-2 text-left text-xs font-bold text-senac-blue hover:bg-blue-50"><IconFileText className="h-4 w-4" /> Relatório por UCs</button><button onClick={() => generateReport(reportSelection, data.students, data.turma, data.course, tutor1Name, tutor2Name, activityTracking, data, naJustifications)} disabled={reportSelection.length === 0} className="flex items-center gap-2 rounded px-3 py-2 text-left text-xs font-bold text-senac-blue hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-40"><IconPrinter className="h-4 w-4" /> Selecionados {reportSelection.length > 0 && `(${reportSelection.length})`}</button></div></details>
                                     <button onClick={() => setShowDashboardHistory(true)} className="flex min-h-[54px] min-w-[120px] items-center justify-center gap-2 rounded-lg border border-senac-blue bg-white px-4 py-2 text-sm font-medium text-senac-blue shadow hover:bg-blue-50" title={`Histórico ${historyStorageSource === "cloud" ? "compartilhado" : "local"}`}><IconBarChart2 className="h-4 w-4" /> Histórico</button>
+                                    <button onClick={() => setShowOrionStatus(true)} className="flex min-h-[54px] min-w-[120px] items-center justify-center gap-2 rounded-lg border border-green-700 bg-white px-4 py-2 text-sm font-medium text-green-800 shadow hover:bg-green-50"><IconCheckCircle className="h-4 w-4" /> Status Órion</button>
                                     <button onClick={() => setShowAtaModal(!showAtaModal)} className="flex min-h-[54px] min-w-[120px] items-center justify-center gap-2 rounded-lg bg-senac-blue px-4 py-2 text-sm font-medium text-white shadow hover:bg-blue-800"><IconFileText className="h-4 w-4" /> Gerar ATA</button>
                                 </div></section>
                             </div>

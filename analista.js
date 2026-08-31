@@ -44,6 +44,7 @@
     const ANALYST_NAMES = Array.isArray(window.SENAC_ANALYST_NAMES) ? window.SENAC_ANALYST_NAMES : ["Michel Farias", "Mariana Mello", "Bruna Cunha", "Bianca Aresta"];
 
     const prototypeData = loadData();
+    prototypeData.classes = (prototypeData.classes || []).filter(item => /^\d{9}$/.test(String(item.id || "")));
     const state = {
         data: prototypeData,
         view: "overview",
@@ -416,7 +417,9 @@
 
     function getStudent(recovery) {
         const classItem = getClass(recovery.classId);
-        return classItem?.students.find(student => student.id === recovery.studentId);
+        const expectedName = normalize(recovery.studentName || recovery.studentKey || "");
+        return classItem?.students.find(student => String(student.id) === String(recovery.studentId)
+            || (expectedName && normalize(student.name) === expectedName));
     }
 
     function isOpen(recovery) {
@@ -461,7 +464,16 @@
 
     function instructorNamesForClass(classItem) {
         const names = Array.isArray(classItem?.instructors) ? classItem.instructors : [];
-        return [...new Set([...names, classItem?.instructor].map(value => String(value || "").trim()).filter(Boolean))];
+        const canonical = value => {
+            const text = String(value || "").trim();
+            const key = normalize(text).replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
+            if (!key || /^\d+[.]?$/.test(key) || /a partir de|periodo|instrutor nao identificado/.test(key)) return "";
+            if (key === "jean" || key.startsWith("jean elizeu")) return "Jean Elizeu Sauka";
+            if (key === "ana claudia" || key.startsWith("ana claudia hafemann")) return "Ana Claudia Hafemann";
+            if (key === "bruna lorena" || key.startsWith("bruna lorena de lima")) return "Bruna Lorena de Lima";
+            return text;
+        };
+        return [...new Set([...names, classItem?.instructor].map(canonical).filter(Boolean))];
     }
 
     function instructorLabel(classItem) {
@@ -684,7 +696,7 @@
         const dropouts = classes.reduce((sum, item) => sum + item.dropouts, 0);
         document.getElementById("metrics").innerHTML = [
             metricCard("Turmas ativas", classes.length, `<b>${classes.reduce((sum, item) => sum + item.studentsCount, 0)}</b> estudantes acompanhados`, "school", "#004a8d"),
-            metricCard("Recuperações abertas", open.length, `<b>${recoveries.length}</b> registros no período`, "book-open-check", "#f58220"),
+            metricCard("Recuperações", recoveries.length, `<b>${open.length}</b> abertas · <b>${closed.length}</b> concluídas`, "book-open-check", "#f58220"),
             metricCard("Prazo crítico", critical.length, `<b>${critical.filter(item => daysUntil(item.end) < 0).length}</b> vencidas`, "alarm-clock", "#c62828"),
             metricCard("Efetividade", `${successRate}%`, `<b>${developed}</b> concluídas com desenvolvimento`, "trending-up", "#078847"),
             metricCard("Desligamentos", dropouts, `Consolidados nas turmas filtradas`, "user-minus", "#6d3cb4")
@@ -750,17 +762,31 @@
             button.classList.toggle("active", key === state.recoveryFilter);
             button.querySelector("span").textContent = counts[key];
         });
-        document.getElementById("recoveryNavCount").textContent = counts.open;
+        document.getElementById("recoveryNavCount").textContent = counts.all;
     }
 
     function renderRecoveriesTable() {
         const recoveries = filteredRecoveries().filter(recoveryMatchesSegment).sort((a, b) => daysUntil(a.end) - daysUntil(b.end));
         document.getElementById("recoveriesTable").innerHTML = recoveries.length ? recoveries.map(recovery => {
             const student = getStudent(recovery);
-            const status = statusMeta[recovery.status] || statusMeta.open;
+            const status = recovery.synthetic ? { label: "Sem tratativa", className: "gray" } : (statusMeta[recovery.status] || statusMeta.open);
             const outcome = outcomeMeta[recovery.outcome] || outcomeMeta.pending;
-            return `<tr><td><span class="cell-main">${escapeHTML(student?.name || "Aluno")}</span><span class="cell-sub">Órion ${escapeHTML(student?.orion || "-")}</span></td><td><span class="cell-main">${recovery.classId}</span><span class="cell-sub">${recovery.uc}</span></td><td>${badge(`Recuperação ${recovery.number}`, "blue")}</td><td>${escapeHTML(recovery.reason)}</td><td><span class="cell-main">${formatDate(recovery.start)} a ${formatDate(recovery.end)}</span><span class="cell-sub" style="color:${isCritical(recovery) ? "#c62828" : "#647386"}">${isOpen(recovery) ? dueLabel(recovery.end) : "Encerrada"}</span></td><td>${badge(status.label, status.className)}</td><td>${badge(outcome.label, outcome.className)}</td><td><div class="button-row"><button class="icon-button table-action" data-mail-recovery="${recovery.id}" title="Abrir mensagem"><i data-lucide="mail"></i></button><button class="icon-button table-action" data-edit-recovery="${recovery.id}" title="Editar recuperação"><i data-lucide="pencil"></i></button></div></td></tr>`;
+            const period = recovery.synthetic ? `<span class="cell-main">Ainda não definida</span><span class="cell-sub">Tratativa ainda não aberta</span>` : `<span class="cell-main">${formatDate(recovery.start)} a ${formatDate(recovery.end)}</span><span class="cell-sub" style="color:${isCritical(recovery) ? "#c62828" : "#647386"}">${isOpen(recovery) ? dueLabel(recovery.end) : "Encerrada"}</span>`;
+            return `<tr><td><span class="cell-main">${escapeHTML(student?.name || recovery.studentName || "Aluno")}</span><span class="cell-sub">Órion ${escapeHTML(student?.orion || "-")}</span></td><td><span class="cell-main">${recovery.classId}</span><span class="cell-sub">${recovery.uc}</span></td><td>${badge(`Recuperação ${recovery.number}`, "blue")}</td><td>${escapeHTML(recovery.reason)}</td><td>${period}</td><td>${badge(status.label, status.className)}</td><td>${badge(outcome.label, outcome.className)}</td><td><div class="button-row"><button class="icon-button table-action" data-mail-recovery="${recovery.id}" title="Abrir mensagem"><i data-lucide="mail"></i></button><button class="icon-button table-action" data-edit-recovery="${recovery.id}" title="Editar recuperação"><i data-lucide="pencil"></i></button></div></td></tr>`;
         }).join("") : `<tr><td colspan="8" class="empty-state">Nenhuma recuperação encontrada.</td></tr>`;
+    }
+
+    function renderDropoutTracking() {
+        const body = document.getElementById("dropoutTrackingTable");
+        if (!body) return;
+        const rows = filteredClasses().flatMap(classItem => (classItem.students || [])
+            .filter(student => student.isProcessDropout || student.isDropout)
+            .map(student => ({ classItem, student })));
+        body.innerHTML = rows.length ? rows.map(({ classItem, student }) => {
+            const process = student.isProcessDropout && !student.isDropout;
+            const documentation = student.documentStatus === "com_documentacao" ? badge("Com documentação", "green") : badge("Sem documentação", process ? "red" : "amber");
+            return `<tr><td><span class="cell-main">${escapeHTML(student.name)}</span><span class="cell-sub">Órion ${escapeHTML(student.orion || "-")}</span></td><td>${classItem.id}</td><td>${escapeHTML(instructorLabel(classItem))}</td><td>${badge(process ? "Em processo" : "Evadido/Desligado", process ? "amber" : "purple")}</td><td>${documentation}</td><td>${escapeHTML(student.dropoutReason || (process ? "Aguardando conclusão do processo" : "Desligamento identificado na chamada"))}</td></tr>`;
+        }).join("") : `<tr><td colspan="6" class="empty-state">Nenhum aluno em processo ou desligado nas turmas filtradas.</td></tr>`;
     }
 
     function renderKanban() {
@@ -1133,6 +1159,7 @@
         renderClassesTable();
         renderRecoverySegments();
         renderRecoveriesTable();
+        renderDropoutTracking();
         renderKanban();
         renderCalendar();
         renderReports();
@@ -1211,11 +1238,14 @@
         const studentId = document.getElementById("recoveryStudent").value;
         const existingId = document.getElementById("recoveryId").value;
         const existing = state.data.recoveries.find(item => item.id === existingId);
+        const student = getClass(classId)?.students.find(item => String(item.id) === String(studentId));
         const sequence = existing?.number || state.data.recoveries.filter(item => item.classId === classId && item.studentId === studentId).reduce((max, item) => Math.max(max, item.number), 0) + 1;
         return {
             id: existingId || `r-${Date.now()}`,
             classId,
             studentId,
+            studentKey: normalize(student?.name || studentId),
+            studentName: student?.name || "Aluno não identificado",
             uc: document.getElementById("recoveryUc").value,
             number: sequence,
             reason: document.getElementById("recoveryReason").value,

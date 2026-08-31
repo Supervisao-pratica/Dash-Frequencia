@@ -41,11 +41,36 @@ service cloud.firestore {
     }
 
     match /analyst_recoveries/{recoveryId} {
-      allow read, create, update, delete: if isAnalyst();
+      allow read: if isSenacUser();
+
+      allow create: if isSenacUser()
+        && request.resource.data.classId is string
+        && request.resource.data.studentId is string
+        && request.resource.data.number is int
+        && request.resource.data.reason is string
+        && request.resource.data.start is string
+        && request.resource.data.end is string
+        && request.resource.data.status in ['triage', 'open', 'contacted', 'waiting', 'evaluation', 'closed', 'cancelled']
+        && request.resource.data.outcome in ['pending', 'developed', 'not_developed', 'cancelled']
+        && request.resource.data.updatedBy == request.auth.token.email;
+
+      allow update: if isSenacUser()
+        && request.resource.data.classId == resource.data.classId
+        && request.resource.data.studentId == resource.data.studentId
+        && request.resource.data.number is int
+        && request.resource.data.reason is string
+        && request.resource.data.start is string
+        && request.resource.data.end is string
+        && request.resource.data.status in ['triage', 'open', 'contacted', 'waiting', 'evaluation', 'closed', 'cancelled']
+        && request.resource.data.outcome in ['pending', 'developed', 'not_developed', 'cancelled']
+        && request.resource.data.updatedBy == request.auth.token.email;
+
+      allow delete: if isAnalyst();
     }
 
     match /analyst_class_overrides/{turmaKey} {
-      allow read, create, update: if isAnalyst()
+      allow read: if isSenacUser();
+      allow create, update: if isSenacUser()
         && request.resource.data.start is string
         && request.resource.data.end is string
         && request.resource.data.ucs is list

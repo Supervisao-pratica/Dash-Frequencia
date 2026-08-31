@@ -18,6 +18,16 @@
         const text = String(value || "").trim();
         return text && !/^(não identificado|nao identificado|instrutor|tutor)$/i.test(text) ? text : "";
     };
+    const validClassSummary = summary => /\d{9}/.test(String(summary?.turma || summary?.turmaKey || ""));
+    const canonicalInstructor = value => {
+        const text = validName(value);
+        const key = normalize(text).replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
+        if (!key || /^\d+[.]?$/.test(key) || /a partir de|periodo|não identificado|nao identificado/.test(key)) return "";
+        if (key === "jean" || key.startsWith("jean elizeu")) return "Jean Elizeu Sauka";
+        if (key === "ana claudia" || key.startsWith("ana claudia hafemann")) return "Ana Claudia Hafemann";
+        if (key === "bruna lorena" || key.startsWith("bruna lorena de lima")) return "Bruna Lorena de Lima";
+        return text;
+    };
 
     function analystSeedForUser(user) {
         const identity = normalize(`${user?.email?.split("@")[0] || ""} ${user?.displayName || ""}`);
@@ -60,20 +70,29 @@
     function buildClass(summary, studentsSource, latest, override) {
         const rawClass = String(summary.turma || summary.turmaKey || "");
         const id = (rawClass.match(/\d{9}/) || [summary.turmaKey || keyOf(rawClass)])[0];
-        const instructors = [...new Set([...(summary.instructors || []), summary.tutor1, summary.tutor2].map(validName).filter(Boolean))];
+        const instructors = [...new Set([...(summary.instructors || []), summary.tutor1, summary.tutor2].map(canonicalInstructor).filter(Boolean))];
         const studentSources = Array.isArray(studentsSource) ? studentsSource : [];
         const students = studentSources.map((student, index) => ({
             id: String(student.id ?? `${id}-${index + 1}`),
             name: String(student.name || `Aluno ${index + 1}`),
             email: String(student.studentEmail || ""),
-            orion: String(student.orionCode || student.orion || "")
+            orion: String(student.orionCode || student.orion || ""),
+            needsRecovery: Boolean(student.needs_recuperacao),
+            needsCouncil: Boolean(student.needs_conselho),
+            isProcessDropout: Boolean(student.is_process_dropout),
+            isDropout: Boolean(student.is_dropout),
+            dropoutReason: String(student.dropout_reason || ""),
+            documentStatus: String(student.dropoutDocumentStatus || "")
         }));
         const detectedUcs = [...new Set([...(summary.ucs || []), ...studentSources.flatMap(student => Object.keys(student.uc_scores || {}))].map(value => String(value).toUpperCase()).filter(value => /^UC\d+$|^PI$/.test(value)))].sort((a, b) => ucOrder(a) - ucOrder(b));
         const scoredUcs = detectedUcs.filter(uc => studentSources.some(student => student.uc_scores && student.uc_scores[uc]));
         const currentUc = String(override?.currentUc || scoredUcs.at(-1) || detectedUcs[0] || "UC1");
         const currentIndex = Math.max(0, detectedUcs.indexOf(currentUc));
         const generatedUcs = buildUcDates(detectedUcs.length ? detectedUcs : [currentUc], currentIndex);
-        const ucs = generatedUcs.map(uc => override?.ucs?.find(item => item.name === uc.name) || uc);
+        const ucs = generatedUcs.map(uc => {
+            const configured = override?.ucs?.find(item => item.name === uc.name);
+            return configured?.start && configured?.end ? configured : uc;
+        });
         const historyStudents = Object.values(latest?.students || {});
         const warnings = Array.isArray(summary.attendanceWarnings) ? summary.attendanceWarnings : [];
         const monitoring = ucs.map(uc => {
@@ -163,7 +182,7 @@
                 return { docs: [] };
             }
         };
-        const [profiles, classes, students, histories, recoveries, sharedNotes, ownNotes, ownEvaluations, overrides] = await Promise.all([
+        const [profiles, classes, students, histories, recoveries, sharedNotes, ownNotes, ownEvaluations, overrides, instructorNotes] = await Promise.all([
             safeGet("perfis dos analistas", db.collection("analyst_profiles")),
             safeGet("turmas sincronizadas", db.collection("saved_classes"), true),
             safeGet("alunos das turmas", db.collection("saved_class_students"), true),
@@ -172,7 +191,8 @@
             safeGet("anotações compartilhadas", db.collection("analyst_shared_notes").where("visibleToInstructor", "==", true)),
             safeGet("caderno privado do analista", db.collection("analyst_notes").where("ownerEmail", "==", ownerEmail)),
             safeGet("avaliações privadas", db.collection("analyst_evaluations").where("ownerEmail", "==", ownerEmail)),
-            safeGet("configurações das turmas", db.collection("analyst_class_overrides"))
+            safeGet("configurações das turmas", db.collection("analyst_class_overrides")),
+            safeGet("chamados dos instrutores", db.collection("instructor_notes"))
         ]);
 
         const profileMap = new Map(profiles.docs.map(doc => [String(doc.data().analystKey || ""), doc.data()]));
@@ -180,16 +200,18 @@
         const studentGroups = groupStudents(students.docs);
         const latestHistories = latestHistoryByClass(histories.docs);
         const overrideMap = new Map(overrides.docs.map(doc => [doc.id, doc.data()]));
-        const classData = classes.docs.map(doc => {
-            const summary = { turmaKey: doc.id, ...doc.data() };
+        const classData = classes.docs.map(doc => ({ doc, summary: { turmaKey: doc.id, ...doc.data() } })).filter(item => validClassSummary(item.summary)).map(({ doc, summary }) => {
             return buildClass(summary, studentGroups.get(doc.id) || [], latestHistories.get(doc.id), overrideMap.get(doc.id));
         }).sort((a, b) => b.id.localeCompare(a.id));
 
-        const recoveryData = recoveries.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        const recordedRecoveries = recoveries.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        const recordedKeys = new Set(recordedRecoveries.map(item => `${item.classId}|${normalize(item.studentName || item.studentKey || item.studentId)}`));
+        const untreatedRecoveries = classData.flatMap(classItem => classItem.students.filter(student => student.needsRecovery && !recordedKeys.has(`${classItem.id}|${normalize(student.name)}`)).map(student => ({ id: `pending-${classItem.id}-${keyOf(student.name)}`, classId: classItem.id, studentId: student.id, studentKey: normalize(student.name), studentName: student.name, uc: classItem.currentUc, number: 1, reason: "Identificado na aba Recuperação da chamada; tratativa ainda não registrada.", start: "", end: "", status: "triage", outcome: "pending", synthetic: true })));
+        const recoveryData = [...recordedRecoveries, ...untreatedRecoveries];
         const evaluationMap = new Map(ownEvaluations.docs.map(doc => [doc.id, doc.data()]));
         const noteDocuments = new Map(sharedNotes.docs.map(doc => [doc.id, doc]));
         ownNotes.docs.forEach(doc => noteDocuments.set(doc.id, doc));
-        const noteData = [...noteDocuments.values()].map(doc => {
+        const analystNoteData = [...noteDocuments.values()].map(doc => {
             const note = doc.data() || {};
             const evaluation = evaluationMap.get(doc.id);
             return {
@@ -212,6 +234,31 @@
                 status: String(note.trackingStatus || "em_acompanhamento")
             };
         });
+        const instructorNoteData = instructorNotes.docs.map(doc => {
+            const note = doc.data() || {};
+            if (!String(note.responsibleAnalyst || "").trim()) return null;
+            return {
+                id: `instructor-${doc.id}`,
+                classId: String(note.turmaKey || ""),
+                instructor: canonicalInstructor(note.instructorName || note.instructorKey || "Instrutor"),
+                date: String(note.date || note.createdAt || "").slice(0, 10),
+                type: String((note.situationTypes || [])[0] || "Ponto de atenção"),
+                subject: String(note.subject || (note.situationTypes || []).join(", ") || "Chamado do instrutor"),
+                notes: String(note.notes || ""),
+                competency: "",
+                evaluationPercent: null,
+                author: String(note.responsibleAnalyst || "Analista responsável"),
+                responsibleAnalyst: String(note.responsibleAnalyst || ""),
+                trackingEnabled: Boolean(note.treatmentDueDate || note.treatmentStatus),
+                trackingStatus: String(note.treatmentStatus || "em_tratativa"),
+                reminderDate: String(note.treatmentDueDate || "").slice(0, 10),
+                periodStart: String(note.treatmentStartDate || note.date || "").slice(0, 10),
+                periodEnd: String(note.treatmentDueDate || "").slice(0, 10),
+                status: String(note.treatmentStatus || "em_tratativa"),
+                source: "instructor_notebook"
+            };
+        }).filter(Boolean);
+        const noteData = [...analystNoteData, ...instructorNoteData];
 
         window.SENAC_CENTRAL_USER = { uid: user.uid, email: user.email, name: currentName, analystKey: seed.key };
         window.SENAC_ANALYST_NAMES = analystNames;
@@ -222,7 +269,7 @@
         document.getElementById("analystProfileName").textContent = currentName;
         document.getElementById("profileAvatar").textContent = currentName.split(/\s+/).map(part => part[0]).slice(0, 2).join("").toUpperCase();
         const script = document.createElement("script");
-        script.src = `./analista.js?v=2.1.0`;
+        script.src = `./analista.js?v=2.2.0`;
         script.onload = () => loading?.remove();
         script.onerror = () => { if (loading) loading.innerHTML = "Não foi possível carregar a Central do Analista."; };
         document.body.appendChild(script);
@@ -239,7 +286,7 @@
                 const writes = [];
                 nextRecoveries.forEach((item, id) => {
                     if (JSON.stringify(item) !== JSON.stringify(previousRecoveries.get(id))) {
-                        writes.push(db.collection("analyst_recoveries").doc(id).set({ ...item, ownerEmail: user.email, updatedAt: new Date().toISOString() }, { merge: true }));
+                        writes.push(db.collection("analyst_recoveries").doc(id).set({ ...item, updatedBy: user.email, ownerEmail: user.email, updatedAt: new Date().toISOString() }, { merge: true }));
                     }
                 });
                 previousRecoveries.forEach((item, id) => { if (!nextRecoveries.has(id)) writes.push(db.collection("analyst_recoveries").doc(id).delete()); });
