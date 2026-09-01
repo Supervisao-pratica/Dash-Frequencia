@@ -47,6 +47,10 @@
                 <strong id="analystProfileName">Analista</strong>
                 <span id="profileRoleLabel">Perfil Analista</span>
             </div>
+            <button class="secondary-button network-scan-button" id="scanNetworkClasses" title="Localizar e sincronizar todas as chamadas de 2025 e 2026">
+                <i data-lucide="folder-search-2"></i> Varrer rede
+            </button>
+            <button class="primary-button" id="openAnalystNotebook"><i data-lucide="notebook-pen"></i> Caderno do Analista</button>
             <button class="icon-button" id="resetDemo" title="Sincronizar dados" aria-label="Sincronizar dados">
                 <i data-lucide="refresh-cw"></i>
             </button>
@@ -232,6 +236,8 @@
                     <div><header><i data-lucide="presentation"></i><span><strong>Ação do instrutor</strong><small>O que foi realizado e acompanhado</small></span></header><div id="instructorActionIndicators" class="indicator-grid"></div></div>
                     <div><header><i data-lucide="graduation-cap"></i><span><strong>Resultado dos alunos</strong><small>O efeito observado nas turmas</small></span></header><div id="studentResultIndicators" class="indicator-grid"></div></div>
                 </div>
+                <div class="diagnosis-panel" id="differentialDiagnosis"></div>
+                <div class="operational-panel"><div><strong>Métricas operacionais</strong><span>Volume de trabalho, sem confundir tentativa com resultado.</span></div><div id="operationalMetrics" class="operational-metrics"></div></div>
             </section>
             <div class="reports-grid">
                 <section class="panel"><div class="panel-heading"><div><h3>Quantidade</h3><p>Aberturas por UC</p></div></div><div id="ucChart" class="horizontal-chart"></div></section>
@@ -260,15 +266,43 @@
                 <details><summary><i data-lucide="clipboard-check"></i><span><strong>Monitoramento acadêmico</strong><small>Frequência, atividades e Órion</small></span><i data-lucide="chevron-down"></i></summary><div><p>Frequência mostra chamadas abertas ou incompletas. Diário da Prática resume o último upload de atividades. Correções indicam itens ainda não avaliados. Órion depende da confirmação manual do usuário.</p><p>Os pontos de atenção são calculados por turma e UC a partir do último retrato sincronizado.</p></div></details>
                 <details><summary><i data-lucide="book-open-check"></i><span><strong>Recuperações</strong><small>Abertura, histórico e resultado</small></span><i data-lucide="chevron-down"></i></summary><div><p>Primeiro escolha a turma; a lista de alunos exibirá somente estudantes daquela chamada. Cada nova abertura recebe a sequência Recuperação 1, 2, 3 e assim por diante.</p><p>“Sem tratativa” significa que o aluno foi identificado na recuperação da chamada, mas a abertura ainda não foi registrada. Registre UC, motivo, data de abertura, prazo, status e resultado. Quando a chamada atualizada deixar de indicar recuperação para o aluno, a recuperação aberta será encerrada como “Desenvolveu”, preservando todo o histórico.</p></div></details>
                 <details><summary><i data-lucide="columns-3"></i><span><strong>Quadro de tratativas</strong><small>Fluxo estilo Trello</small></span><i data-lucide="chevron-down"></i></summary><div><p>Azul identifica recuperação de aluno e laranja identifica mediação do instrutor. Arraste cartões entre A organizar, Em acompanhamento, Aguardando retorno, Em avaliação e Concluída.</p><p>Somente o analista responsável altera suas mediações; cartões de outros analistas ficam em modo de leitura.</p></div></details>
-                <details><summary><i data-lucide="presentation"></i><span><strong>Avaliação e mediação do instrutor</strong><small>Ação não é o mesmo que resultado</small></span><i data-lucide="chevron-down"></i></summary><div><p>Os indicadores separam o que o instrutor realizou do efeito observado nos estudantes. A sequência usada é: ação, interação, engajamento, aprendizagem e permanência.</p><p>A avaliação percentual é privada e visível somente ao analista responsável. O instrutor recebe o conteúdo do acompanhamento sem a porcentagem.</p></div></details>
+                <details><summary><i data-lucide="presentation"></i><span><strong>Avaliação e mediação do instrutor</strong><small>Ação não é o mesmo que resultado</small></span><i data-lucide="chevron-down"></i></summary><div><p>Os oito indicadores principais seguem a sequência: cobertura de ação, tratativas concluídas, interação efetiva, engajamento, frequência, aprendizagem, risco revertido e permanência.</p><p>Mensagem enviada conta como ação. Somente a resposta do jovem confirma interação; participação e entrega confirmam engajamento; evolução na UC confirma aprendizagem. As métricas operacionais ficam separadas para não transformar volume de mensagens em resultado pedagógico.</p><p>O diagnóstico diferencial aponta se o risco decorre de ausência de tentativa, abordagem sem retorno, interação sem engajamento ou engajamento sem aprendizagem. A avaliação percentual é privada; o instrutor recebe o conteúdo do acompanhamento sem a porcentagem.</p></div></details>
                 <details><summary><i data-lucide="calendar-days"></i><span><strong>Calendário e alertas</strong><small>Prazos que exigem atuação</small></span><i data-lucide="chevron-down"></i></summary><div><p>Recuperações abertas entram em alerta sete dias antes do término da UC. “Vencida” é calculada automaticamente. O botão do Outlook gera lembretes para os prazos críticos.</p></div></details>
                 <details><summary><i data-lucide="chart-no-axes-combined"></i><span><strong>Relatórios</strong><small>Quantidade, qualidade e evolução</small></span><i data-lucide="chevron-down"></i></summary><div><p>Os relatórios respeitam os filtros globais. Quantidade mostra volume de casos; qualidade mostra resultados; mediação compara ação do instrutor com engajamento, aprendizagem, frequência e permanência.</p></div></details>
-                <details><summary><i data-lucide="refresh-cw"></i><span><strong>Sincronização e origem dos dados</strong><small>O que fica gravado</small></span><i data-lucide="chevron-down"></i></summary><div><p>A Central apresenta turmas válidas, com número de nove dígitos, que foram sincronizadas pelos instrutores. Recuperações, avaliações, tratativas e datas ficam no Firebase. Atividades representam o último upload disponível.</p></div></details>
+                <details><summary><i data-lucide="refresh-cw"></i><span><strong>Sincronização e origem dos dados</strong><small>O que fica gravado</small></span><i data-lucide="chevron-down"></i></summary><div><p>No aplicativo, “Varrer rede” percorre as pastas Turmas 2025 e Turmas 2026, lê as chamadas ativas e grava o retrato no Firebase. Qualquer portal do analista aberto recebe a atualização automaticamente.</p><p>A regra considera ativas as qualificações iniciadas nos últimos 380 dias e os cursos técnicos iniciados nos últimos 600 dias. Recuperações, avaliações, tratativas e datas ficam no Firebase. Atividades representam o último upload disponível.</p></div></details>
             </div>
         </section>
     </main>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+    <div class="modal-backdrop" id="analystNotebookModal" hidden>
+        <section class="modal wide" role="dialog" aria-modal="true" aria-labelledby="analystNotebookTitle">
+            <form id="analystNotebookForm">
+                <header><div><span class="eyebrow">Acompanhamento e avaliação</span><h2 id="analystNotebookTitle">Caderno do Analista</h2></div><button class="icon-button" type="button" data-close-modal="analystNotebookModal"><i data-lucide="x"></i></button></header>
+                <div class="form-grid">
+                    <label>Instrutor acompanhado<select id="analystNoteInstructor" required></select></label>
+                    <label>Turma<select id="analystNoteClass" required></select></label>
+                    <label>Data do registro<input id="analystNoteDate" type="date" required></label>
+                    <label>Tipo<select id="analystNoteType"><option>Acompanhamento</option><option>Elogio</option><option>Orientação</option><option>Ponto de atenção</option><option>Plano de ação</option><option>Avaliação</option></select></label>
+                    <label class="span-2">Dimensão da cadeia<select id="analystNoteDimension"><option value="action">1. Ação do instrutor</option><option value="interaction">2. Interação com o jovem</option><option value="engagement">3. Engajamento</option><option value="learning">4. Aprendizagem</option><option value="permanence">5. Permanência</option></select></label>
+                    <div class="guidance-bubble span-2" id="analystDimensionGuidance"></div>
+                    <label>Tentativa de contato/ação<select id="analystNoteAttempt"><option value="not_applicable">Não se aplica</option><option value="not_done">Não realizada</option><option value="done">Realizada e documentada</option></select></label>
+                    <label>Resposta e troca efetiva<select id="analystNoteResponse"><option value="unknown">Ainda não verificada</option><option value="no_response">Sem resposta do jovem</option><option value="responded">Houve resposta e interação</option></select></label>
+                    <label>Efeito no engajamento<select id="analystNoteEngagement"><option value="unknown">Ainda não medido</option><option value="no_change">Sem mudança observada</option><option value="improved">Participação/entrega melhorou</option><option value="declined">Participação/entrega piorou</option></select></label>
+                    <label>Evidência de aprendizagem<select id="analystNoteLearning"><option value="unknown">Ainda não medida</option><option value="no_change">Sem evolução observada</option><option value="improved">Evolução/recuperação confirmada</option><option value="not_developed">Não desenvolveu</option></select></label>
+                    <label>Risco de permanência<select id="analystNotePermanence"><option value="none">Sem risco identificado</option><option value="attention">Em atenção</option><option value="high">Risco alto</option><option value="reversed">Risco revertido</option><option value="dropout">Evasão/desligamento</option></select></label>
+                    <label>Status da tratativa<select id="analystNoteStatus"><option value="em_acompanhamento">Em acompanhamento</option><option value="aguardando_retorno">Aguardando retorno</option><option value="em_avaliacao">Em avaliação</option><option value="resolvido">Concluída</option><option value="cancelado">Cancelada</option></select></label>
+                    <label class="span-2">Assunto<input id="analystNoteSubject" required placeholder="Ex.: abordagem sem retorno do jovem"></label>
+                    <label class="span-2">Descrição e evidências<textarea id="analystNoteText" rows="5" required placeholder="Registre o que foi feito, a resposta obtida e o efeito observado. Não conclua engajamento ou aprendizagem apenas pelo envio de mensagem."></textarea></label>
+                    <label>Data para revisão<input id="analystNoteReminder" type="date"></label>
+                    <label>Avaliação interna opcional (%)<input id="analystNoteScore" type="number" min="0" max="100" step="1" placeholder="Oculta para o instrutor"></label>
+                </div>
+                <div class="diagnostic-bubble" id="analystDiagnosticPreview"></div>
+                <footer><span class="confidential-note"><i data-lucide="shield-check"></i> O texto será compartilhado com o instrutor; a porcentagem permanece privada.</span><button type="button" class="ghost-button" data-close-modal="analystNotebookModal">Cancelar</button><button class="primary-button" type="submit"><i data-lucide="save"></i> Salvar acompanhamento</button></footer>
+            </form>
+        </section>
+    </div>
 
     <div class="modal-backdrop" id="recoveryModal" hidden>
         <section class="modal" role="dialog" aria-modal="true" aria-labelledby="recoveryModalTitle">
@@ -332,6 +366,6 @@
     </div>
 
     <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
-    <script src="./analista-bootstrap.js?v=2.2.0"></script>
+    <script src="./analista-bootstrap.js?v=2.3.0"></script>
 </body>
 </html>

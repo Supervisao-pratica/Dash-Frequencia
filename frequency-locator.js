@@ -14,6 +14,22 @@ const extractClassNumber = value => {
     return match ? match[0] : '';
 };
 
+const extractFolderStartDate = value => {
+    const matches = [...String(value || '').matchAll(/(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{4})/g)];
+    if (!matches.length) return null;
+    const match = matches[matches.length - 1];
+    const date = new Date(Number(match[3]), Number(match[2]) - 1, Number(match[1]), 12, 0, 0, 0);
+    return Number.isNaN(date.getTime()) ? null : date;
+};
+
+const isActiveClassFolder = (folderName, now = new Date()) => {
+    const start = extractFolderStartDate(folderName);
+    if (!start) return false;
+    const ageDays = Math.floor((now.getTime() - start.getTime()) / 86400000);
+    const isTechnical = /\bTECNIC[AO]?\b/.test(normalizeName(folderName));
+    return ageDays <= (isTechnical ? 600 : 380);
+};
+
 const directoryEntries = async directory => fs.promises.readdir(directory, { withFileTypes: true });
 
 const isFrequencyFile = entry => {
@@ -164,4 +180,54 @@ async function locateFrequencyFile(turmaValue, options = {}) {
     throw new Error(`Nenhuma planilha de frequência foi encontrada para a turma ${turma} na pasta da turma ou em Controle de Frequência.`);
 }
 
-module.exports = { DEFAULT_NETWORK_ROOT, extractClassNumber, locateFrequencyFile, normalizeName, scanDropoutDocuments };
+async function scanFrequencyClasses(options = {}) {
+    const root = options.root || DEFAULT_NETWORK_ROOT;
+    const years = [...new Set((options.years || [2025, 2026]).map(String))];
+    const results = [];
+    const missing = [];
+    const errors = [];
+    const inactive = [];
+    let totalFolders = 0;
+    for (const year of years) {
+        const yearDirectory = path.join(root, `Turmas ${year}`);
+        let entries;
+        try {
+            entries = await directoryEntries(yearDirectory);
+        } catch (error) {
+            errors.push({ year, path: yearDirectory, error: error.message });
+            continue;
+        }
+        const identified = entries.filter(entry => entry.isDirectory() && /^\d{9}(?:\D|$)/.test(entry.name));
+        const classes = options.includeInactive ? identified : identified.filter(entry => {
+            const active = isActiveClassFolder(entry.name, options.now || new Date());
+            if (!active) inactive.push({ turma: extractClassNumber(entry.name), year, folderName: entry.name, classDirectory: path.join(yearDirectory, entry.name) });
+            return active;
+        });
+        totalFolders += classes.length;
+        for (const entry of classes) {
+            const turma = extractClassNumber(entry.name);
+            const classDirectory = path.join(yearDirectory, entry.name);
+            try {
+                const direct = await listFrequencyFiles(classDirectory, turma);
+                let candidates = direct;
+                let location = 'Pasta da turma';
+                if (!candidates.length) {
+                    const classEntries = await directoryEntries(classDirectory);
+                    const controlEntry = findControlDirectory(classEntries);
+                    const controlDirectory = controlEntry ? path.join(classDirectory, controlEntry.name) : '';
+                    candidates = controlDirectory ? await listFrequencyFiles(controlDirectory, turma) : [];
+                    location = controlEntry ? controlEntry.name : 'Controle de Frequência';
+                }
+                if (candidates.length) results.push({ ...candidates[0], turma, year, classDirectory, folderName: entry.name, location });
+                else missing.push({ turma, year, classDirectory, folderName: entry.name });
+            } catch (error) {
+                errors.push({ turma, year, classDirectory, error: error.message });
+            }
+            if (typeof options.onProgress === 'function') options.onProgress({ year, turma, scanned: results.length + missing.length + errors.filter(item => item.turma).length, totalFolders, found: results.length, missing: missing.length, errors: errors.length });
+        }
+    }
+    results.sort((a, b) => b.turma.localeCompare(a.turma));
+    return { root, years, totalFolders, found: results.length, missing: missing.length, inactive: inactive.length, errorCount: errors.length, classes: results, missingClasses: missing, inactiveClasses: inactive, errors, scannedAt: new Date().toISOString(), activeRule: '380 dias para qualificações e 600 dias para cursos técnicos' };
+}
+
+module.exports = { DEFAULT_NETWORK_ROOT, extractClassNumber, locateFrequencyFile, normalizeName, scanDropoutDocuments, scanFrequencyClasses };

@@ -154,7 +154,7 @@
         }
         const seed = analystSeedForUser(user);
         if (!seed) {
-            window.location.replace("./index.html?perfil=instrutor");
+            window.location.replace("./Dashboard_V76.html?perfil=instrutor");
             return;
         }
         const currentName = analystFullName(user, seed);
@@ -231,7 +231,13 @@
                 reminderDate: String(note.reminderDate || note.periodEnd || "").slice(0, 10),
                 periodStart: String(note.periodStart || note.date || "").slice(0, 10),
                 periodEnd: String(note.periodEnd || "").slice(0, 10),
-                status: String(note.trackingStatus || "em_acompanhamento")
+                status: String(note.trackingStatus || "em_acompanhamento"),
+                dimension: String(note.dimension || "action"),
+                contactAttempt: String(note.contactAttempt || "not_applicable"),
+                studentResponse: String(note.studentResponse || "unknown"),
+                engagementEffect: String(note.engagementEffect || "unknown"),
+                learningEvidence: String(note.learningEvidence || "unknown"),
+                permanenceRisk: String(note.permanenceRisk || "none")
             };
         });
         const instructorNoteData = instructorNotes.docs.map(doc => {
@@ -265,11 +271,24 @@
         window.SENAC_CENTRAL_SYNC_WARNINGS = syncWarnings;
         window.SENAC_CENTRAL_INITIAL_DATA = { version: 2, classes: classData, recoveries: recoveryData, analystNotes: noteData };
         installPersistence(db, user, window.SENAC_CENTRAL_INITIAL_DATA);
+        let receivedInitialClassSnapshot = false;
+        let classRefreshTimer = null;
+        const savedClassesQuery = db.collection("saved_classes");
+        if (typeof savedClassesQuery.onSnapshot === "function") {
+            savedClassesQuery.onSnapshot(() => {
+                if (!receivedInitialClassSnapshot) {
+                    receivedInitialClassSnapshot = true;
+                    return;
+                }
+                clearTimeout(classRefreshTimer);
+                classRefreshTimer = setTimeout(() => window.location.reload(), 4000);
+            }, error => console.warn("Não foi possível acompanhar atualizações de turmas em tempo real.", error));
+        }
 
         document.getElementById("analystProfileName").textContent = currentName;
         document.getElementById("profileAvatar").textContent = currentName.split(/\s+/).map(part => part[0]).slice(0, 2).join("").toUpperCase();
         const script = document.createElement("script");
-        script.src = `./analista.js?v=2.2.0`;
+        script.src = `./analista.js?v=2.3.0`;
         script.onload = () => loading?.remove();
         script.onerror = () => { if (loading) loading.innerHTML = "Não foi possível carregar a Central do Analista."; };
         document.body.appendChild(script);
@@ -305,15 +324,55 @@
                     const comparable = { start: payload.start, end: payload.end, currentUc: payload.currentUc, ucs: payload.ucs, orion: payload.orion };
                     if (JSON.stringify(comparable) !== JSON.stringify(oldPayload)) writes.push(db.collection("analyst_class_overrides").doc(classItem.id).set(payload, { merge: true }));
                 });
-                const previousNotes = new Map((previous.analystNotes || []).map(item => [item.id, item]));
-                (data.analystNotes || []).forEach(note => {
+                const previousNotes = new Map((previous.analystNotes || []).filter(item => item.source !== "instructor_notebook").map(item => [item.id, item]));
+                const nextNotes = new Map((data.analystNotes || []).filter(item => item.source !== "instructor_notebook").map(item => [item.id, item]));
+                nextNotes.forEach(note => {
                     const oldNote = previousNotes.get(note.id);
                     const isOwner = String(note.ownerEmail || "").toLowerCase() === String(user.email || "").toLowerCase();
-                    const trackingChanged = oldNote && (note.trackingStatus !== oldNote.trackingStatus || note.trackingEnabled !== oldNote.trackingEnabled);
-                    if (!isOwner || !trackingChanged) return;
-                    const statusUpdate = { trackingEnabled: note.trackingEnabled === true, trackingStatus: note.trackingStatus, updatedAt: new Date().toISOString() };
-                    writes.push(db.collection("analyst_notes").doc(note.id).set(statusUpdate, { merge: true }));
-                    writes.push(db.collection("analyst_shared_notes").doc(note.id).set(statusUpdate, { merge: true }));
+                    if (!isOwner || JSON.stringify(note) === JSON.stringify(oldNote)) return;
+                    const updatedAt = new Date().toISOString();
+                    const privatePayload = {
+                        ownerEmail: user.email,
+                        turmaKey: String(note.classId || "GERAL"),
+                        analystKey: String(window.SENAC_CENTRAL_USER?.analystKey || keyOf(note.author || user.email)),
+                        analystName: String(note.author || user.email),
+                        instructorKey: keyOf(note.instructor),
+                        instructorName: String(note.instructor || "Instrutor"),
+                        date: String(note.date || ""),
+                        followupType: String(note.type || "Acompanhamento"),
+                        subject: String(note.subject || "Acompanhamento"),
+                        notes: String(note.notes || ""),
+                        competency: String(note.competency || ""),
+                        visibleToInstructor: true,
+                        score: null,
+                        trackingEnabled: note.trackingEnabled === true,
+                        trackingStatus: String(note.trackingStatus || "em_acompanhamento"),
+                        reminderDate: String(note.reminderDate || ""),
+                        periodStart: String(note.periodStart || note.date || ""),
+                        periodEnd: String(note.periodEnd || note.date || ""),
+                        dimension: String(note.dimension || "action"),
+                        contactAttempt: String(note.contactAttempt || "not_applicable"),
+                        studentResponse: String(note.studentResponse || "unknown"),
+                        engagementEffect: String(note.engagementEffect || "unknown"),
+                        learningEvidence: String(note.learningEvidence || "unknown"),
+                        permanenceRisk: String(note.permanenceRisk || "none"),
+                        updatedAt
+                    };
+                    const sharedPayload = { ...privatePayload };
+                    delete sharedPayload.score;
+                    writes.push(db.collection("analyst_notes").doc(note.id).set(privatePayload, { merge: true }));
+                    writes.push(db.collection("analyst_shared_notes").doc(note.id).set(sharedPayload, { merge: true }));
+                    if (note.evaluationPercent !== null && note.evaluationPercent !== "" && Number.isInteger(Number(note.evaluationPercent))) {
+                        writes.push(db.collection("analyst_evaluations").doc(note.id).set({ ownerEmail: user.email, turmaKey: privatePayload.turmaKey, analystKey: privatePayload.analystKey, score: Number(note.evaluationPercent), updatedAt }, { merge: true }));
+                    } else if (oldNote?.evaluationPercent !== null && oldNote?.evaluationPercent !== undefined) {
+                        writes.push(db.collection("analyst_evaluations").doc(note.id).delete());
+                    }
+                });
+                previousNotes.forEach((note, id) => {
+                    if (nextNotes.has(id) || String(note.ownerEmail || "").toLowerCase() !== String(user.email || "").toLowerCase()) return;
+                    writes.push(db.collection("analyst_notes").doc(id).delete());
+                    writes.push(db.collection("analyst_shared_notes").doc(id).delete());
+                    writes.push(db.collection("analyst_evaluations").doc(id).delete());
                 });
                 try {
                     await Promise.all(writes);
@@ -328,6 +387,6 @@
     bootstrap().catch(error => {
         console.error(error);
         const loading = document.getElementById("centralLoading");
-        if (loading) loading.innerHTML = `<strong>Não foi possível abrir a Central do Analista.</strong><span>${String(error.message || error)}</span><a href="./index.html?perfil=instrutor">Voltar ao Dashboard</a>`;
+        if (loading) loading.innerHTML = `<strong>Não foi possível abrir a Central do Analista.</strong><span>${String(error.message || error)}</span><a href="./Dashboard_V76.html?perfil=instrutor">Voltar ao Dashboard</a>`;
     });
 })();

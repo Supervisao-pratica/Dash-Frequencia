@@ -3863,7 +3863,7 @@
         const persistSavedClass = async (data, source = {}) => {
             if (!data || !getValidTurmaNumber(data.turma) || !Array.isArray(data.students)) return { source: "local", summary: null };
             const summary = { ...makeSavedClassSummary(data, source), cloudSynced: false };
-            await markSavedClassAccess(summary.turmaKey);
+            if (!source.skipUserAccess) await markSavedClassAccess(summary.turmaKey);
             writeSavedClassLocal(summary, data);
             const db = await getNotebookFirestore();
             if (!db) return { source: "local", summary };
@@ -5196,6 +5196,8 @@
             const [frequencySourceRevision, setFrequencySourceRevision] = useState(0);
             const [classSyncMessage, setClassSyncMessage] = useState("");
             const [activeClassUpdatedAt, setActiveClassUpdatedAt] = useState("");
+            const [networkScan, setNetworkScan] = useState({ running: false, scanned: 0, total: 0, found: 0, synchronized: 0, skipped: 0, failed: 0, message: "" });
+            const networkScanStarted = useRef(false);
             
             // --- MODAIS ---
             const [showAtaModal, setShowAtaModal] = useState(false);
@@ -5767,6 +5769,73 @@
                 }
             };
 
+            const scanAllNetworkClasses = async () => {
+                if (networkScan.running) return;
+                if (!isElectronDesktop() || typeof window.senacDesktop.scanFrequencyClasses !== "function") {
+                    alert("A varredura completa das turmas está disponível somente no aplicativo instalado.");
+                    return;
+                }
+                setNetworkScan({ running: true, scanned: 0, total: 0, found: 0, synchronized: 0, skipped: 0, failed: 0, message: "Localizando turmas ativas de 2025 e 2026..." });
+                let removeProgress = null;
+                try {
+                    if (typeof window.senacDesktop.onFrequencyScanProgress === "function") {
+                        removeProgress = window.senacDesktop.onFrequencyScanProgress(progress => setNetworkScan(current => ({ ...current, scanned: Number(progress.scanned || 0), total: Math.max(Number(progress.totalFolders || 0), current.total), found: Number(progress.found || 0), message: `Varrendo pastas: ${progress.scanned || 0} verificadas, ${progress.found || 0} chamadas encontradas...` })));
+                    }
+                    const inventory = await window.senacDesktop.scanFrequencyClasses();
+                    const db = await getNotebookFirestore();
+                    if (!db) throw new Error("O Firebase não está disponível. A varredura não pode atualizar o portal do analista.");
+                    const existingSnapshot = await db.collection("saved_classes").get();
+                    const byClass = new Map(existingSnapshot.docs.map(doc => {
+                        const item = { turmaKey: doc.id, ...doc.data() };
+                        return [getSavedClassKey(item.turma || item.turmaKey), item];
+                    }));
+                    let synchronized = 0;
+                    let skipped = 0;
+                    let failed = 0;
+                    const failures = [];
+                    setNetworkScan(current => ({ ...current, total: inventory.classes.length, found: inventory.found, message: `${inventory.found} chamadas ativas encontradas. Sincronizando com o Firebase...` }));
+                    for (let index = 0; index < inventory.classes.length; index++) {
+                        const located = inventory.classes[index];
+                        try {
+                            const previous = byClass.get(getSavedClassKey(located.turma));
+                            if (previous && Number(previous.sourceLastModified || 0) >= Number(located.mtimeMs || 0) - 500) {
+                                skipped++;
+                            } else {
+                                const bytes = await window.senacDesktop.readFile(located.path);
+                                const arrayBuffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+                                const processed = processExcelFile(arrayBuffer);
+                                if (getSavedClassKey(processed.turma) !== getSavedClassKey(located.turma)) throw new Error(`A planilha identificou a turma ${processed.turma || "não informada"}.`);
+                                if (!Array.isArray(processed.students) || processed.students.length === 0) throw new Error("Nenhum aluno foi identificado.");
+                                const persistence = await persistSavedClass(processed, { name: located.name, lastModified: located.mtimeMs, path: located.path, scanSource: "rede_2025_2026", skipUserAccess: true });
+                                if (persistence.source !== "cloud") throw new Error("A chamada foi lida, mas não foi gravada no Firebase.");
+                                synchronized++;
+                            }
+                        } catch (error) {
+                            failed++;
+                            failures.push(`${located.turma}: ${error.message}`);
+                            console.error(`Falha ao sincronizar a turma ${located.turma}`, error);
+                        }
+                        setNetworkScan(current => ({ ...current, scanned: index + 1, total: inventory.classes.length, synchronized, skipped, failed, message: `Sincronizando ${index + 1}/${inventory.classes.length}: ${synchronized} atualizadas, ${skipped} sem alteração, ${failed} com falha.` }));
+                    }
+                    await refreshSavedClasses({ announce: false });
+                    const summary = `Varredura concluída: ${inventory.found} turmas ativas localizadas, ${synchronized} atualizadas, ${skipped} já estavam atuais e ${failed} apresentaram falha.${inventory.inactive ? ` ${inventory.inactive} pastas encerradas foram ignoradas.` : ""}`;
+                    setNetworkScan(current => ({ ...current, running: false, scanned: inventory.classes.length, total: inventory.classes.length, found: inventory.found, synchronized, skipped, failed, message: summary, failures }));
+                    setClassSyncMessage(summary);
+                } catch (error) {
+                    console.error("Erro na varredura completa da rede", error);
+                    setNetworkScan(current => ({ ...current, running: false, message: `Não foi possível concluir a varredura: ${error.message}` }));
+                } finally {
+                    if (typeof removeProgress === "function") removeProgress();
+                }
+            };
+
+            useEffect(() => {
+                const shouldScan = new URLSearchParams(window.location.search).get("scan") === "network";
+                if (!shouldScan || networkScanStarted.current || !currentAnalystName || !isElectronDesktop()) return;
+                networkScanStarted.current = true;
+                scanAllNetworkClasses();
+            }, [currentAnalystName]);
+
             useEffect(() => {
                 if (!data || !data.turma || !isElectronDesktop()) return undefined;
                 let stopped = false;
@@ -6190,7 +6259,7 @@
             if (!data) {
                 return (
                     <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4">
-                        <div className="absolute top-4 right-4 text-xs text-gray-400">{getCurrentAuthenticatedEmail()}</div>
+                        <div className="absolute top-4 right-4 flex items-center gap-2 text-xs text-gray-400">{currentAnalystName && <button type="button" onClick={() => { window.location.href = "./analista.html"; }} className="rounded-md border border-orange-200 bg-white px-3 py-1.5 font-bold text-senac-orange shadow-sm hover:bg-orange-50"><IconBarChart2 className="mr-1 inline h-3.5 w-3.5" /> Central do Analista</button>}<span>{getCurrentAuthenticatedEmail()}</span></div>
                         <div className="w-full max-w-4xl bg-white rounded-2xl shadow-2xl overflow-hidden animate-slide-up">
                             <div className="bg-senac-blue p-8 text-center relative overflow-hidden">
                                 <div className="absolute top-0 left-0 w-full h-full opacity-10 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')]"></div>
@@ -6199,6 +6268,7 @@
                             <div className="p-10 text-center">
                                 <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/8/86/Senac_logo.svg/500px-Senac_logo.svg.png" className="h-16 mx-auto mb-6" />
                                 <p className="text-gray-500 mb-8 max-w-md mx-auto">Arraste sua planilha <strong>(.xlsm)</strong> para gerar o dashboard.</p>
+                                {currentAnalystName && <div className="mb-6 rounded-lg border border-blue-200 bg-blue-50 p-4 text-left"><div className="flex flex-wrap items-center justify-between gap-3"><div><strong className="text-sm text-senac-blue">Varredura das turmas ativas</strong><p className="mt-1 text-xs text-gray-600">Localiza as chamadas de 2025 e 2026 na rede e sincroniza o resultado para o portal do analista.</p></div><button type="button" onClick={scanAllNetworkClasses} disabled={networkScan.running} className="rounded-md bg-senac-blue px-4 py-2 text-xs font-bold text-white disabled:opacity-50"><IconRefreshCw className={`mr-1 inline h-4 w-4 ${networkScan.running ? "animate-spin" : ""}`} /> {networkScan.running ? "Varrendo..." : "Varrer rede agora"}</button></div>{networkScan.message && <div className="mt-3 rounded border border-blue-100 bg-white px-3 py-2 text-xs text-blue-800">{networkScan.message}</div>}{networkScan.running && networkScan.total > 0 && <div className="mt-2 h-2 overflow-hidden rounded bg-blue-100"><div className="h-full bg-senac-orange transition-all" style={{ width: `${Math.min(100, Math.round(networkScan.scanned / networkScan.total * 100))}%` }} /></div>}</div>}
                                 <div className={`border-2 border-dashed rounded-xl p-12 transition-all cursor-pointer ${dragActive ? 'border-senac-orange bg-orange-50 scale-105' : 'border-gray-300 hover:border-senac-blue hover:bg-blue-50'}`} onDragEnter={(e) => { e.preventDefault(); setDragActive(true); }} onDragLeave={(e) => { e.preventDefault(); setDragActive(false); }} onDragOver={(e) => e.preventDefault()} onDrop={handleDrop} onClick={() => document.getElementById('fileUpload').click()}>
                                     <IconUploadCloud className={`w-16 h-16 mx-auto mb-4 ${dragActive ? 'text-senac-orange' : 'text-gray-400'}`} /><p className="text-gray-700 font-semibold text-lg">Clique ou arraste o arquivo aqui</p>
                                     <input id="fileUpload" type="file" className="hidden" accept=".xlsx, .xls, .xlsm" onChange={(e) => { handleFile(e.target.files[0]); e.target.value = ''; }} />
@@ -6453,6 +6523,7 @@
                             <div className="flex w-full min-w-0 flex-1 flex-col gap-3 2xl:flex-row 2xl:items-start 2xl:justify-end">
                                 <section className="min-w-0 rounded-lg border border-blue-100 bg-blue-50/60 p-2"><div className="mb-1 px-1 text-[10px] font-bold uppercase text-senac-blue">Atualizar dados</div><div className="flex flex-wrap gap-2">
                                 <button type="button" onClick={updateFrequencyCall} disabled={updatingFrequency} className="bg-white border border-senac-blue text-senac-blue hover:bg-blue-50 disabled:cursor-wait disabled:opacity-60 px-4 py-2 rounded-lg flex items-center gap-2 shadow transition-all active:scale-95 text-sm font-medium min-h-[54px] min-w-[116px] max-w-[160px] justify-center whitespace-normal text-center leading-tight" title={isElectronDesktop() ? "Localizar e atualizar automaticamente a chamada desta turma na rede" : (webFrequencyHandle ? "Reler a planilha vinculada desta turma" : "Selecionar e lembrar a planilha desta turma")}><IconRefreshCw className={`w-4 h-4 ${updatingFrequency ? "animate-spin" : ""}`} /> {updatingFrequency ? "Atualizando..." : "Atualizar chamada"}</button><input id="updateFrequencyInput" type="file" className="hidden" accept=".xlsx,.xlsm,.xls" onChange={handleManualFrequencyUpdate} />
+                                {currentAnalystName && <button type="button" onClick={scanAllNetworkClasses} disabled={networkScan.running} className="bg-white border border-purple-500 text-purple-700 hover:bg-purple-50 disabled:cursor-wait disabled:opacity-60 px-4 py-2 rounded-lg flex items-center gap-2 shadow text-sm font-medium min-h-[54px] min-w-[116px] max-w-[160px] justify-center text-center leading-tight"><IconRefreshCw className={`h-4 w-4 ${networkScan.running ? "animate-spin" : ""}`} /> {networkScan.running ? `${networkScan.scanned}/${networkScan.total || "..."}` : "Varrer turmas"}</button>}
                                 <label className="cursor-pointer bg-white border border-senac-blue text-senac-blue hover:bg-blue-50 px-4 py-2 rounded-lg flex items-center gap-2 shadow transition-all active:scale-95 text-sm font-medium min-h-[54px] min-w-[116px] max-w-[160px] justify-center whitespace-normal text-center leading-tight" title="Ler a aba DADOS GERAIS"><IconUploadCloud className="w-4 h-4" /> Dados Gerais <input type="file" className="hidden" accept=".xlsx,.xlsm,.xls" onChange={(e) => { handleGeneralDataFile(e.target.files[0]); e.target.value = ''; }} /></label>
                                 <label className="cursor-pointer bg-white border border-senac-orange text-senac-orange hover:bg-orange-50 px-4 py-2 rounded-lg flex items-center gap-2 shadow transition-all active:scale-95 text-sm font-medium min-h-[54px] min-w-[116px] max-w-[160px] justify-center whitespace-normal text-center leading-tight" title="Ler uma ou várias planilhas de atividades por UC"><IconUploadCloud className="w-4 h-4" /> Ler atividades{activityTracking && activityTracking.uploads ? ` (${activityTracking.uploads.length})` : ""} <input type="file" multiple className="hidden" accept=".xlsx,.xlsm,.xls" onChange={(e) => { handleActivityFiles(e.target.files); e.target.value = ''; }} /></label>
                                 </div></section>

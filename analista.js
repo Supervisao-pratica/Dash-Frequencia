@@ -42,6 +42,13 @@
         { id: "closed", label: "Concluída", tone: "#078847" }
     ];
     const ANALYST_NAMES = Array.isArray(window.SENAC_ANALYST_NAMES) ? window.SENAC_ANALYST_NAMES : ["Michel Farias", "Mariana Mello", "Bruna Cunha", "Bianca Aresta"];
+    const dimensionGuidance = {
+        action: { label: "Ação do instrutor", competency: "planejamento", text: "Use quando houver evidência do que o instrutor fez: contato, orientação, correção, plano ou encaminhamento. O simples envio deve ser registrado como ação, não como interação." },
+        interaction: { label: "Interação com o jovem", competency: "comunicacao", text: "Use quando for possível confirmar se houve resposta e troca efetiva. Mensagem enviada sem retorno continua sendo apenas tentativa de contato." },
+        engagement: { label: "Engajamento", competency: "cliente", text: "Use para registrar mudança observável na participação, presença ou entrega de atividades após a mediação." },
+        learning: { label: "Aprendizagem", competency: "resultados", text: "Use quando houver evidência de evolução nas atividades, recuperação ou desenvolvimento das competências da UC." },
+        permanence: { label: "Permanência", competency: "visao_sistemica", text: "Use para risco de evasão, reversão de risco, continuidade no curso ou desligamento confirmado." }
+    };
 
     const prototypeData = loadData();
     prototypeData.classes = (prototypeData.classes || []).filter(item => /^\d{9}$/.test(String(item.id || "")));
@@ -846,9 +853,17 @@
         const notes = filteredAnalystNotes();
         const recoveries = filteredRecoveries();
         const monitoringRows = filteredMonitoringRows();
-        const evaluations = notes.filter(note => note.evaluationPercent !== null && note.evaluationPercent !== "" && Number.isFinite(Number(note.evaluationPercent))).map(note => Number(note.evaluationPercent));
         const openMediations = notes.filter(note => analystNoteWorkflow(note) !== "closed").length;
-        const accompaniedContacts = recoveries.filter(item => ["contacted", "waiting", "evaluation", "closed"].includes(item.status)).length;
+        const documentedAttempts = notes.filter(note => note.contactAttempt === "done").length;
+        const explicitResponses = notes.filter(note => note.studentResponse === "responded").length;
+        const explicitNoResponses = notes.filter(note => note.studentResponse === "no_response").length;
+        const interactionMeasured = explicitResponses + explicitNoResponses;
+        const engagementImproved = notes.filter(note => note.engagementEffect === "improved").length;
+        const engagementMeasured = notes.filter(note => note.engagementEffect && note.engagementEffect !== "unknown").length;
+        const learningImproved = notes.filter(note => note.learningEvidence === "improved").length;
+        const learningMeasured = notes.filter(note => note.learningEvidence && note.learningEvidence !== "unknown").length;
+        const reversedRisks = notes.filter(note => note.permanenceRisk === "reversed").length;
+        const recordedRisks = notes.filter(note => ["attention", "high", "reversed", "dropout"].includes(note.permanenceRisk)).length;
         const correctedActivities = monitoringRows.reduce((sum, item) => sum + Number(item.record.correction?.corrected || 0), 0);
         const practiceRows = monitoringRows.filter(item => item.record.practice?.capturedAt);
         const practiceCompleted = practiceRows.reduce((sum, item) => sum + Number(item.record.practice?.completed || 0), 0);
@@ -859,12 +874,35 @@
         const weightedFrequency = totalStudents ? classes.reduce((sum, item) => sum + Number(item.frequency || 0) * Number(item.studentsCount || 0), 0) / totalStudents : null;
         const dropouts = classes.reduce((sum, item) => sum + Number(item.dropouts || 0), 0);
         const percentage = (part, total) => total ? `${Math.round(part / total * 100)}%` : "--";
+        const atRiskCases = recoveries.filter(item => item.status !== "cancelled").length;
+        const actionCoverage = atRiskCases ? `${Math.min(100, Math.round(documentedAttempts / atRiskCases * 100))}%` : "--";
+        const effectiveInteraction = percentage(explicitResponses, interactionMeasured);
+        const engagementEvolution = engagementMeasured ? percentage(engagementImproved, engagementMeasured) : percentage(practiceCompleted, practiceTotal);
+        const learningEvolution = learningMeasured ? percentage(learningImproved, learningMeasured) : percentage(developedRecoveries, closedRecoveries.length);
+        let diagnosis = "Ainda não há evidências suficientes para diferenciar causa e efeito. Registre a ação, a resposta e o efeito observado no Caderno do Analista.";
+        if (atRiskCases > 0 && documentedAttempts / atRiskCases < 0.5) diagnosis = "Há casos de risco sem tentativa documentada suficiente. A prioridade é ampliar e registrar a ação do instrutor antes de avaliar a estratégia de abordagem.";
+        else if (documentedAttempts > 0 && interactionMeasured > 0 && explicitResponses / interactionMeasured < 0.5) diagnosis = "As tentativas estão sendo realizadas, mas geram pouco retorno. O diagnóstico aponta para revisão do canal, horário ou estratégia de abordagem.";
+        else if (explicitResponses > 0 && engagementMeasured > 0 && engagementImproved / engagementMeasured < 0.5) diagnosis = "Existe interação, porém ela ainda não se converte em participação e entregas. É necessário revisar o encaminhamento pedagógico após o contato.";
+        else if (engagementImproved > 0 && learningMeasured > 0 && learningImproved / learningMeasured < 0.5) diagnosis = "O engajamento melhorou, mas a aprendizagem ainda não evoluiu na mesma proporção. Reforce devolutivas, recuperação e mediação por competência.";
+        else if (recordedRisks > 0 && reversedRisks / recordedRisks >= 0.5) diagnosis = "A cadeia apresenta efeito positivo na permanência: a maior parte dos riscos registrados foi revertida. Preserve as estratégias com evidência de resultado.";
         return {
             notes: notes.length,
             openMediations,
-            evaluationAverage: evaluations.length ? `${Math.round(evaluations.reduce((sum, value) => sum + value, 0) / evaluations.length)}%` : "--",
-            evaluationCount: evaluations.length,
-            accompaniedContacts,
+            actionCoverage,
+            documentedAttempts,
+            atRiskCases,
+            effectiveInteraction,
+            explicitResponses,
+            interactionMeasured,
+            engagementEvolution,
+            engagementImproved,
+            engagementMeasured,
+            learningEvolution,
+            learningImproved,
+            learningMeasured,
+            reversedRisks,
+            recordedRisks,
+            diagnosis,
             correctedActivities,
             engagement: percentage(practiceCompleted, practiceTotal),
             practiceCompleted,
@@ -886,17 +924,21 @@
     function renderMediationIndicators() {
         const data = mediationIndicators();
         document.getElementById("instructorActionIndicators").innerHTML = [
-            indicatorCard("Mediações documentadas", data.notes, `${data.openMediations} ainda em acompanhamento`, "#f58220"),
-            indicatorCard("Média avaliativa", data.evaluationAverage, `${plural(data.evaluationCount, "avaliação interna", "avaliações internas")} sob sua responsabilidade`, "#6d3cb4"),
-            indicatorCard("Contatos acompanhados", data.accompaniedContacts, "Recuperações com interação ou encaminhamento registrado", "#1976b8"),
-            indicatorCard("Correções realizadas", data.correctedActivities, "Atividades corrigidas no último retrato disponível", "#078847")
+            indicatorCard("1. Cobertura de ação", data.actionCoverage, `${data.documentedAttempts} ações para ${data.atRiskCases} casos de risco`, "#f58220"),
+            indicatorCard("2. Tratativas concluídas", `${Math.max(0, data.notes - data.openMediations)}/${data.notes}`, "Acompanhamentos concluídos no conjunto filtrado", "#6d3cb4"),
+            indicatorCard("3. Interação efetiva", data.effectiveInteraction, `${data.explicitResponses} respostas em ${data.interactionMeasured} retornos medidos`, "#1976b8")
         ].join("");
         document.getElementById("studentResultIndicators").innerHTML = [
-            indicatorCard("Engajamento nas atividades", data.engagement, `${data.practiceCompleted} de ${data.practiceTotal} conclusões registradas`, "#004a8d"),
-            indicatorCard("Desenvolvimento após recuperação", data.recoveryDevelopment, `${data.developedRecoveries} de ${data.closedRecoveries} recuperações concluídas`, "#078847"),
-            indicatorCard("Frequência média", data.averageFrequency, "Média ponderada das turmas filtradas", "#d17b08"),
-            indicatorCard("Permanência", data.permanence, `${data.dropouts} desligamento(s) em ${data.totalStudents} estudantes`, "#c62828")
+            indicatorCard("4. Engajamento", data.engagementEvolution, "Evolução de participação e entregas após a mediação", "#004a8d"),
+            indicatorCard("5. Frequência", data.averageFrequency, "Média ponderada das turmas filtradas", "#d17b08"),
+            indicatorCard("6. Aprendizagem", data.learningEvolution, "Evolução ou recuperação confirmada por evidência", "#078847"),
+            indicatorCard("7. Risco revertido", data.recordedRisks ? `${data.reversedRisks}/${data.recordedRisks}` : "--", "Casos de permanência acompanhados e revertidos", "#00838f"),
+            indicatorCard("8. Permanência", data.permanence, `${data.dropouts} desligamento(s) em ${data.totalStudents} estudantes`, "#c62828")
         ].join("");
+        document.getElementById("differentialDiagnosis").innerHTML = `<strong>Diagnóstico diferencial</strong><p>${escapeHTML(data.diagnosis)}</p>`;
+        document.getElementById("operationalMetrics").innerHTML = [
+            `${data.notes} registros`, `${data.documentedAttempts} tentativas`, `${data.correctedActivities} correções`, `${data.practiceCompleted}/${data.practiceTotal} atividades`
+        ].map(item => `<span>${escapeHTML(item)}</span>`).join("");
     }
 
     function renderReports() {
@@ -1183,6 +1225,92 @@
         refreshIcons();
     }
 
+    function analystNotebookDiagnosis() {
+        const attempt = document.getElementById("analystNoteAttempt").value;
+        const response = document.getElementById("analystNoteResponse").value;
+        const engagement = document.getElementById("analystNoteEngagement").value;
+        const learning = document.getElementById("analystNoteLearning").value;
+        const permanence = document.getElementById("analystNotePermanence").value;
+        if (attempt === "not_done") return "Diagnóstico: não há ação documentada. Oriente a realização e o registro da mediação antes de avaliar a resposta do jovem.";
+        if (attempt === "done" && response === "no_response") return "Diagnóstico: houve tentativa, mas não interação. Considere outro canal, horário, abordagem ou apoio do supervisor.";
+        if (response === "responded" && ["no_change", "declined"].includes(engagement)) return "Diagnóstico: houve interação, mas ela não se converteu em engajamento. Revise o encaminhamento combinado com o jovem.";
+        if (engagement === "improved" && ["no_change", "not_developed"].includes(learning)) return "Diagnóstico: a participação melhorou, porém ainda não há evolução na aprendizagem. Planeje devolutiva e recuperação por competência.";
+        if (permanence === "reversed") return "Diagnóstico: risco de permanência revertido. Registre quais ações produziram resultado para apoiar futuras mediações.";
+        if (permanence === "dropout") return "Diagnóstico: evasão ou desligamento confirmado. Preserve as tentativas, respostas e encaminhamentos que antecederam o desfecho.";
+        return "Orientação: complete apenas etapas sustentadas por evidências. Envio de mensagem é ação; resposta confirma interação; participação e aprendizagem exigem resultados observáveis.";
+    }
+
+    function updateAnalystNotebookGuidance() {
+        const dimension = document.getElementById("analystNoteDimension").value;
+        const guidance = dimensionGuidance[dimension] || dimensionGuidance.action;
+        document.getElementById("analystDimensionGuidance").innerHTML = `<strong>Quando aplicar ${escapeHTML(guidance.label)}</strong><span>${escapeHTML(guidance.text)}</span>`;
+        document.getElementById("analystDiagnosticPreview").textContent = analystNotebookDiagnosis();
+    }
+
+    function populateAnalystNotebookClasses() {
+        const instructor = document.getElementById("analystNoteInstructor").value;
+        const classes = state.data.classes.filter(classItem => instructorNamesForClass(classItem).includes(instructor));
+        const select = document.getElementById("analystNoteClass");
+        select.innerHTML = classes.length
+            ? classes.map(classItem => `<option value="${classItem.id}">${classItem.id} · ${escapeHTML(classItem.course || "Curso não identificado")}</option>`).join("")
+            : `<option value="GERAL">Acompanhamento geral do instrutor</option>`;
+    }
+
+    function openAnalystNotebookModal() {
+        const instructors = [...new Set(state.data.classes.flatMap(instructorNamesForClass))].sort((a, b) => a.localeCompare(b, "pt-BR"));
+        const instructorSelect = document.getElementById("analystNoteInstructor");
+        instructorSelect.innerHTML = instructors.map(name => `<option value="${escapeHTML(name)}">${escapeHTML(name)}</option>`).join("");
+        instructorSelect.value = state.filters.instructor !== "all" && instructors.includes(state.filters.instructor) ? state.filters.instructor : instructors[0] || "";
+        populateAnalystNotebookClasses();
+        document.getElementById("analystNoteDate").value = isoOffset(0);
+        document.getElementById("analystNoteType").value = "Acompanhamento";
+        document.getElementById("analystNoteDimension").value = "action";
+        document.getElementById("analystNoteAttempt").value = "not_applicable";
+        document.getElementById("analystNoteResponse").value = "unknown";
+        document.getElementById("analystNoteEngagement").value = "unknown";
+        document.getElementById("analystNoteLearning").value = "unknown";
+        document.getElementById("analystNotePermanence").value = "none";
+        document.getElementById("analystNoteStatus").value = "em_acompanhamento";
+        document.getElementById("analystNoteSubject").value = "";
+        document.getElementById("analystNoteText").value = "";
+        document.getElementById("analystNoteReminder").value = "";
+        document.getElementById("analystNoteScore").value = "";
+        updateAnalystNotebookGuidance();
+        openModal("analystNotebookModal");
+    }
+
+    function getAnalystNotebookForm() {
+        const dimension = document.getElementById("analystNoteDimension").value;
+        const date = document.getElementById("analystNoteDate").value;
+        const reminderDate = document.getElementById("analystNoteReminder").value;
+        const score = document.getElementById("analystNoteScore").value;
+        return {
+            id: `an-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            classId: document.getElementById("analystNoteClass").value,
+            instructor: document.getElementById("analystNoteInstructor").value,
+            date,
+            type: document.getElementById("analystNoteType").value,
+            subject: document.getElementById("analystNoteSubject").value.trim(),
+            notes: document.getElementById("analystNoteText").value.trim(),
+            competency: dimensionGuidance[dimension]?.competency || "",
+            dimension,
+            contactAttempt: document.getElementById("analystNoteAttempt").value,
+            studentResponse: document.getElementById("analystNoteResponse").value,
+            engagementEffect: document.getElementById("analystNoteEngagement").value,
+            learningEvidence: document.getElementById("analystNoteLearning").value,
+            permanenceRisk: document.getElementById("analystNotePermanence").value,
+            evaluationPercent: score === "" ? null : Number(score),
+            author: currentAnalystName(),
+            ownerEmail: String(window.SENAC_CENTRAL_USER?.email || "").toLowerCase(),
+            trackingEnabled: true,
+            trackingStatus: document.getElementById("analystNoteStatus").value,
+            reminderDate,
+            periodStart: date,
+            periodEnd: reminderDate || date,
+            status: document.getElementById("analystNoteStatus").value
+        };
+    }
+
     function closeModal(id) {
         document.getElementById(id).hidden = true;
         document.body.style.overflow = "";
@@ -1382,7 +1510,7 @@
         const instructorFilter = state.profileMode === "instructor" ? state.previewInstructor : state.filters.instructor;
         const monitoring = monitoringTotals();
         const mediation = mediationIndicators();
-        return `${title}\n\nTurmas: ${filteredClasses().length}\nRecuperações registradas: ${recoveries.length}\nRecuperações abertas: ${open}\nPrazo crítico: ${critical}\nConcluídas: ${closed.length}\nConcluídas com desenvolvimento: ${developed}\n\nAÇÃO DO INSTRUTOR\nMediações documentadas: ${mediation.notes}\nMédia avaliativa interna: ${mediation.evaluationAverage} (${mediation.evaluationCount} avaliações)\nContatos acompanhados: ${mediation.accompaniedContacts}\nCorreções realizadas: ${mediation.correctedActivities}\n\nRESULTADO DOS ALUNOS\nEngajamento nas atividades: ${mediation.engagement}\nDesenvolvimento após recuperação: ${mediation.recoveryDevelopment}\nFrequência média: ${mediation.averageFrequency}\nPermanência: ${mediation.permanence}\n\nPLANILHA DE CHAMADA\nChamadas abertas/incompletas: ${monitoring.openCalls}\nRegistros de frequência pendentes: ${monitoring.attendancePending}\nPendências no Diário da Prática: ${monitoring.practicePending}\nCorreções pendentes: ${monitoring.correctionPending}\nResultados não concluídos no Órion: ${monitoring.orionPending}\nPontos de atenção: ${monitoring.alerts}\n\nFiltros: Analista ${state.filters.analyst}; Instrutor ${instructorFilter}; Turma ${state.filters.classId}; UC ${state.filters.uc}.`;
+        return `${title}\n\nTurmas: ${filteredClasses().length}\nRecuperações registradas: ${recoveries.length}\nRecuperações abertas: ${open}\nPrazo crítico: ${critical}\nConcluídas: ${closed.length}\nConcluídas com desenvolvimento: ${developed}\n\nCADEIA DE MEDIAÇÃO\n1. Cobertura de ação: ${mediation.actionCoverage}\n2. Tratativas concluídas: ${Math.max(0, mediation.notes - mediation.openMediations)}/${mediation.notes}\n3. Interação efetiva: ${mediation.effectiveInteraction}\n4. Engajamento: ${mediation.engagementEvolution}\n5. Frequência: ${mediation.averageFrequency}\n6. Aprendizagem: ${mediation.learningEvolution}\n7. Riscos revertidos: ${mediation.reversedRisks}/${mediation.recordedRisks}\n8. Permanência: ${mediation.permanence}\nDiagnóstico: ${mediation.diagnosis}\n\nMÉTRICAS OPERACIONAIS\nRegistros: ${mediation.notes}\nTentativas documentadas: ${mediation.documentedAttempts}\nCorreções realizadas: ${mediation.correctedActivities}\n\nPLANILHA DE CHAMADA\nChamadas abertas/incompletas: ${monitoring.openCalls}\nRegistros de frequência pendentes: ${monitoring.attendancePending}\nPendências no Diário da Prática: ${monitoring.practicePending}\nCorreções pendentes: ${monitoring.correctionPending}\nResultados não concluídos no Órion: ${monitoring.orionPending}\nPontos de atenção: ${monitoring.alerts}\n\nFiltros: Analista ${state.filters.analyst}; Instrutor ${instructorFilter}; Turma ${state.filters.classId}; UC ${state.filters.uc}.`;
     }
 
     function monitoringSummary() {
@@ -1438,7 +1566,7 @@
             }
             if (profileModeButton) {
                 if (profileModeButton.dataset.profileMode === "instructor") {
-                    window.location.href = "./index.html?perfil=instrutor";
+                    window.location.href = "./Dashboard_V76.html?perfil=instrutor";
                     return;
                 }
                 state.profileMode = profileModeButton.dataset.profileMode;
@@ -1463,6 +1591,26 @@
             state.filters.uc = "all";
             renderAll();
             showToast(`Agora você está visualizando o sistema como ${state.previewInstructor}.`);
+        });
+        document.getElementById("scanNetworkClasses")?.addEventListener("click", () => {
+            if (!window.senacDesktop?.isDesktop) {
+                showToast("A varredura das pastas de rede está disponível somente no aplicativo instalado.");
+                return;
+            }
+            window.location.href = "./Dashboard_V76.html?perfil=instrutor&scan=network";
+        });
+        document.getElementById("openAnalystNotebook")?.addEventListener("click", openAnalystNotebookModal);
+        document.getElementById("analystNoteInstructor")?.addEventListener("change", populateAnalystNotebookClasses);
+        ["analystNoteDimension", "analystNoteAttempt", "analystNoteResponse", "analystNoteEngagement", "analystNoteLearning", "analystNotePermanence"].forEach(id => {
+            document.getElementById(id)?.addEventListener("change", updateAnalystNotebookGuidance);
+        });
+        document.getElementById("analystNotebookForm")?.addEventListener("submit", event => {
+            event.preventDefault();
+            const note = getAnalystNotebookForm();
+            state.data.analystNotes.push(note);
+            saveData("Acompanhamento salvo e sincronizado com o perfil do instrutor.");
+            closeModal("analystNotebookModal");
+            renderAll();
         });
         document.getElementById("classFilter").addEventListener("change", event => { state.filters.classId = event.target.value; renderAll(); });
         document.getElementById("ucFilter").addEventListener("change", event => { state.filters.uc = event.target.value; renderAll(); });
