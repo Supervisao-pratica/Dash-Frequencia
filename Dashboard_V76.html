@@ -5816,6 +5816,7 @@
                 }
                 setNetworkScan({ running: true, scanned: 0, total: 0, found: 0, synchronized: 0, skipped: 0, failed: 0, message: "Localizando turmas ativas de 2025 e 2026..." });
                 let removeProgress = null;
+                let backgroundResult = { status: "completed" };
                 try {
                     if (typeof window.senacDesktop.onFrequencyScanProgress === "function") {
                         removeProgress = window.senacDesktop.onFrequencyScanProgress(progress => setNetworkScan(current => ({ ...current, scanned: Number(progress.scanned || 0), total: Math.max(Number(progress.totalFolders || 0), current.total), found: Number(progress.found || 0), message: `Varrendo pastas: ${progress.scanned || 0} verificadas, ${progress.found || 0} chamadas encontradas...` })));
@@ -5874,9 +5875,11 @@
                     setClassSyncMessage(summary);
                 } catch (error) {
                     console.error("Erro na varredura completa da rede", error);
+                    backgroundResult = { status: "failed", message: String(error.message || "Erro ao sincronizar a rede") };
                     setNetworkScan(current => ({ ...current, running: false, message: `Não foi possível concluir a varredura: ${error.message}` }));
                 } finally {
                     if (typeof removeProgress === "function") removeProgress();
+                    if (new URLSearchParams(window.location.search).get("background") === "1") window.senacDesktop?.completeAutomaticNetworkSync?.(backgroundResult);
                 }
             };
 

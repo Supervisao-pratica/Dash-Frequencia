@@ -199,6 +199,7 @@ async function scanFrequencyClasses(options = {}) {
     const missing = [];
     const errors = [];
     const inactive = [];
+    const tasks = [];
     let totalFolders = 0;
     for (const year of years) {
         const yearDirectory = path.join(root, `Turmas ${year}`);
@@ -216,31 +217,47 @@ async function scanFrequencyClasses(options = {}) {
             return active;
         });
         totalFolders += classes.length;
-        for (const entry of classes) {
-            const turma = extractClassNumber(entry.name);
-            const classDirectory = path.join(yearDirectory, entry.name);
-            try {
-                const direct = await listFrequencyFiles(classDirectory, turma);
-                let candidates = direct;
-                let location = 'Pasta da turma';
-                if (!candidates.length) {
-                    const classEntries = await directoryEntries(classDirectory);
-                    const controlEntry = findControlDirectory(classEntries);
-                    const controlDirectory = controlEntry ? path.join(classDirectory, controlEntry.name) : '';
-                    candidates = controlDirectory ? await listFrequencyFiles(controlDirectory, turma) : [];
-                    location = controlEntry ? controlEntry.name : 'Controle de Frequência';
-                }
-                if (candidates.length) {
-                    const responsibleAnalyst = extractResponsibleAnalyst(entry.name);
-                    results.push({ ...candidates[0], turma, year, classDirectory, folderName: entry.name, location, responsibleAnalystKey: responsibleAnalyst?.key || '', responsibleAnalyst: responsibleAnalyst?.name || '' });
-                }
-                else missing.push({ turma, year, classDirectory, folderName: entry.name });
-            } catch (error) {
-                errors.push({ turma, year, classDirectory, error: error.message });
-            }
-            if (typeof options.onProgress === 'function') options.onProgress({ year, turma, scanned: results.length + missing.length + errors.filter(item => item.turma).length, totalFolders, found: results.length, missing: missing.length, errors: errors.length });
-        }
+        classes.forEach(entry => tasks.push({ year, entry, yearDirectory }));
     }
+
+    let nextTask = 0;
+    let scanned = 0;
+    const concurrency = Math.max(1, Math.min(12, Number(options.concurrency || 8)));
+    const inspectClass = async ({ year, entry, yearDirectory }) => {
+        const turma = extractClassNumber(entry.name);
+        const classDirectory = path.join(yearDirectory, entry.name);
+        try {
+            const direct = await listFrequencyFiles(classDirectory, turma);
+            let candidates = direct;
+            let location = 'Pasta da turma';
+            if (!candidates.length) {
+                const classEntries = await directoryEntries(classDirectory);
+                const controlEntry = findControlDirectory(classEntries);
+                const controlDirectory = controlEntry ? path.join(classDirectory, controlEntry.name) : '';
+                candidates = controlDirectory ? await listFrequencyFiles(controlDirectory, turma) : [];
+                location = controlEntry ? controlEntry.name : 'Controle de Frequência';
+            }
+            if (candidates.length) {
+                const responsibleAnalyst = extractResponsibleAnalyst(entry.name);
+                results.push({ ...candidates[0], turma, year, classDirectory, folderName: entry.name, location, responsibleAnalystKey: responsibleAnalyst?.key || '', responsibleAnalyst: responsibleAnalyst?.name || '' });
+            } else {
+                missing.push({ turma, year, classDirectory, folderName: entry.name });
+            }
+        } catch (error) {
+            errors.push({ turma, year, classDirectory, error: error.message });
+        } finally {
+            scanned++;
+            if (typeof options.onProgress === 'function') options.onProgress({ year, turma, scanned, totalFolders, found: results.length, missing: missing.length, errors: errors.length });
+        }
+    };
+    const worker = async () => {
+        while (true) {
+            const taskIndex = nextTask++;
+            if (taskIndex >= tasks.length) return;
+            await inspectClass(tasks[taskIndex]);
+        }
+    };
+    await Promise.all(Array.from({ length: Math.min(concurrency, tasks.length) }, worker));
     results.sort((a, b) => b.turma.localeCompare(a.turma));
     return { root, years, totalFolders, found: results.length, missing: missing.length, inactive: inactive.length, errorCount: errors.length, classes: results, missingClasses: missing, inactiveClasses: inactive, errors, scannedAt: new Date().toISOString(), activeRule: '380 dias para qualificações e 600 dias para cursos técnicos' };
 }

@@ -9,6 +9,11 @@ app.setAppUserModelId('br.senacpr.dashboardfrequencia');
 let mainWindow = null;
 let updateCheckTimer = null;
 let updatePromptOpen = false;
+let backgroundNetworkSyncWindow = null;
+let backgroundNetworkSyncTimer = null;
+let backgroundNetworkSyncTimeout = null;
+const BACKGROUND_NETWORK_SYNC_INTERVAL = 2 * 60 * 60 * 1000;
+const BACKGROUND_NETWORK_SYNC_TIMEOUT = 20 * 60 * 1000;
 
 ipcMain.handle('senac:stat-file', async (_event, filePath) => {
     const value = await fs.promises.stat(String(filePath || ''));
@@ -26,6 +31,52 @@ ipcMain.handle('senac:scan-frequency-classes', async event => scanFrequencyClass
     years: [2025, 2026],
     onProgress: progress => event.sender.send('senac:scan-frequency-progress', progress)
 }));
+
+function scheduleBackgroundNetworkSync() {
+    if (backgroundNetworkSyncTimer) clearTimeout(backgroundNetworkSyncTimer);
+    backgroundNetworkSyncTimer = setTimeout(() => startBackgroundNetworkSync(), BACKGROUND_NETWORK_SYNC_INTERVAL);
+}
+
+function finishBackgroundNetworkSync() {
+    if (backgroundNetworkSyncTimeout) clearTimeout(backgroundNetworkSyncTimeout);
+    backgroundNetworkSyncTimeout = null;
+    const scanWindow = backgroundNetworkSyncWindow;
+    backgroundNetworkSyncWindow = null;
+    if (scanWindow && !scanWindow.isDestroyed()) scanWindow.close();
+    scheduleBackgroundNetworkSync();
+}
+
+function startBackgroundNetworkSync() {
+    if (backgroundNetworkSyncWindow && !backgroundNetworkSyncWindow.isDestroyed()) return { started: false, reason: 'already-running' };
+    if (backgroundNetworkSyncTimer) clearTimeout(backgroundNetworkSyncTimer);
+    backgroundNetworkSyncTimer = null;
+    const scanWindow = new BrowserWindow({
+        show: false,
+        webPreferences: {
+            preload: path.join(__dirname, 'preload.js'),
+            nodeIntegration: false,
+            contextIsolation: true,
+            backgroundThrottling: false
+        }
+    });
+    backgroundNetworkSyncWindow = scanWindow;
+    scanWindow.loadFile('Dashboard_V76.html', { query: { perfil: 'instrutor', scan: 'network', background: '1' } });
+    scanWindow.on('closed', () => {
+        if (backgroundNetworkSyncWindow === scanWindow) {
+            backgroundNetworkSyncWindow = null;
+            if (backgroundNetworkSyncTimeout) clearTimeout(backgroundNetworkSyncTimeout);
+            backgroundNetworkSyncTimeout = null;
+            scheduleBackgroundNetworkSync();
+        }
+    });
+    backgroundNetworkSyncTimeout = setTimeout(() => finishBackgroundNetworkSync(), BACKGROUND_NETWORK_SYNC_TIMEOUT);
+    return { started: true };
+}
+
+ipcMain.handle('senac:start-automatic-network-sync', () => startBackgroundNetworkSync());
+ipcMain.on('senac:automatic-network-sync-complete', event => {
+    if (backgroundNetworkSyncWindow && event.sender === backgroundNetworkSyncWindow.webContents) finishBackgroundNetworkSync();
+});
 
 function createWindow() {
     mainWindow = new BrowserWindow({
@@ -103,5 +154,7 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
     if (updateCheckTimer) clearInterval(updateCheckTimer);
+    if (backgroundNetworkSyncTimer) clearTimeout(backgroundNetworkSyncTimer);
+    if (backgroundNetworkSyncTimeout) clearTimeout(backgroundNetworkSyncTimeout);
     if (process.platform !== 'darwin') app.quit();
 });

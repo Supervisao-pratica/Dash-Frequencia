@@ -7,6 +7,8 @@ contextBridge.exposeInMainWorld('senacDesktop', {
     locateFrequencyFile: turma => ipcRenderer.invoke('senac:locate-frequency', turma),
     scanDropoutDocuments: (turma, studentNames) => ipcRenderer.invoke('senac:scan-dropout-documents', turma, studentNames),
     scanFrequencyClasses: () => ipcRenderer.invoke('senac:scan-frequency-classes'),
+    startAutomaticNetworkSync: () => ipcRenderer.invoke('senac:start-automatic-network-sync'),
+    completeAutomaticNetworkSync: result => ipcRenderer.send('senac:automatic-network-sync-complete', result || {}),
     onFrequencyScanProgress: callback => {
         const listener = (_event, progress) => callback(progress);
         ipcRenderer.on('senac:scan-frequency-progress', listener);
