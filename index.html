@@ -3770,7 +3770,9 @@
             sourceLastModified: Number(source.lastModified || 0),
             sourceFolderName: String(source.folderName || ""),
             responsibleAnalystKey: String(source.responsibleAnalystKey || data.responsibleAnalystKey || ""),
-            responsibleAnalyst: String(source.responsibleAnalyst || data.responsibleAnalyst || "")
+            responsibleAnalyst: String(source.responsibleAnalyst || data.responsibleAnalyst || ""),
+            // A turma só entra no panorama global enquanto for localizada na última varredura da rede.
+            ...(source.scanSource === "rede_2025_2026" ? { networkActive: true, lastNetworkScanAt: new Date().toISOString() } : {})
         });
 
         const readSavedClassesLocal = () => {
@@ -5849,7 +5851,25 @@
                     let skipped = 0;
                     let failed = 0;
                     const failures = [];
+                    const activeNetworkKeys = new Set(inventory.classes.map(item => getSavedClassKey(item.turma)));
                     setNetworkScan(current => ({ ...current, total: inventory.classes.length, found: inventory.found, message: `${inventory.found} chamadas ativas encontradas. Sincronizando com o Firebase...` }));
+
+                    // Mantém o histórico intacto, mas impede que turmas que não existem mais na rede
+                    // sejam contadas como ativas na Central do Analista.
+                    const inactiveUpdates = existingSnapshot.docs
+                        .map(doc => ({ ref: doc.ref, summary: { turmaKey: doc.id, ...doc.data() } }))
+                        .filter(({ summary }) => getValidTurmaNumber(summary.turma || summary.turmaKey)
+                            && String(summary.sourceFolderName || "").trim()
+                            && !activeNetworkKeys.has(getSavedClassKey(summary.turma || summary.turmaKey))
+                            && summary.networkActive !== false);
+                    for (let start = 0; start < inactiveUpdates.length; start += 400) {
+                        const batch = db.batch();
+                        inactiveUpdates.slice(start, start + 400).forEach(({ ref }) => batch.set(ref, {
+                            networkActive: false,
+                            lastNetworkScanAt: new Date().toISOString()
+                        }, { merge: true }));
+                        await batch.commit();
+                    }
                     for (let index = 0; index < inventory.classes.length; index++) {
                         const located = inventory.classes[index];
                         try {
@@ -5861,6 +5881,8 @@
                                         responsibleAnalystKey: String(located.responsibleAnalystKey || ""),
                                         responsibleAnalyst: String(located.responsibleAnalyst || ""),
                                         sourceFolderName: String(located.folderName || ""),
+                                        networkActive: true,
+                                        lastNetworkScanAt: new Date().toISOString(),
                                         updatedAt: new Date().toISOString(),
                                         updatedBy: getCurrentAuthenticatedEmail()
                                     }, { merge: true });

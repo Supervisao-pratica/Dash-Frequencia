@@ -223,7 +223,8 @@
         const latestHistories = latestHistoryByClass(histories.docs);
         const overrideMap = new Map(overrides.docs.map(doc => [doc.id, doc.data()]));
         configureInstructorAliases(classes.docs.map(doc => ({ turmaKey: doc.id, ...doc.data() })));
-        const classData = classes.docs.map(doc => ({ doc, summary: { turmaKey: doc.id, ...doc.data() } })).filter(item => validClassSummary(item.summary)).map(({ doc, summary }) => {
+        const classData = classes.docs.map(doc => ({ doc, summary: { turmaKey: doc.id, ...doc.data() } }))
+            .filter(item => validClassSummary(item.summary) && item.summary.networkActive !== false).map(({ doc, summary }) => {
             return buildClass(summary, studentGroups.get(doc.id) || [], latestHistories.get(doc.id), overrideMap.get(doc.id), analystNameByKey.get(String(summary.responsibleAnalystKey || "")) || summary.responsibleAnalyst);
         }).sort((a, b) => b.id.localeCompare(a.id));
 
@@ -324,7 +325,7 @@
         document.getElementById("analystProfileName").textContent = currentName;
         document.getElementById("profileAvatar").textContent = currentName.split(/\s+/).map(part => part[0]).slice(0, 2).join("").toUpperCase();
         const script = document.createElement("script");
-        script.src = `./analista.js?v=2.6.0`;
+        script.src = `./analista.js?v=2.6.1`;
         script.onload = () => loading?.remove();
         script.onerror = () => { if (loading) loading.innerHTML = "Não foi possível carregar a Central do Analista."; };
         document.body.appendChild(script);
