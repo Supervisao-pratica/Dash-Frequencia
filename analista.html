@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="./analista.css?v=2.5.0">
+    <link rel="stylesheet" href="./analista.css?v=2.6.0">
     <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore-compat.js"></script>
@@ -133,9 +133,9 @@
         <section class="view" id="view-classes">
             <div class="page-heading">
                 <div><span class="eyebrow">Visão por turma</span><h2>Turmas compartilhadas</h2><p>Somente turmas abertas e sincronizadas pelos instrutores.</p></div>
-                <button class="secondary-button analyst-only" id="simulateImport"><i data-lucide="files"></i> Simular leitura múltipla</button>
+                <button class="secondary-button analyst-only" id="simulateImport"><i data-lucide="files"></i> Ver demonstração de leitura múltipla</button>
             </div>
-            <div class="info-note"><i data-lucide="shield-check"></i><span>Nesta demonstração, a leitura múltipla apenas exibe o fluxo. Nenhuma planilha será aberta ou alterada.</span></div>
+            <div class="info-note"><i data-lucide="shield-check"></i><span>Esta opção é somente uma demonstração: não lê, não grava e não altera planilhas. A leitura real é feita pela sincronização automática da rede.</span></div>
             <section class="table-section no-top-gap">
                 <div class="table-wrap"><table><thead><tr><th>Turma / curso</th><th>Instrutor</th><th>Período</th><th>UC atual</th><th>Alunos</th><th>Recuperações</th><th>Situação</th><th></th></tr></thead><tbody id="classesTable"></tbody></table></div>
             </section>
@@ -370,6 +370,6 @@
     </div>
 
     <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
-    <script src="./analista-bootstrap.js?v=2.5.0"></script>
+    <script src="./analista-bootstrap.js?v=2.6.0"></script>
 </body>
 </html>

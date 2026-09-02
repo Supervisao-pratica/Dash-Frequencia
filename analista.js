@@ -41,7 +41,10 @@
         { id: "evaluation", label: "Em avaliação", tone: "#6d3cb4" },
         { id: "closed", label: "Concluída", tone: "#078847" }
     ];
-    const ANALYST_NAMES = Array.isArray(window.SENAC_ANALYST_NAMES) ? window.SENAC_ANALYST_NAMES : ["Michel Farias", "Mariana Mello", "Bruna Cunha", "Bianca Aresta"];
+    const ANALYST_OPTIONS = Array.isArray(window.SENAC_ANALYST_OPTIONS) ? window.SENAC_ANALYST_OPTIONS : [
+        { key: "MICHEL", name: "Michel Farias" }, { key: "MARIANA", name: "Mariana Mello" }, { key: "BRUNA_CUNHA", name: "Bruna Cunha" }, { key: "BIANCA", name: "Bianca Aresta" }, { key: "JULIANA_SEVERO", name: "Juliana Severo" }
+    ];
+    const ANALYST_NAMES = ANALYST_OPTIONS.map(item => item.name);
     const dimensionGuidance = {
         action: { label: "Ação do instrutor", competency: "planejamento", text: "Use quando houver evidência do que o instrutor fez: contato, orientação, correção, plano ou encaminhamento. O simples envio deve ser registrado como ação, não como interação." },
         interaction: { label: "Interação com o jovem", competency: "comunicacao", text: "Use quando for possível confirmar se houve resposta e troca efetiva. Mensagem enviada sem retorno continua sendo apenas tentativa de contato." },
@@ -474,6 +477,17 @@
         }) || null;
     }
 
+    function analystKeyFor(value) {
+        const normalized = normalize(value);
+        const exact = ANALYST_OPTIONS.find(item => normalize(item.name) === normalized || normalize(item.key) === normalized);
+        if (exact) return exact.key;
+        const matches = ANALYST_OPTIONS.filter(item => {
+            const firstName = normalize(item.name).split(/\s+/)[0];
+            return firstName && normalized.split(/\s+/)[0] === firstName;
+        });
+        return matches.length === 1 ? matches[0].key : "";
+    }
+
     function currentAnalystName() {
         return window.SENAC_CENTRAL_USER?.name || ANALYST_NAMES[0] || "Analista";
     }
@@ -528,7 +542,7 @@
         const effectiveInstructor = state.profileMode === "instructor" ? state.previewInstructor : state.filters.instructor;
         return state.data.classes.filter(classItem => {
             const instructorOk = effectiveInstructor === "all" || instructorNamesForClass(classItem).includes(effectiveInstructor);
-            const analystOk = state.profileMode === "instructor" || state.filters.analyst === "all" || classItem.responsibleAnalyst === state.filters.analyst;
+            const analystOk = state.profileMode === "instructor" || state.filters.analyst === "all" || String(classItem.responsibleAnalystKey || "") === state.filters.analyst || analystKeyFor(classItem.responsibleAnalyst) === state.filters.analyst;
             const classOk = state.filters.classId === "all" || classItem.id === state.filters.classId;
             const ucOk = state.filters.uc === "all" || classItem.ucs.some(uc => uc.name === state.filters.uc) || classItem.monitoring?.some(item => item.uc === state.filters.uc);
             const searchOk = matchesSearch([classItem.id, classItem.course, ...instructorNamesForClass(classItem), ...analystsForClass(classItem.id), ...classItem.students.flatMap(student => [student.name, student.orion])]);
@@ -549,7 +563,7 @@
     function filteredAnalystNotes() {
         const allowedClasses = new Set(filteredClasses().map(item => item.id));
         return (state.data.analystNotes || []).filter(note => {
-            const analystOk = state.profileMode === "instructor" || state.filters.analyst === "all" || canonicalAnalyst(note.author) === state.filters.analyst;
+            const analystOk = state.profileMode === "instructor" || state.filters.analyst === "all" || analystKeyFor(note.author) === state.filters.analyst;
             const classOk = !note.classId || allowedClasses.has(note.classId);
             const instructorOk = state.profileMode !== "instructor" || note.instructor === state.previewInstructor;
             const ucOk = state.filters.uc === "all" || !note.uc || note.uc === state.filters.uc;
@@ -613,12 +627,12 @@
         const ucSelect = document.getElementById("ucFilter");
         const previewSelect = document.getElementById("previewInstructor");
         const instructors = [...new Set(state.data.classes.flatMap(instructorNamesForClass))].sort((a, b) => a.localeCompare(b, "pt-BR"));
-        const analysts = [...new Set(ANALYST_NAMES)].sort((a, b) => a.localeCompare(b, "pt-BR"));
+        const analysts = [...ANALYST_OPTIONS].sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
         const ucs = [...new Set(state.data.classes.flatMap(item => [...item.ucs.map(uc => uc.name), ...(item.monitoring || []).map(row => row.uc)]))].sort((a, b) => a === "PI" ? 1 : b === "PI" ? -1 : Number(a.replace(/\D/g, "")) - Number(b.replace(/\D/g, "")));
         const availableClasses = state.profileMode === "instructor" ? state.data.classes.filter(item => instructorNamesForClass(item).includes(state.previewInstructor)) : state.data.classes;
 
         instructorSelect.innerHTML = `<option value="all">Todos os instrutores</option>${instructors.map(name => `<option value="${escapeHTML(name)}">${escapeHTML(name)}</option>`).join("")}`;
-        analystSelect.innerHTML = `<option value="all">Todos os analistas</option>${analysts.map(name => `<option value="${escapeHTML(name)}">${escapeHTML(name)}</option>`).join("")}`;
+        analystSelect.innerHTML = `<option value="all">Todos os analistas</option>${analysts.map(item => `<option value="${escapeHTML(item.key)}">${escapeHTML(item.name)}</option>`).join("")}`;
         previewSelect.innerHTML = instructors.map(name => `<option value="${escapeHTML(name)}">${escapeHTML(name)}</option>`).join("");
         classSelect.innerHTML = `<option value="all">${state.profileMode === "instructor" ? "Todas as minhas turmas" : "Todas as turmas"}</option>${availableClasses.map(item => `<option value="${item.id}">${item.id}</option>`).join("")}`;
         ucSelect.innerHTML = `<option value="all">Todas as UCs</option>${ucs.map(uc => `<option value="${uc}">${uc}</option>`).join("")}`;

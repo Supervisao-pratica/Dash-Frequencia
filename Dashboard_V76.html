@@ -5464,6 +5464,22 @@
             }, [data ? data.turma : "", frequencySourceRevision]);
 
             useEffect(() => {
+                if (!data || !getValidTurmaNumber(data.turma)) return undefined;
+                let stopped = false;
+                let unsubscribe = null;
+                getNotebookFirestore().then(db => {
+                    if (!db || stopped) return;
+                    unsubscribe = db.collection("analyst_recoveries").where("classId", "==", getValidTurmaNumber(data.turma)).onSnapshot(snapshot => {
+                        if (stopped) return;
+                        const records = snapshot.docs.map(doc => normalizeRecoveryRecord({ id: doc.id, ...doc.data() }));
+                        setClassRecoveries(records.sort((a, b) => a.studentName.localeCompare(b.studentName, "pt-BR") || Number(a.number) - Number(b.number)));
+                        setRecoveryStorageSource("cloud");
+                    }, error => console.error("Erro ao receber atualizações de recuperação", error));
+                });
+                return () => { stopped = true; if (typeof unsubscribe === "function") unsubscribe(); };
+            }, [data ? data.turma : ""]);
+
+            useEffect(() => {
                 if (!data || !data.turma) { setOrionStatus({}); return; }
                 loadClassOrionStatus(data.turma, data.ucs).then(setOrionStatus);
             }, [data ? data.turma : "", (data?.ucs || []).join("|")]);
@@ -6288,6 +6304,7 @@
             const selectedNAStudentSummary = selectedStudentForModal ? getNAStudentSummary(data, selectedStudentForModal.name, naJustifications) : null;
             const selectedNAStudentRaw = selectedStudentForModal && data && data.naAlerts && data.naAlerts.students ? data.naAlerts.students[normalizeName(selectedStudentForModal.name)] : null;
             const naAttentionTotal = naAttentionStudents.reduce((total, student) => total + student.count, 0);
+            const openRecoveryAlerts = classRecoveries.filter(record => RECOVERY_OPEN_STATUSES.includes(record.status));
             const processStudentsWithoutDocuments = data ? data.students.filter(student => student.is_process_dropout && !student.is_dropout && (!dropoutDocuments[normalizeName(student.name)] || dropoutDocuments[normalizeName(student.name)].status !== "com_documentacao")) : [];
             const selectedDropoutDocument = selectedStudentForModal ? dropoutDocuments[normalizeName(selectedStudentForModal.name)] : null;
             const selectedDropoutDocumentMeta = getDropoutDocumentMeta(selectedDropoutDocument);
@@ -6660,6 +6677,13 @@
                                         </div>
                                     ))}
                                 </div>
+                            </div>
+                        )}
+                        {openRecoveryAlerts.length > 0 && (
+                            <div className="mb-6 border border-red-200 border-l-4 border-l-red-600 bg-red-50 p-4 text-sm text-red-900 shadow-sm rounded-lg">
+                                <div className="mb-2 flex items-center gap-2 font-bold"><IconAlertTriangle className="w-4 h-4" /> Recuperações abertas para acompanhamento</div>
+                                <div className="text-xs"><strong>{openRecoveryAlerts.length} registro(s):</strong> {openRecoveryAlerts.slice(0, 10).map(record => `${record.studentName} (Recuperação ${record.number}${record.uc ? ` · ${record.uc}` : ""})`).join("; ")}{openRecoveryAlerts.length > 10 ? `; e mais ${openRecoveryAlerts.length - 10}` : ""}</div>
+                                <div className="mt-2 text-[11px] text-red-700">Abra o quadro do aluno para registrar a tratativa, atualizar o status ou marcar como recuperou.</div>
                             </div>
                         )}
                         {naAttentionStudents.length > 0 && (

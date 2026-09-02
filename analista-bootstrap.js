@@ -303,6 +303,7 @@
         window.SENAC_CENTRAL_USER = { uid: user.uid, email: user.email, name: currentName, analystKey: seed.key };
         window.senacDesktop?.startAutomaticNetworkSync?.().catch(error => console.warn("Não foi possível iniciar a sincronização automática da rede.", error));
         window.SENAC_ANALYST_NAMES = analystNames;
+        window.SENAC_ANALYST_OPTIONS = ANALYST_SEEDS.map((item, index) => ({ key: item.key, name: analystNames[index] || item.fallbackName }));
         window.SENAC_CENTRAL_SYNC_WARNINGS = syncWarnings;
         window.SENAC_CENTRAL_INITIAL_DATA = { version: 2, classes: classData, recoveries: recoveryData, analystNotes: noteData, activityHistory: activityHistoryData };
         installPersistence(db, user, window.SENAC_CENTRAL_INITIAL_DATA);
@@ -323,7 +324,7 @@
         document.getElementById("analystProfileName").textContent = currentName;
         document.getElementById("profileAvatar").textContent = currentName.split(/\s+/).map(part => part[0]).slice(0, 2).join("").toUpperCase();
         const script = document.createElement("script");
-        script.src = `./analista.js?v=2.5.0`;
+        script.src = `./analista.js?v=2.6.0`;
         script.onload = () => loading?.remove();
         script.onerror = () => { if (loading) loading.innerHTML = "Não foi possível carregar a Central do Analista."; };
         document.body.appendChild(script);
