@@ -58,6 +58,7 @@
         profileMode: "analyst",
         previewInstructor: prototypeData.classes[0]?.instructor || "",
         recoveryFilter: "all",
+        activityHistoryFilter: "all",
         workflowFilter: "all",
         monitoringFilter: "all",
         filters: { instructor: "all", analyst: "all", classId: "all", uc: "all", search: "" },
@@ -235,7 +236,11 @@
     }
 
     function loadData() {
-        if (window.SENAC_CENTRAL_INITIAL_DATA) return JSON.parse(JSON.stringify(window.SENAC_CENTRAL_INITIAL_DATA));
+        if (window.SENAC_CENTRAL_INITIAL_DATA) {
+            const initial = JSON.parse(JSON.stringify(window.SENAC_CENTRAL_INITIAL_DATA));
+            if (!Array.isArray(initial.activityHistory)) initial.activityHistory = [];
+            return initial;
+        }
         try {
             const stored = JSON.parse(localStorage.getItem(STORAGE_KEY));
             if (stored && Array.isArray(stored.classes) && Array.isArray(stored.recoveries)) {
@@ -243,6 +248,10 @@
                 let migrated = false;
                 if (!Array.isArray(stored.analystNotes)) {
                     stored.analystNotes = defaults.analystNotes;
+                    migrated = true;
+                }
+                if (!Array.isArray(stored.activityHistory)) {
+                    stored.activityHistory = [];
                     migrated = true;
                 }
                 stored.classes.forEach(classItem => {
@@ -506,19 +515,20 @@
     }
 
     function analystsForClass(classId) {
-        return [...new Set(analystActivities().filter(item => item.classId === classId).map(item => item.analyst))];
+        const classItem = getClass(classId);
+        return [...new Set([classItem?.responsibleAnalyst, ...analystActivities().filter(item => item.classId === classId).map(item => item.analyst)].filter(Boolean))];
     }
 
     function analystClassLabel(classId) {
-        const analysts = analystsForClass(classId);
-        return analysts.length ? analysts.join(", ") : "Sem registro de analista";
+        const classItem = getClass(classId);
+        return classItem?.responsibleAnalyst || "Analista responsável não identificada";
     }
 
     function filteredClasses() {
         const effectiveInstructor = state.profileMode === "instructor" ? state.previewInstructor : state.filters.instructor;
         return state.data.classes.filter(classItem => {
             const instructorOk = effectiveInstructor === "all" || instructorNamesForClass(classItem).includes(effectiveInstructor);
-            const analystOk = state.profileMode === "instructor" || state.filters.analyst === "all" || analystsForClass(classItem.id).includes(state.filters.analyst);
+            const analystOk = state.profileMode === "instructor" || state.filters.analyst === "all" || classItem.responsibleAnalyst === state.filters.analyst;
             const classOk = state.filters.classId === "all" || classItem.id === state.filters.classId;
             const ucOk = state.filters.uc === "all" || classItem.ucs.some(uc => uc.name === state.filters.uc) || classItem.monitoring?.some(item => item.uc === state.filters.uc);
             const searchOk = matchesSearch([classItem.id, classItem.course, ...instructorNamesForClass(classItem), ...analystsForClass(classItem.id), ...classItem.students.flatMap(student => [student.name, student.orion])]);
@@ -605,7 +615,7 @@
         const instructors = [...new Set(state.data.classes.flatMap(instructorNamesForClass))].sort((a, b) => a.localeCompare(b, "pt-BR"));
         const analysts = [...new Set(ANALYST_NAMES)].sort((a, b) => a.localeCompare(b, "pt-BR"));
         const ucs = [...new Set(state.data.classes.flatMap(item => [...item.ucs.map(uc => uc.name), ...(item.monitoring || []).map(row => row.uc)]))].sort((a, b) => a === "PI" ? 1 : b === "PI" ? -1 : Number(a.replace(/\D/g, "")) - Number(b.replace(/\D/g, "")));
-        const availableClasses = state.profileMode === "instructor" ? state.data.classes.filter(item => item.instructor === state.previewInstructor) : state.data.classes;
+        const availableClasses = state.profileMode === "instructor" ? state.data.classes.filter(item => instructorNamesForClass(item).includes(state.previewInstructor)) : state.data.classes;
 
         instructorSelect.innerHTML = `<option value="all">Todos os instrutores</option>${instructors.map(name => `<option value="${escapeHTML(name)}">${escapeHTML(name)}</option>`).join("")}`;
         analystSelect.innerHTML = `<option value="all">Todos os analistas</option>${analysts.map(name => `<option value="${escapeHTML(name)}">${escapeHTML(name)}</option>`).join("")}`;
@@ -644,7 +654,7 @@
         document.getElementById("monitoringDescription").textContent = instructorMode ? "Pendências e entregas limitadas às turmas do instrutor visualizado." : "Situação de frequência, atividades, recuperação e lançamento no Órion.";
         document.getElementById("overviewEyebrow").textContent = instructorMode ? "Visão operacional" : "Panorama compartilhado";
         document.getElementById("overviewTitle").textContent = instructorMode ? `Acompanhamento de ${state.previewInstructor}` : "Acompanhamento das turmas";
-        document.getElementById("overviewDescription").textContent = instructorMode ? "Somente turmas, estudantes e tratativas disponíveis para este instrutor." : "Dados consolidados das chamadas abertas pelos instrutores.";
+        document.getElementById("overviewDescription").textContent = instructorMode ? "Somente turmas, estudantes e tratativas disponíveis para este instrutor." : "Dados consolidados das chamadas sincronizadas pelo aplicativo.";
         document.getElementById("reportsEyebrow").textContent = instructorMode ? "Desempenho das minhas turmas" : "Gestão e qualidade";
         document.getElementById("reportsTitle").textContent = instructorMode ? `Relatórios de ${state.previewInstructor}` : "Relatório global do analista";
         document.getElementById("reportsDescription").textContent = instructorMode ? "Indicadores limitados às turmas do instrutor visualizado." : "Comparativos por instrutor, turma, UC, motivo e resultado.";
@@ -714,15 +724,15 @@
         const recoveries = filteredRecoveries();
         const instructors = [...new Set(filteredClasses().flatMap(instructorNamesForClass))];
         const chartData = instructors.map(name => {
-            const items = recoveries.filter(item => getClass(item.classId)?.instructor === name);
+            const items = recoveries.filter(item => instructorNamesForClass(getClass(item.classId)).includes(name));
             return { name, open: items.filter(isOpen).length, closed: items.filter(item => item.status === "closed").length };
-        });
+        }).sort((a, b) => (b.open + b.closed) - (a.open + a.closed) || a.name.localeCompare(b.name, "pt-BR"));
         const max = Math.max(1, ...chartData.flatMap(item => [item.open, item.closed]));
         document.getElementById("instructorChart").innerHTML = chartData.length ? chartData.map(item => `
-            <div class="bar-group" title="${escapeHTML(item.name)}">
-                <div class="bar" style="height:${Math.max(3, item.open / max * 175)}px"><em>${item.open}</em></div>
-                <div class="bar closed" style="height:${Math.max(3, item.closed / max * 175)}px"><em>${item.closed}</em></div>
-                <label>${escapeHTML(item.name.split(" ")[0])}</label>
+            <div class="recovery-chart-row">
+                <strong title="${escapeHTML(item.name)}">${escapeHTML(item.name)}</strong>
+                <div class="recovery-series"><span>Abertas <b>${item.open}</b></span><div><i class="open" style="--value:${item.open / max * 100}%"></i></div></div>
+                <div class="recovery-series"><span>Concluídas <b>${item.closed}</b></span><div><i class="closed" style="--value:${item.closed / max * 100}%"></i></div></div>
             </div>`).join("") : `<div class="empty-state">Nenhum dado para os filtros escolhidos.</div>`;
     }
 
@@ -794,6 +804,35 @@
             const documentation = student.documentStatus === "com_documentacao" ? badge("Com documentação", "green") : badge("Sem documentação", process ? "red" : "amber");
             return `<tr><td><span class="cell-main">${escapeHTML(student.name)}</span><span class="cell-sub">Órion ${escapeHTML(student.orion || "-")}</span></td><td>${classItem.id}</td><td>${escapeHTML(instructorLabel(classItem))}</td><td>${badge(process ? "Em processo" : "Evadido/Desligado", process ? "amber" : "purple")}</td><td>${documentation}</td><td>${escapeHTML(student.dropoutReason || (process ? "Aguardando conclusão do processo" : "Desligamento identificado na chamada"))}</td></tr>`;
         }).join("") : `<tr><td colspan="6" class="empty-state">Nenhum aluno em processo ou desligado nas turmas filtradas.</td></tr>`;
+    }
+
+    function historyCategoryMeta(category) {
+        return ({
+            frequency: { label: "Chamada e alertas", tone: "orange" },
+            recovery: { label: "Recuperação", tone: "red" },
+            dropout: { label: "Desligamento e documentos", tone: "purple" },
+            notebook: { label: "Caderno e anotações", tone: "blue" },
+            orion: { label: "Órion", tone: "green" }
+        })[category] || { label: "Outra movimentação", tone: "gray" };
+    }
+
+    function renderActivityHistory() {
+        const body = document.getElementById("activityHistoryTable");
+        if (!body) return;
+        const allowedClasses = new Set(filteredClasses().map(item => item.id));
+        const rows = (state.data.activityHistory || []).filter(item => {
+            const classId = String(item.turmaKey || "");
+            const classOk = !classId || classId === "GERAL" || allowedClasses.has(classId);
+            const categoryOk = state.activityHistoryFilter === "all" || item.category === state.activityHistoryFilter;
+            const searchOk = matchesSearch([item.turmaKey, item.actorName, item.summary, item.detail, historyCategoryMeta(item.category).label]);
+            return classOk && categoryOk && searchOk;
+        }).sort((a, b) => String(b.occurredAt || "").localeCompare(String(a.occurredAt || ""))).slice(0, 300);
+        body.innerHTML = rows.length ? rows.map(item => {
+            const meta = historyCategoryMeta(item.category);
+            const date = item.occurredAt ? new Date(item.occurredAt) : null;
+            const dateLabel = date && !Number.isNaN(date.getTime()) ? date.toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" }) : "Data não informada";
+            return `<tr><td><span class="cell-main">${escapeHTML(dateLabel)}</span></td><td>${badge(meta.label, meta.tone)}</td><td><span class="cell-main">${escapeHTML(item.turmaKey || "Geral")}</span></td><td>${escapeHTML(item.actorName || item.actorEmail || "Sistema")}</td><td><span class="cell-main history-event">${escapeHTML(item.summary || "Movimentação registrada.")}</span>${item.detail ? `<span class="cell-sub">${escapeHTML(item.detail)}</span>` : ""}</td></tr>`;
+        }).join("") : `<tr><td colspan="5" class="empty-state">Nenhuma movimentação encontrada para os filtros escolhidos.</td></tr>`;
     }
 
     function renderKanban() {
@@ -1106,19 +1145,18 @@
         document.getElementById("monitoringInstructorChart").innerHTML = byInstructor.length ? byInstructor.map(item => `<div class="h-bar-row"><strong>${escapeHTML(item.name.split(" ")[0])}</strong><div class="h-bar-track"><i style="--value:${item.value}%;--tone:${item.value >= 85 ? "#078847" : item.value >= 65 ? "#d17b08" : "#c62828"}"></i></div><b>${item.value}%</b></div>`).join("") : `<div class="empty-state">Sem dados.</div>`;
 
         const allowedClassIds = new Set(rows.map(item => item.classItem.id));
-        let analystUsage = analystActivities().filter(item => allowedClassIds.has(item.classId));
-        if (state.filters.uc !== "all") analystUsage = analystUsage.filter(item => !item.uc || item.uc === state.filters.uc);
-        if (state.filters.analyst !== "all") analystUsage = analystUsage.filter(item => item.analyst === state.filters.analyst);
-        const byAnalyst = [...new Set(analystUsage.map(item => item.analyst))].map(analyst => {
-            const records = analystUsage.filter(item => item.analyst === analyst);
+        const analystUsage = filteredClasses().filter(item => allowedClassIds.has(item.id) && item.responsibleAnalyst);
+        const byAnalyst = [...new Set(analystUsage.map(item => item.responsibleAnalyst))].map(analyst => {
+            const assignedClasses = analystUsage.filter(item => item.responsibleAnalyst === analyst);
+            const records = analystActivities().filter(item => assignedClasses.some(classItem => classItem.id === item.classId));
             return {
                 name: analyst,
-                classes: new Set(records.map(item => item.classId)).size,
+                classes: assignedClasses.length,
                 records: records.length,
                 active: records.filter(item => item.active).length
             };
         }).sort((a, b) => b.active - a.active || b.records - a.records || a.name.localeCompare(b.name));
-        document.getElementById("monitoringAnalystChart").innerHTML = byAnalyst.length ? byAnalyst.map((item, index) => `<div class="analyst-load-row" style="--tone:${["#004a8d", "#f58220", "#078847", "#6d3cb4", "#c62828"][index % 5]}"><div><strong>${escapeHTML(item.name)}</strong><small>${item.records} registro(s) em ${item.classes} turma(s)</small></div><b title="Registros ativos">${item.active}</b></div>`).join("") : `<div class="empty-state">O quadro será formado conforme os analistas registrarem situações.</div>`;
+        document.getElementById("monitoringAnalystChart").innerHTML = byAnalyst.length ? byAnalyst.map((item, index) => `<div class="analyst-load-row" style="--tone:${["#004a8d", "#f58220", "#078847", "#6d3cb4", "#c62828"][index % 5]}"><div><strong>${escapeHTML(item.name)}</strong><small>${item.classes} turma(s) sob responsabilidade · ${item.records} registro(s)</small></div><b title="Registros ativos">${item.active}</b></div>`).join("") : `<div class="empty-state">A responsabilidade será identificada pelo nome da analista na pasta da turma após a varredura pelo aplicativo.</div>`;
 
         const pendingVolume = item => {
             if (monitoringTiming(item.classItem, item.record) === "future") return 0;
@@ -1202,6 +1240,7 @@
         renderRecoverySegments();
         renderRecoveriesTable();
         renderDropoutTracking();
+        renderActivityHistory();
         renderKanban();
         renderCalendar();
         renderReports();
@@ -1618,6 +1657,7 @@
         document.getElementById("clearFilters").addEventListener("click", () => { state.filters = { instructor: state.profileMode === "instructor" ? state.previewInstructor : "all", analyst: "all", classId: "all", uc: "all", search: "" }; document.getElementById("globalSearch").value = ""; renderAll(); });
 
         document.querySelectorAll("[data-recovery-filter]").forEach(button => button.addEventListener("click", () => { state.recoveryFilter = button.dataset.recoveryFilter; renderRecoverySegments(); renderRecoveriesTable(); refreshIcons(); }));
+        document.getElementById("activityHistoryFilter")?.addEventListener("change", event => { state.activityHistoryFilter = event.target.value; renderActivityHistory(); refreshIcons(); });
         document.querySelectorAll("[data-workflow-filter]").forEach(button => button.addEventListener("click", () => { state.workflowFilter = button.dataset.workflowFilter; renderKanban(); refreshIcons(); }));
         document.querySelectorAll("[data-monitoring-filter]").forEach(button => button.addEventListener("click", () => { state.monitoringFilter = button.dataset.monitoringFilter; renderMonitoring(); refreshIcons(); }));
 

@@ -5,7 +5,8 @@
         { key: "MICHEL", tokens: ["michel"], fallbackName: "Michel Farias" },
         { key: "MARIANA", tokens: ["mariana"], fallbackName: "Mariana Mello" },
         { key: "BRUNA_CUNHA", tokens: ["bruna", "cunha"], fallbackName: "Bruna Cunha" },
-        { key: "BIANCA", tokens: ["bianca"], fallbackName: "Bianca Aresta" }
+        { key: "BIANCA", tokens: ["bianca"], fallbackName: "Bianca Aresta" },
+        { key: "JULIANA_SEVERO", tokens: ["juliana", "severo"], fallbackName: "Juliana Severo" }
     ];
     const DAY = 86400000;
 
@@ -19,7 +20,7 @@
         return text && !/^(não identificado|nao identificado|instrutor|tutor)$/i.test(text) ? text : "";
     };
     const validClassSummary = summary => /\d{9}/.test(String(summary?.turma || summary?.turmaKey || ""));
-    const canonicalInstructor = value => {
+    const baseCanonicalInstructor = value => {
         const text = validName(value);
         const key = normalize(text).replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
         if (!key || /^\d+[.]?$/.test(key) || /a partir de|periodo|não identificado|nao identificado/.test(key)) return "";
@@ -28,6 +29,22 @@
         if (key === "bruna lorena" || key.startsWith("bruna lorena de lima")) return "Bruna Lorena de Lima";
         return text;
     };
+    let canonicalInstructor = baseCanonicalInstructor;
+
+    function configureInstructorAliases(classSummaries) {
+        const names = [...new Set(classSummaries.flatMap(summary => [...(summary.instructors || []), summary.tutor1, summary.tutor2]).map(baseCanonicalInstructor).filter(Boolean))];
+        const records = names.map(name => ({ name, tokens: normalize(name).replace(/[^a-z0-9 ]/g, " ").split(/\s+/).filter(Boolean) }));
+        canonicalInstructor = value => {
+            const base = baseCanonicalInstructor(value);
+            const tokens = normalize(base).replace(/[^a-z0-9 ]/g, " ").split(/\s+/).filter(Boolean);
+            if (!tokens.length) return "";
+            const extensions = records.filter(record => record.tokens.length > tokens.length && tokens.every((token, index) => record.tokens[index] === token));
+            if (!extensions.length) return base;
+            const nextTokens = new Set(extensions.map(record => record.tokens[tokens.length]));
+            if (nextTokens.size !== 1) return base;
+            return extensions.sort((a, b) => b.tokens.length - a.tokens.length || b.name.length - a.name.length)[0].name;
+        };
+    }
 
     function analystSeedForUser(user) {
         const identity = normalize(`${user?.email?.split("@")[0] || ""} ${user?.displayName || ""}`);
@@ -67,7 +84,7 @@
         return groups;
     }
 
-    function buildClass(summary, studentsSource, latest, override) {
+    function buildClass(summary, studentsSource, latest, override, responsibleAnalyst) {
         const rawClass = String(summary.turma || summary.turmaKey || "");
         const id = (rawClass.match(/\d{9}/) || [summary.turmaKey || keyOf(rawClass)])[0];
         const instructors = [...new Set([...(summary.instructors || []), summary.tutor1, summary.tutor2].map(canonicalInstructor).filter(Boolean))];
@@ -135,6 +152,9 @@
             students,
             ucs,
             monitoring,
+            responsibleAnalyst: String(responsibleAnalyst || summary.responsibleAnalyst || ""),
+            responsibleAnalystKey: String(summary.responsibleAnalystKey || ""),
+            sourceFolderName: String(summary.sourceFolderName || ""),
             sourceUpdatedAt: summary.updatedAt || null
         };
     }
@@ -182,7 +202,7 @@
                 return { docs: [] };
             }
         };
-        const [profiles, classes, students, histories, recoveries, sharedNotes, ownNotes, ownEvaluations, overrides, instructorNotes] = await Promise.all([
+        const [profiles, classes, students, histories, recoveries, sharedNotes, ownNotes, ownEvaluations, overrides, instructorNotes, activityHistory] = await Promise.all([
             safeGet("perfis dos analistas", db.collection("analyst_profiles")),
             safeGet("turmas sincronizadas", db.collection("saved_classes"), true),
             safeGet("alunos das turmas", db.collection("saved_class_students"), true),
@@ -192,16 +212,19 @@
             safeGet("caderno privado do analista", db.collection("analyst_notes").where("ownerEmail", "==", ownerEmail)),
             safeGet("avaliações privadas", db.collection("analyst_evaluations").where("ownerEmail", "==", ownerEmail)),
             safeGet("configurações das turmas", db.collection("analyst_class_overrides")),
-            safeGet("chamados dos instrutores", db.collection("instructor_notes"))
+            safeGet("chamados dos instrutores", db.collection("instructor_notes")),
+            safeGet("histórico de movimentações", db.collection("activity_history"))
         ]);
 
         const profileMap = new Map(profiles.docs.map(doc => [String(doc.data().analystKey || ""), doc.data()]));
         const analystNames = ANALYST_SEEDS.map(item => String(profileMap.get(item.key)?.fullName || (item.key === seed.key ? currentName : item.fallbackName)));
+        const analystNameByKey = new Map(ANALYST_SEEDS.map((item, index) => [item.key, analystNames[index]]));
         const studentGroups = groupStudents(students.docs);
         const latestHistories = latestHistoryByClass(histories.docs);
         const overrideMap = new Map(overrides.docs.map(doc => [doc.id, doc.data()]));
+        configureInstructorAliases(classes.docs.map(doc => ({ turmaKey: doc.id, ...doc.data() })));
         const classData = classes.docs.map(doc => ({ doc, summary: { turmaKey: doc.id, ...doc.data() } })).filter(item => validClassSummary(item.summary)).map(({ doc, summary }) => {
-            return buildClass(summary, studentGroups.get(doc.id) || [], latestHistories.get(doc.id), overrideMap.get(doc.id));
+            return buildClass(summary, studentGroups.get(doc.id) || [], latestHistories.get(doc.id), overrideMap.get(doc.id), analystNameByKey.get(String(summary.responsibleAnalystKey || "")) || summary.responsibleAnalyst);
         }).sort((a, b) => b.id.localeCompare(a.id));
 
         const recordedRecoveries = recoveries.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -265,11 +288,22 @@
             };
         }).filter(Boolean);
         const noteData = [...analystNoteData, ...instructorNoteData];
+        const recordedHistory = activityHistory.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        const frequencyHistory = histories.docs.map(doc => {
+            const snapshot = doc.data() || {};
+            const metrics = snapshot.class || {};
+            const alerts = Number(metrics.naPending || 0) + Number(metrics.activityPending || 0) + Number(metrics.treatmentOpen || 0);
+            return { id: `snapshot-${doc.id}`, turmaKey: String(snapshot.turmaKey || snapshot.turma || ""), category: "frequency", action: "snapshot", occurredAt: String(snapshot.capturedAt || ""), actorName: String(snapshot.recordedBy || "Sistema"), actorEmail: String(snapshot.recordedBy || ""), entityId: String(snapshot.turmaKey || ""), summary: `Chamada atualizada: ${Number(metrics.naPending || 0)} NA pendente(s), ${Number(metrics.activityPending || 0)} atividade(s) pendente(s) e ${Number(metrics.treatmentOpen || 0)} tratativa(s) aberta(s).`, detail: alerts ? `${alerts} ponto(s) de atenção no retrato.` : "Nenhum ponto de atenção no retrato." };
+        });
+        const recoveryHistory = recordedRecoveries.map(item => ({ id: `current-recovery-${item.id}`, turmaKey: String(item.classId || ""), category: "recovery", action: "current", occurredAt: String(item.updatedAt || item.start || ""), actorName: String(item.updatedBy || item.createdBy || "Sistema"), actorEmail: String(item.updatedBy || ""), entityId: item.id, summary: `${item.studentName || "Aluno"}: Recuperação ${item.number || 1} está como ${item.status || "sem tratativa"}.`, detail: `${item.uc || "UC não informada"} · ${item.reason || "Motivo não informado"}` }));
+        const notebookHistory = noteData.map(item => ({ id: `current-note-${item.id}`, turmaKey: String(item.classId || ""), category: "notebook", action: "current", occurredAt: String(item.date || ""), actorName: String(item.author || "Sistema"), actorEmail: String(item.ownerEmail || ""), entityId: item.id, summary: `${item.type || "Anotação"}: ${item.subject || "Sem assunto"}.`, detail: `${item.instructor || "Instrutor não identificado"} · ${item.trackingStatus || item.status || "Sem status"}` }));
+        const dropoutHistory = classData.flatMap(classItem => classItem.students.filter(student => student.isProcessDropout || student.isDropout || student.documentStatus).map(student => ({ id: `current-dropout-${classItem.id}-${keyOf(student.name)}`, turmaKey: classItem.id, category: "dropout", action: "current", occurredAt: String(classItem.sourceUpdatedAt || ""), actorName: "Sistema", actorEmail: "", entityId: student.id, summary: `${student.name}: ${student.isDropout ? "evasão/desligamento" : "processo de desligamento"}.`, detail: student.documentStatus ? `Documentação: ${student.documentStatus.replaceAll("_", " ")}.` : "Situação documental não informada." })));
+        const activityHistoryData = [...recordedHistory, ...frequencyHistory, ...recoveryHistory, ...notebookHistory, ...dropoutHistory].sort((a, b) => String(b.occurredAt || "").localeCompare(String(a.occurredAt || ""))).slice(0, 1000);
 
         window.SENAC_CENTRAL_USER = { uid: user.uid, email: user.email, name: currentName, analystKey: seed.key };
         window.SENAC_ANALYST_NAMES = analystNames;
         window.SENAC_CENTRAL_SYNC_WARNINGS = syncWarnings;
-        window.SENAC_CENTRAL_INITIAL_DATA = { version: 2, classes: classData, recoveries: recoveryData, analystNotes: noteData };
+        window.SENAC_CENTRAL_INITIAL_DATA = { version: 2, classes: classData, recoveries: recoveryData, analystNotes: noteData, activityHistory: activityHistoryData };
         installPersistence(db, user, window.SENAC_CENTRAL_INITIAL_DATA);
         let receivedInitialClassSnapshot = false;
         let classRefreshTimer = null;
@@ -288,7 +322,7 @@
         document.getElementById("analystProfileName").textContent = currentName;
         document.getElementById("profileAvatar").textContent = currentName.split(/\s+/).map(part => part[0]).slice(0, 2).join("").toUpperCase();
         const script = document.createElement("script");
-        script.src = `./analista.js?v=2.3.0`;
+        script.src = `./analista.js?v=2.4.0`;
         script.onload = () => loading?.remove();
         script.onerror = () => { if (loading) loading.innerHTML = "Não foi possível carregar a Central do Analista."; };
         document.body.appendChild(script);
@@ -303,12 +337,23 @@
                 const previousRecoveries = new Map((previous.recoveries || []).map(item => [item.id, item]));
                 const nextRecoveries = new Map((data.recoveries || []).map(item => [item.id, item]));
                 const writes = [];
+                const historyWrite = (category, action, entityId, turmaKey, summary, before, after) => {
+                    const id = `event-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+                    const clean = value => JSON.parse(JSON.stringify(value || {}));
+                    writes.push(db.collection("activity_history").doc(id).set({
+                        turmaKey: String(turmaKey || "GERAL"), category, action, summary: String(summary || "Alteração registrada."),
+                        occurredAt: new Date().toISOString(), actorEmail: String(user.email || ""), actorName: String(window.SENAC_CENTRAL_USER?.name || user.email || "Usuário"),
+                        entityId: String(entityId || ""), before: clean(before), after: clean(after)
+                    }));
+                };
                 nextRecoveries.forEach((item, id) => {
                     if (JSON.stringify(item) !== JSON.stringify(previousRecoveries.get(id))) {
                         writes.push(db.collection("analyst_recoveries").doc(id).set({ ...item, updatedBy: user.email, ownerEmail: user.email, updatedAt: new Date().toISOString() }, { merge: true }));
+                        const oldItem = previousRecoveries.get(id);
+                        historyWrite("recovery", oldItem ? "update" : "create", id, item.classId, `${item.studentName || "Aluno"}: Recuperação ${item.number || 1} ${oldItem ? `alterada de ${oldItem.status || "sem status"} para ${item.status || "sem status"}` : "criada"}.`, oldItem, item);
                     }
                 });
-                previousRecoveries.forEach((item, id) => { if (!nextRecoveries.has(id)) writes.push(db.collection("analyst_recoveries").doc(id).delete()); });
+                previousRecoveries.forEach((item, id) => { if (!nextRecoveries.has(id)) { writes.push(db.collection("analyst_recoveries").doc(id).delete()); historyWrite("recovery", "delete", id, item.classId, `${item.studentName || "Aluno"}: registro de recuperação removido.`, item, {}); } });
                 (data.classes || []).forEach(classItem => {
                     const oldClass = (previous.classes || []).find(item => item.id === classItem.id);
                     const payload = {
@@ -322,7 +367,12 @@
                     };
                     const oldPayload = oldClass ? { start: oldClass.start, end: oldClass.end, currentUc: oldClass.currentUc, ucs: oldClass.ucs, orion: Object.fromEntries((oldClass.monitoring || []).map(record => [record.uc, record.orion])) } : null;
                     const comparable = { start: payload.start, end: payload.end, currentUc: payload.currentUc, ucs: payload.ucs, orion: payload.orion };
-                    if (JSON.stringify(comparable) !== JSON.stringify(oldPayload)) writes.push(db.collection("analyst_class_overrides").doc(classItem.id).set(payload, { merge: true }));
+                    if (JSON.stringify(comparable) !== JSON.stringify(oldPayload)) {
+                        writes.push(db.collection("analyst_class_overrides").doc(classItem.id).set(payload, { merge: true }));
+                        const oldOrion = oldPayload?.orion || {};
+                        const changedOrion = Object.keys(payload.orion || {}).filter(uc => JSON.stringify(payload.orion[uc]) !== JSON.stringify(oldOrion[uc]));
+                        historyWrite(changedOrion.length ? "orion" : "frequency", "update", classItem.id, classItem.id, changedOrion.length ? `Órion atualizado em ${changedOrion.join(", ")}.` : "Datas ou unidades curriculares da turma foram atualizadas.", oldPayload, comparable);
+                    }
                 });
                 const previousNotes = new Map((previous.analystNotes || []).filter(item => item.source !== "instructor_notebook").map(item => [item.id, item]));
                 const nextNotes = new Map((data.analystNotes || []).filter(item => item.source !== "instructor_notebook").map(item => [item.id, item]));
@@ -362,6 +412,7 @@
                     delete sharedPayload.score;
                     writes.push(db.collection("analyst_notes").doc(note.id).set(privatePayload, { merge: true }));
                     writes.push(db.collection("analyst_shared_notes").doc(note.id).set(sharedPayload, { merge: true }));
+                    historyWrite("notebook", oldNote ? "update" : "create", note.id, privatePayload.turmaKey, `${privatePayload.followupType}: ${privatePayload.subject} ${oldNote ? "foi atualizado" : "foi criado"} para ${privatePayload.instructorName}.`, oldNote, note);
                     if (note.evaluationPercent !== null && note.evaluationPercent !== "" && Number.isInteger(Number(note.evaluationPercent))) {
                         writes.push(db.collection("analyst_evaluations").doc(note.id).set({ ownerEmail: user.email, turmaKey: privatePayload.turmaKey, analystKey: privatePayload.analystKey, score: Number(note.evaluationPercent), updatedAt }, { merge: true }));
                     } else if (oldNote?.evaluationPercent !== null && oldNote?.evaluationPercent !== undefined) {
@@ -373,6 +424,7 @@
                     writes.push(db.collection("analyst_notes").doc(id).delete());
                     writes.push(db.collection("analyst_shared_notes").doc(id).delete());
                     writes.push(db.collection("analyst_evaluations").doc(id).delete());
+                    historyWrite("notebook", "delete", id, note.classId, `${note.type || "Anotação"}: ${note.subject || "Sem assunto"} foi removida.`, note, {});
                 });
                 try {
                     await Promise.all(writes);

@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="./analista.css?v=2.3.0">
+    <link rel="stylesheet" href="./analista.css?v=2.4.0">
     <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore-compat.js"></script>
@@ -61,7 +61,7 @@
         <button class="nav-item active" data-view="overview"><i data-lucide="layout-dashboard"></i><span id="overviewNavLabel">Visão geral</span></button>
         <button class="nav-item" data-view="classes"><i data-lucide="school"></i><span id="classesNavLabel">Turmas</span></button>
         <button class="nav-item" data-view="monitoring"><i data-lucide="clipboard-check"></i><span id="monitoringNavLabel">Monitoramento</span><b id="monitoringNavCount">0</b></button>
-        <button class="nav-item" data-view="recoveries"><i data-lucide="book-open-check"></i><span>Recuperações</span><b id="recoveryNavCount">0</b></button>
+        <button class="nav-item" data-view="recoveries"><i data-lucide="book-open-check"></i><span>Situações dos alunos</span><b id="recoveryNavCount">0</b></button>
         <button class="nav-item" data-view="workflow"><i data-lucide="columns-3"></i><span>Tratativas</span></button>
         <button class="nav-item" data-view="calendar"><i data-lucide="calendar-days"></i><span>Calendário</span></button>
         <button class="nav-item" data-view="reports"><i data-lucide="chart-no-axes-combined"></i><span id="reportsNavLabel">Relatórios</span></button>
@@ -106,13 +106,13 @@
 
         <section class="view active" id="view-overview">
             <div class="page-heading">
-                <div><span class="eyebrow" id="overviewEyebrow">Panorama compartilhado</span><h2 id="overviewTitle">Acompanhamento das turmas</h2><p id="overviewDescription">Dados consolidados das chamadas abertas pelos instrutores.</p></div>
+                <div><span class="eyebrow" id="overviewEyebrow">Panorama compartilhado</span><h2 id="overviewTitle">Acompanhamento das turmas</h2><p id="overviewDescription">Dados consolidados das chamadas sincronizadas pelo aplicativo.</p></div>
                 <button class="primary-button" data-open-recovery><i data-lucide="plus"></i> Nova recuperação</button>
             </div>
             <div class="metric-grid" id="metrics"></div>
             <div class="dashboard-grid">
                 <section class="panel chart-panel">
-                    <div class="panel-heading"><div><h3>Recuperações por instrutor</h3><p>Quantidade aberta e concluída no período</p></div><span class="legend"><i></i>Abertas <i></i>Concluídas</span></div>
+                    <div class="panel-heading"><div><h3>Recuperações por instrutor</h3><p>Compare, em cada linha, quantas estão abertas e quantas foram concluídas.</p></div><span class="legend" aria-label="Legenda do gráfico"><i></i>Laranja: abertas <i></i>Azul: concluídas</span></div>
                     <div id="instructorChart" class="bar-chart"></div>
                 </section>
                 <section class="panel attention-panel">
@@ -173,7 +173,7 @@
 
         <section class="view" id="view-recoveries">
             <div class="page-heading">
-                <div><span class="eyebrow">Acompanhamento individual</span><h2>Recuperações</h2><p>Cada abertura recebe um número e mantém seu próprio histórico.</p></div>
+                <div><span class="eyebrow">Recuperação, desligamento e documentação</span><h2>Situações dos alunos</h2><p>Acompanhe recuperações, processos de desligamento, documentação e o histórico das alterações.</p></div>
                 <button class="primary-button" data-open-recovery><i data-lucide="plus"></i> Nova recuperação</button>
             </div>
             <div class="segmented" id="recoverySegments">
@@ -188,6 +188,10 @@
             <section class="table-section">
                 <div class="panel-heading"><div><h3>Desligamentos e documentação</h3><p>Alunos em processo, com ou sem documentação, e desligamentos concluídos.</p></div></div>
                 <div class="table-wrap"><table><thead><tr><th>Aluno</th><th>Turma</th><th>Instrutor</th><th>Situação</th><th>Documentação</th><th>Observação</th></tr></thead><tbody id="dropoutTrackingTable"></tbody></table></div>
+            </section>
+            <section class="table-section">
+                <div class="panel-heading"><div><h3>Histórico de movimentações</h3><p>Registro cronológico das mudanças realizadas no sistema e dos retratos recebidos das planilhas.</p></div><label class="history-filter">Mostrar<select id="activityHistoryFilter"><option value="all">Todas as movimentações</option><option value="frequency">Chamadas e alertas</option><option value="recovery">Recuperações</option><option value="dropout">Desligamento e documentos</option><option value="notebook">Cadernos e anotações</option><option value="orion">Órion</option></select></label></div>
+                <div class="table-wrap"><table><thead><tr><th>Data</th><th>Tipo</th><th>Turma</th><th>Responsável</th><th>O que aconteceu</th></tr></thead><tbody id="activityHistoryTable"></tbody></table></div>
             </section>
         </section>
 
@@ -269,7 +273,7 @@
                 <details><summary><i data-lucide="presentation"></i><span><strong>Avaliação e mediação do instrutor</strong><small>Ação não é o mesmo que resultado</small></span><i data-lucide="chevron-down"></i></summary><div><p>Os oito indicadores principais seguem a sequência: cobertura de ação, tratativas concluídas, interação efetiva, engajamento, frequência, aprendizagem, risco revertido e permanência.</p><p>Mensagem enviada conta como ação. Somente a resposta do jovem confirma interação; participação e entrega confirmam engajamento; evolução na UC confirma aprendizagem. As métricas operacionais ficam separadas para não transformar volume de mensagens em resultado pedagógico.</p><p>O diagnóstico diferencial aponta se o risco decorre de ausência de tentativa, abordagem sem retorno, interação sem engajamento ou engajamento sem aprendizagem. A avaliação percentual é privada; o instrutor recebe o conteúdo do acompanhamento sem a porcentagem.</p></div></details>
                 <details><summary><i data-lucide="calendar-days"></i><span><strong>Calendário e alertas</strong><small>Prazos que exigem atuação</small></span><i data-lucide="chevron-down"></i></summary><div><p>Recuperações abertas entram em alerta sete dias antes do término da UC. “Vencida” é calculada automaticamente. O botão do Outlook gera lembretes para os prazos críticos.</p></div></details>
                 <details><summary><i data-lucide="chart-no-axes-combined"></i><span><strong>Relatórios</strong><small>Quantidade, qualidade e evolução</small></span><i data-lucide="chevron-down"></i></summary><div><p>Os relatórios respeitam os filtros globais. Quantidade mostra volume de casos; qualidade mostra resultados; mediação compara ação do instrutor com engajamento, aprendizagem, frequência e permanência.</p></div></details>
-                <details><summary><i data-lucide="refresh-cw"></i><span><strong>Sincronização e origem dos dados</strong><small>O que fica gravado</small></span><i data-lucide="chevron-down"></i></summary><div><p>No aplicativo, “Varrer rede” percorre as pastas Turmas 2025 e Turmas 2026, lê as chamadas ativas e grava o retrato no Firebase. Qualquer portal do analista aberto recebe a atualização automaticamente.</p><p>A regra considera ativas as qualificações iniciadas nos últimos 380 dias e os cursos técnicos iniciados nos últimos 600 dias. Recuperações, avaliações, tratativas e datas ficam no Firebase. Atividades representam o último upload disponível.</p></div></details>
+                <details><summary><i data-lucide="refresh-cw"></i><span><strong>Sincronização e origem dos dados</strong><small>O que fica gravado</small></span><i data-lucide="chevron-down"></i></summary><div><p>No aplicativo, “Varrer rede” percorre as pastas Turmas 2025 e Turmas 2026, lê as chamadas ativas e grava o retrato no Firebase. Qualquer portal do analista aberto recebe a atualização automaticamente.</p><p>O analista responsável é identificado pelo nome escrito na pasta da turma. Por exemplo: uma pasta com “Bruna” pertence à Bruna Cunha. O filtro de analista usa essa atribuição, não a pessoa que abriu ou alterou a turma.</p><p>A regra considera ativas as qualificações iniciadas nos últimos 380 dias e os cursos técnicos iniciados nos últimos 600 dias. Recuperações, avaliações, tratativas, datas e mudanças de status ficam no Firebase. Atividades representam o último upload disponível.</p></div></details>
             </div>
         </section>
     </main>
@@ -366,6 +370,6 @@
     </div>
 
     <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
-    <script src="./analista-bootstrap.js?v=2.3.0"></script>
+    <script src="./analista-bootstrap.js?v=2.4.0"></script>
 </body>
 </html>

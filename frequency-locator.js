@@ -14,6 +14,18 @@ const extractClassNumber = value => {
     return match ? match[0] : '';
 };
 
+const extractResponsibleAnalyst = value => {
+    const normalized = normalizeName(value);
+    const analysts = [
+        { pattern: /\bJULIANA(?:\s+SEVERO)?\b/, key: 'JULIANA_SEVERO', name: 'Juliana Severo' },
+        { pattern: /\bBRUNA(?:\s+CUNHA)?\b/, key: 'BRUNA_CUNHA', name: 'Bruna Cunha' },
+        { pattern: /\bMARIANA\b/, key: 'MARIANA', name: 'Mariana' },
+        { pattern: /\bMICHEL\b/, key: 'MICHEL', name: 'Michel Farias' },
+        { pattern: /\bBIANCA\b/, key: 'BIANCA', name: 'Bianca' }
+    ];
+    return analysts.find(item => item.pattern.test(normalized)) || null;
+};
+
 const extractFolderStartDate = value => {
     const matches = [...String(value || '').matchAll(/(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{4})/g)];
     if (!matches.length) return null;
@@ -218,7 +230,10 @@ async function scanFrequencyClasses(options = {}) {
                     candidates = controlDirectory ? await listFrequencyFiles(controlDirectory, turma) : [];
                     location = controlEntry ? controlEntry.name : 'Controle de Frequência';
                 }
-                if (candidates.length) results.push({ ...candidates[0], turma, year, classDirectory, folderName: entry.name, location });
+                if (candidates.length) {
+                    const responsibleAnalyst = extractResponsibleAnalyst(entry.name);
+                    results.push({ ...candidates[0], turma, year, classDirectory, folderName: entry.name, location, responsibleAnalystKey: responsibleAnalyst?.key || '', responsibleAnalyst: responsibleAnalyst?.name || '' });
+                }
                 else missing.push({ turma, year, classDirectory, folderName: entry.name });
             } catch (error) {
                 errors.push({ turma, year, classDirectory, error: error.message });
@@ -230,4 +245,4 @@ async function scanFrequencyClasses(options = {}) {
     return { root, years, totalFolders, found: results.length, missing: missing.length, inactive: inactive.length, errorCount: errors.length, classes: results, missingClasses: missing, inactiveClasses: inactive, errors, scannedAt: new Date().toISOString(), activeRule: '380 dias para qualificações e 600 dias para cursos técnicos' };
 }
 
-module.exports = { DEFAULT_NETWORK_ROOT, extractClassNumber, locateFrequencyFile, normalizeName, scanDropoutDocuments, scanFrequencyClasses };
+module.exports = { DEFAULT_NETWORK_ROOT, extractClassNumber, extractResponsibleAnalyst, locateFrequencyFile, normalizeName, scanDropoutDocuments, scanFrequencyClasses };

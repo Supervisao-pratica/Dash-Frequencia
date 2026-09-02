@@ -260,6 +260,22 @@ service cloud.firestore {
         && request.resource.data.students is map;
     }
 
+    match /activity_history/{eventId} {
+      allow read: if isSenacUser();
+
+      allow create: if isSenacUser()
+        && request.resource.data.turmaKey is string
+        && request.resource.data.category is string
+        && request.resource.data.action is string
+        && request.resource.data.summary is string
+        && request.resource.data.occurredAt is string
+        && request.resource.data.actorEmail == request.auth.token.email
+        && request.resource.data.actorName is string
+        && request.resource.data.entityId is string
+        && request.resource.data.before is map
+        && request.resource.data.after is map;
+    }
+
     match /saved_classes/{turmaKey} {
       allow read, delete: if isSenacUser();
 

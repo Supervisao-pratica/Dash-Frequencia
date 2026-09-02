@@ -967,6 +967,30 @@
             return source;
         };
 
+        const persistActivityHistoryEvent = async ({ turma, category, action, entityId, summary, before = {}, after = {} }) => {
+            try {
+                const db = await getNotebookFirestore();
+                const actorEmail = getCurrentAuthenticatedEmail();
+                if (!db || !actorEmail) return;
+                const clean = value => JSON.parse(JSON.stringify(value || {}, (key, item) => item === undefined ? null : item));
+                const eventId = `event-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+                await db.collection("activity_history").doc(eventId).set({
+                    turmaKey: cleanNotebookKey(turma, "GERAL"),
+                    category: String(category || "other"),
+                    action: String(action || "update"),
+                    summary: String(summary || "Alteração registrada."),
+                    occurredAt: new Date().toISOString(),
+                    actorEmail,
+                    actorName: String(firebase.auth()?.currentUser?.displayName || actorEmail.split("@")[0] || "Usuário"),
+                    entityId: String(entityId || ""),
+                    before: clean(before),
+                    after: clean(after)
+                });
+            } catch (error) {
+                console.warn("Não foi possível registrar a movimentação no histórico.", error);
+            }
+        };
+
         const DROPOUT_DOCUMENT_STORAGE_PREFIX = "dropout_documents_v1_";
         const DROPOUT_DOCUMENT_STATUS_OPTIONS = [
             { value: "sem_documentacao", label: "Sem documentação", className: "bg-red-100 text-red-800 border-red-200" },
@@ -1018,12 +1042,14 @@
             const normalized = normalizeDropoutDocumentRecord(record, turma, record && record.studentName);
             if (!normalized.studentKey) return { record: normalized, source: "local" };
             const records = readDropoutDocumentsLocal(turma);
+            const previousRecord = records[normalized.studentKey] || {};
             records[normalized.studentKey] = normalized;
             writeDropoutDocumentsLocal(turma, records);
             const db = await getNotebookFirestore();
             if (!db) return { record: normalized, source: "local" };
             try {
                 await db.collection("dropout_documents").doc(makeDropoutDocumentDocId(turma, normalized.studentKey)).set(normalized, { merge: true });
+                await persistActivityHistoryEvent({ turma, category: "dropout", action: Object.keys(previousRecord).length ? "update" : "create", entityId: normalized.studentKey, summary: `${normalized.studentName || "Aluno"}: documentação definida como ${getDropoutDocumentMeta(normalized).label.toLowerCase()}.`, before: previousRecord, after: normalized });
                 return { record: normalized, source: "cloud" };
             } catch (error) {
                 console.error("Erro ao salvar acompanhamento documental", error);
@@ -1110,6 +1136,7 @@
                     instructorKey: cleanNotebookKey(canonicalInstructorName, "INSTRUTOR"),
                     ownerEmail: getCurrentAuthenticatedEmail()
                 });
+                await persistActivityHistoryEvent({ turma, category: "notebook", action: "create", entityId: note.id, summary: `${getNotebookSituationLabel(note)} criado no caderno de ${canonicalInstructorName}.`, after: normalizedNote });
                 return { source: "cloud" };
             } catch (error) {
                 console.error("Erro ao salvar nota no Firebase; nota mantida localmente", error);
@@ -1121,6 +1148,7 @@
             const canonicalInstructorName = canonicalizeInstructorName(instructorName);
             const storageKey = makeNotebookStorageKey(turma, canonicalInstructorName);
             const normalized = normalizeNotebookNote(note);
+            const previousNote = readNotebookNotesLocal(storageKey).find(item => String(item.id) === String(normalized.id)) || {};
             const notes = readNotebookNotesLocal(storageKey).map(item => String(item.id) === String(normalized.id) ? normalized : item);
             writeNotebookNotesLocal(storageKey, notes);
             const db = await getNotebookFirestore();
@@ -1130,6 +1158,7 @@
                 delete payload.id;
                 delete payload.instructorSource;
                 await db.collection("instructor_notes").doc(String(normalized.id)).set(payload, { merge: true });
+                await persistActivityHistoryEvent({ turma, category: "notebook", action: "update", entityId: normalized.id, summary: `${getNotebookSituationLabel(normalized)} atualizado no caderno de ${canonicalInstructorName}.`, before: previousNote, after: normalized });
                 return { source: "cloud" };
             } catch (error) {
                 console.error("Erro ao atualizar status da anotação no Firebase", error);
@@ -1151,6 +1180,7 @@
             try {
                 if (isImportedObservation) await db.collection("instructor_notes").doc(String(noteId)).set({ dismissed: true }, { merge: true });
                 else await db.collection("instructor_notes").doc(String(noteId)).delete();
+                await persistActivityHistoryEvent({ turma, category: "notebook", action: isImportedObservation ? "dismiss" : "delete", entityId: noteId, summary: `${sourceNote ? getNotebookSituationLabel(sourceNote) : "Anotação"} ${isImportedObservation ? "dispensada" : "excluída"} no caderno de ${instructorName}.`, before: sourceNote || {}, after: isImportedObservation ? { dismissed: true } : {} });
                 return { source: "cloud" };
             } catch (error) {
                 console.error("Erro ao excluir nota do Firebase", error);
@@ -3442,6 +3472,7 @@
 
         const persistNAJustification = async (turma, entryKey, value) => {
             const current = readNAJustificationsLocal(turma);
+            const previousValue = current[entryKey] || {};
             current[entryKey] = { ...(value || {}), entryKey };
             writeNAJustificationsLocal(turma, current);
             const db = await getNotebookFirestore();
@@ -3457,6 +3488,7 @@
                     justifiedAt: String(value && value.justifiedAt || new Date().toISOString()),
                     updatedAt: new Date().toISOString()
                 }, { merge: true });
+                await persistActivityHistoryEvent({ turma, category: "frequency", action: Object.keys(previousValue).length ? "update" : "create", entityId: entryKey, summary: `Falta NA de ${String(value && value.date || "data não informada")} foi justificada${value && value.reason ? `: ${value.reason}` : "."}`, before: previousValue, after: { ...(value || {}), entryKey } });
                 return { source: "cloud" };
             } catch (error) {
                 console.error("Erro ao salvar justificativa no Firebase; dados mantidos localmente", error);
@@ -3466,12 +3498,14 @@
 
         const removeNAJustification = async (turma, entryKey) => {
             const current = readNAJustificationsLocal(turma);
+            const previousValue = current[entryKey] || {};
             delete current[entryKey];
             writeNAJustificationsLocal(turma, current);
             const db = await getNotebookFirestore();
             if (!db) return { source: "local" };
             try {
                 await db.collection("na_justifications").doc(makeNAJustificationDocId(turma, entryKey)).delete();
+                await persistActivityHistoryEvent({ turma, category: "frequency", action: "delete", entityId: entryKey, summary: `Justificativa de falta NA removida${previousValue.date ? ` da data ${previousValue.date}` : ""}.`, before: previousValue, after: {} });
                 return { source: "cloud" };
             } catch (error) {
                 console.error("Erro ao remover justificativa do Firebase", error);
@@ -3733,7 +3767,10 @@
             updatedAt: new Date().toISOString(),
             updatedBy: getCurrentAuthenticatedEmail(),
             sourceFileName: String(source.name || ""),
-            sourceLastModified: Number(source.lastModified || 0)
+            sourceLastModified: Number(source.lastModified || 0),
+            sourceFolderName: String(source.folderName || ""),
+            responsibleAnalystKey: String(source.responsibleAnalystKey || data.responsibleAnalystKey || ""),
+            responsibleAnalyst: String(source.responsibleAnalyst || data.responsibleAnalyst || "")
         });
 
         const readSavedClassesLocal = () => {
@@ -3985,6 +4022,7 @@
         };
         const persistRecoveryRecord = async record => {
             const normalized = normalizeRecoveryRecord({ ...record, updatedBy: getCurrentAuthenticatedEmail(), updatedAt: new Date().toISOString() });
+            const previousRecord = readRecoveriesLocal(normalized.classId).find(item => item.id === normalized.id) || {};
             const local = [normalized, ...readRecoveriesLocal(normalized.classId).filter(item => item.id !== normalized.id)];
             writeRecoveriesLocal(normalized.classId, local);
             const db = await getNotebookFirestore();
@@ -3993,6 +4031,7 @@
                 const payload = { ...normalized };
                 delete payload.id;
                 await db.collection("analyst_recoveries").doc(normalized.id).set(payload, { merge: true });
+                await persistActivityHistoryEvent({ turma: normalized.classId, category: "recovery", action: Object.keys(previousRecord).length ? "update" : "create", entityId: normalized.id, summary: `${normalized.studentName || "Aluno"}: Recuperação ${normalized.number || 1} ${Object.keys(previousRecord).length ? `alterada para ${normalized.status || "sem status"}` : "criada"}.`, before: previousRecord, after: normalized });
                 return { record: normalized, source: "cloud" };
             } catch (error) {
                 console.error("Erro ao salvar recuperação", error);
@@ -5799,15 +5838,27 @@
                         try {
                             const previous = byClass.get(getSavedClassKey(located.turma));
                             if (previous && Number(previous.sourceLastModified || 0) >= Number(located.mtimeMs || 0) - 500) {
-                                skipped++;
+                                const analystChanged = String(previous.responsibleAnalystKey || "") !== String(located.responsibleAnalystKey || "") || String(previous.sourceFolderName || "") !== String(located.folderName || "");
+                                if (analystChanged) {
+                                    await db.collection("saved_classes").doc(getSavedClassKey(located.turma)).set({
+                                        responsibleAnalystKey: String(located.responsibleAnalystKey || ""),
+                                        responsibleAnalyst: String(located.responsibleAnalyst || ""),
+                                        sourceFolderName: String(located.folderName || ""),
+                                        updatedAt: new Date().toISOString(),
+                                        updatedBy: getCurrentAuthenticatedEmail()
+                                    }, { merge: true });
+                                    await persistActivityHistoryEvent({ turma: located.turma, category: "frequency", action: "assignment", entityId: getSavedClassKey(located.turma), summary: `Turma vinculada à analista ${located.responsibleAnalyst || "não identificada"} conforme a pasta da rede.`, before: { responsibleAnalystKey: previous.responsibleAnalystKey || "", sourceFolderName: previous.sourceFolderName || "" }, after: { responsibleAnalystKey: located.responsibleAnalystKey || "", sourceFolderName: located.folderName || "" } });
+                                    synchronized++;
+                                } else skipped++;
                             } else {
                                 const bytes = await window.senacDesktop.readFile(located.path);
                                 const arrayBuffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
                                 const processed = processExcelFile(arrayBuffer);
                                 if (getSavedClassKey(processed.turma) !== getSavedClassKey(located.turma)) throw new Error(`A planilha identificou a turma ${processed.turma || "não informada"}.`);
                                 if (!Array.isArray(processed.students) || processed.students.length === 0) throw new Error("Nenhum aluno foi identificado.");
-                                const persistence = await persistSavedClass(processed, { name: located.name, lastModified: located.mtimeMs, path: located.path, scanSource: "rede_2025_2026", skipUserAccess: true });
+                                const persistence = await persistSavedClass(processed, { name: located.name, lastModified: located.mtimeMs, path: located.path, folderName: located.folderName, responsibleAnalystKey: located.responsibleAnalystKey, responsibleAnalyst: located.responsibleAnalyst, scanSource: "rede_2025_2026", skipUserAccess: true });
                                 if (persistence.source !== "cloud") throw new Error("A chamada foi lida, mas não foi gravada no Firebase.");
+                                await captureDashboardHistory(processed, null, {}, "varredura automática da rede");
                                 synchronized++;
                             }
                         } catch (error) {
