@@ -3772,7 +3772,7 @@
             responsibleAnalystKey: String(source.responsibleAnalystKey || data.responsibleAnalystKey || ""),
             responsibleAnalyst: String(source.responsibleAnalyst || data.responsibleAnalyst || ""),
             // A turma só entra no panorama global enquanto for localizada na última varredura da rede.
-            ...(source.scanSource === "rede_2025_2026" ? { networkActive: true, lastNetworkScanAt: new Date().toISOString() } : {})
+            ...(source.scanSource === "rede_2025_2026" ? { networkActive: true } : {})
         });
 
         const readSavedClassesLocal = () => {
@@ -5854,22 +5854,6 @@
                     const activeNetworkKeys = new Set(inventory.classes.map(item => getSavedClassKey(item.turma)));
                     setNetworkScan(current => ({ ...current, total: inventory.classes.length, found: inventory.found, message: `${inventory.found} chamadas ativas encontradas. Sincronizando com o Firebase...` }));
 
-                    // Mantém o histórico intacto, mas impede que turmas que não existem mais na rede
-                    // sejam contadas como ativas na Central do Analista.
-                    const inactiveUpdates = existingSnapshot.docs
-                        .map(doc => ({ ref: doc.ref, summary: { turmaKey: doc.id, ...doc.data() } }))
-                        .filter(({ summary }) => getValidTurmaNumber(summary.turma || summary.turmaKey)
-                            && String(summary.sourceFolderName || "").trim()
-                            && !activeNetworkKeys.has(getSavedClassKey(summary.turma || summary.turmaKey))
-                            && summary.networkActive !== false);
-                    for (let start = 0; start < inactiveUpdates.length; start += 400) {
-                        const batch = db.batch();
-                        inactiveUpdates.slice(start, start + 400).forEach(({ ref }) => batch.set(ref, {
-                            networkActive: false,
-                            lastNetworkScanAt: new Date().toISOString()
-                        }, { merge: true }));
-                        await batch.commit();
-                    }
                     for (let index = 0; index < inventory.classes.length; index++) {
                         const located = inventory.classes[index];
                         try {
@@ -5881,8 +5865,6 @@
                                         responsibleAnalystKey: String(located.responsibleAnalystKey || ""),
                                         responsibleAnalyst: String(located.responsibleAnalyst || ""),
                                         sourceFolderName: String(located.folderName || ""),
-                                        networkActive: true,
-                                        lastNetworkScanAt: new Date().toISOString(),
                                         updatedAt: new Date().toISOString(),
                                         updatedBy: getCurrentAuthenticatedEmail()
                                     }, { merge: true });
@@ -5907,6 +5889,15 @@
                         }
                         setNetworkScan(current => ({ ...current, scanned: index + 1, total: inventory.classes.length, synchronized, skipped, failed, message: `Sincronizando ${index + 1}/${inventory.classes.length}: ${synchronized} atualizadas, ${skipped} sem alteração, ${failed} com falha.` }));
                     }
+                    // Um único documento informa a conclusão da varredura. Isso evita que a Central
+                    // recarregue para cada turma e reduz drasticamente leituras no Firebase.
+                    await db.collection("saved_classes").doc("_network_inventory").set({
+                        activeClassIds: [...activeNetworkKeys].sort(),
+                        scannedAt: new Date().toISOString(),
+                        source: "rede_2025_2026",
+                        found: inventory.found,
+                        updatedBy: getCurrentAuthenticatedEmail()
+                    }, { merge: true });
                     await refreshSavedClasses({ announce: false });
                     const summary = `Varredura concluída: ${inventory.found} turmas ativas localizadas, ${synchronized} atualizadas, ${skipped} já estavam atuais e ${failed} apresentaram falha.${inventory.inactive ? ` ${inventory.inactive} pastas encerradas foram ignoradas.` : ""}`;
                     setNetworkScan(current => ({ ...current, running: false, scanned: inventory.classes.length, total: inventory.classes.length, found: inventory.found, synchronized, skipped, failed, message: summary, failures }));

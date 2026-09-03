@@ -34,10 +34,13 @@
     function configureInstructorAliases(classSummaries) {
         const names = [...new Set(classSummaries.flatMap(summary => [...(summary.instructors || []), summary.tutor1, summary.tutor2]).map(baseCanonicalInstructor).filter(Boolean))];
         const records = names.map(name => ({ name, tokens: normalize(name).replace(/[^a-z0-9 ]/g, " ").split(/\s+/).filter(Boolean) }));
+        const preferredSheila = records.filter(record => record.tokens[0] === "sheila")
+            .sort((a, b) => b.tokens.length - a.tokens.length || b.name.length - a.name.length)[0]?.name || "";
         canonicalInstructor = value => {
             const base = baseCanonicalInstructor(value);
             const tokens = normalize(base).replace(/[^a-z0-9 ]/g, " ").split(/\s+/).filter(Boolean);
             if (!tokens.length) return "";
+            if (tokens[0] === "sheila" && preferredSheila) return preferredSheila;
             const extensions = records.filter(record => record.tokens.length > tokens.length && tokens.every((token, index) => record.tokens[index] === token));
             if (!extensions.length) return base;
             const nextTokens = new Set(extensions.map(record => record.tokens[tokens.length]));
@@ -206,14 +209,14 @@
             safeGet("perfis dos analistas", db.collection("analyst_profiles")),
             safeGet("turmas sincronizadas", db.collection("saved_classes"), true),
             safeGet("alunos das turmas", db.collection("saved_class_students"), true),
-            safeGet("histórico do dashboard", db.collection("dashboard_history")),
+            safeGet("histórico do dashboard", db.collection("dashboard_history").orderBy("capturedAt", "desc").limit(300)),
             safeGet("recuperações", db.collection("analyst_recoveries")),
             safeGet("anotações compartilhadas", db.collection("analyst_shared_notes").where("visibleToInstructor", "==", true)),
             safeGet("caderno privado do analista", db.collection("analyst_notes").where("ownerEmail", "==", ownerEmail)),
             safeGet("avaliações privadas", db.collection("analyst_evaluations").where("ownerEmail", "==", ownerEmail)),
             safeGet("configurações das turmas", db.collection("analyst_class_overrides")),
             safeGet("chamados dos instrutores", db.collection("instructor_notes")),
-            safeGet("histórico de movimentações", db.collection("activity_history"))
+            safeGet("histórico de movimentações", db.collection("activity_history").orderBy("occurredAt", "desc").limit(500))
         ]);
 
         const profileMap = new Map(profiles.docs.map(doc => [String(doc.data().analystKey || ""), doc.data()]));
@@ -223,8 +226,12 @@
         const latestHistories = latestHistoryByClass(histories.docs);
         const overrideMap = new Map(overrides.docs.map(doc => [doc.id, doc.data()]));
         configureInstructorAliases(classes.docs.map(doc => ({ turmaKey: doc.id, ...doc.data() })));
+        const inventory = classes.docs.find(doc => doc.id === "_network_inventory")?.data() || {};
+        const activeClassIds = new Set(Array.isArray(inventory.activeClassIds) ? inventory.activeClassIds.map(String) : []);
+        const hasNetworkInventory = activeClassIds.size > 0;
         const classData = classes.docs.map(doc => ({ doc, summary: { turmaKey: doc.id, ...doc.data() } }))
-            .filter(item => validClassSummary(item.summary) && item.summary.networkActive !== false).map(({ doc, summary }) => {
+            // Quando disponível, a lista da varredura é a fonte única das turmas ativas.
+            .filter(item => validClassSummary(item.summary) && (!hasNetworkInventory || activeClassIds.has(String(item.doc.id)))).map(({ doc, summary }) => {
             return buildClass(summary, studentGroups.get(doc.id) || [], latestHistories.get(doc.id), overrideMap.get(doc.id), analystNameByKey.get(String(summary.responsibleAnalystKey || "")) || summary.responsibleAnalyst);
         }).sort((a, b) => b.id.localeCompare(a.id));
 
@@ -308,24 +315,24 @@
         window.SENAC_CENTRAL_SYNC_WARNINGS = syncWarnings;
         window.SENAC_CENTRAL_INITIAL_DATA = { version: 2, classes: classData, recoveries: recoveryData, analystNotes: noteData, activityHistory: activityHistoryData };
         installPersistence(db, user, window.SENAC_CENTRAL_INITIAL_DATA);
-        let receivedInitialClassSnapshot = false;
+        let receivedInitialInventorySnapshot = false;
         let classRefreshTimer = null;
-        const savedClassesQuery = db.collection("saved_classes");
-        if (typeof savedClassesQuery.onSnapshot === "function") {
-            savedClassesQuery.onSnapshot(() => {
-                if (!receivedInitialClassSnapshot) {
-                    receivedInitialClassSnapshot = true;
+        const networkInventoryQuery = db.collection("saved_classes").doc("_network_inventory");
+        if (typeof networkInventoryQuery.onSnapshot === "function") {
+            networkInventoryQuery.onSnapshot(() => {
+                if (!receivedInitialInventorySnapshot) {
+                    receivedInitialInventorySnapshot = true;
                     return;
                 }
                 clearTimeout(classRefreshTimer);
                 classRefreshTimer = setTimeout(() => window.location.reload(), 4000);
-            }, error => console.warn("Não foi possível acompanhar atualizações de turmas em tempo real.", error));
+            }, error => console.warn("Não foi possível acompanhar a conclusão da varredura em tempo real.", error));
         }
 
         document.getElementById("analystProfileName").textContent = currentName;
         document.getElementById("profileAvatar").textContent = currentName.split(/\s+/).map(part => part[0]).slice(0, 2).join("").toUpperCase();
         const script = document.createElement("script");
-        script.src = `./analista.js?v=2.6.1`;
+        script.src = `./analista.js?v=2.6.2`;
         script.onload = () => loading?.remove();
         script.onerror = () => { if (loading) loading.innerHTML = "Não foi possível carregar a Central do Analista."; };
         document.body.appendChild(script);

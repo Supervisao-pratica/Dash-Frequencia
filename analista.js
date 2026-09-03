@@ -494,6 +494,9 @@
 
     function instructorNamesForClass(classItem) {
         const names = Array.isArray(classItem?.instructors) ? classItem.instructors : [];
+        const preferredSheila = state.data.classes.flatMap(item => [...(Array.isArray(item?.instructors) ? item.instructors : []), item?.instructor])
+            .map(value => String(value || "").trim()).filter(value => /^sheila\b/i.test(value))
+            .sort((a, b) => b.split(/\s+/).length - a.split(/\s+/).length || b.length - a.length)[0] || "Sheila";
         const canonical = value => {
             const text = String(value || "").trim();
             const key = normalize(text).replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
@@ -501,9 +504,10 @@
             if (key === "jean" || key.startsWith("jean elizeu")) return "Jean Elizeu Sauka";
             if (key === "ana claudia" || key.startsWith("ana claudia hafemann")) return "Ana Claudia Hafemann";
             if (key === "bruna lorena" || key.startsWith("bruna lorena de lima")) return "Bruna Lorena de Lima";
+            if (key === "sheila" || key.startsWith("sheila ")) return preferredSheila;
             return text;
         };
-        return [...new Set([...names, classItem?.instructor].map(canonical).filter(Boolean))];
+        return [...new Set([...names, classItem?.instructor].map(canonical).filter(name => name && !/^(luciano|fabio|claire)\b/.test(normalize(name))))];
     }
 
     function instructorLabel(classItem) {
@@ -629,7 +633,15 @@
         const instructors = [...new Set(state.data.classes.flatMap(instructorNamesForClass))].sort((a, b) => a.localeCompare(b, "pt-BR"));
         const analysts = [...ANALYST_OPTIONS].sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
         const ucs = [...new Set(state.data.classes.flatMap(item => [...item.ucs.map(uc => uc.name), ...(item.monitoring || []).map(row => row.uc)]))].sort((a, b) => a === "PI" ? 1 : b === "PI" ? -1 : Number(a.replace(/\D/g, "")) - Number(b.replace(/\D/g, "")));
-        const availableClasses = state.profileMode === "instructor" ? state.data.classes.filter(item => instructorNamesForClass(item).includes(state.previewInstructor)) : state.data.classes;
+        const effectiveInstructor = state.profileMode === "instructor" ? state.previewInstructor : state.filters.instructor;
+        const availableClasses = state.data.classes.filter(item => {
+            const instructorOk = effectiveInstructor === "all" || instructorNamesForClass(item).includes(effectiveInstructor);
+            const analystOk = state.profileMode === "instructor" || state.filters.analyst === "all"
+                || String(item.responsibleAnalystKey || "") === state.filters.analyst
+                || analystKeyFor(item.responsibleAnalyst) === state.filters.analyst;
+            return instructorOk && analystOk;
+        });
+        if (state.filters.classId !== "all" && !availableClasses.some(item => item.id === state.filters.classId)) state.filters.classId = "all";
 
         instructorSelect.innerHTML = `<option value="all">Todos os instrutores</option>${instructors.map(name => `<option value="${escapeHTML(name)}">${escapeHTML(name)}</option>`).join("")}`;
         analystSelect.innerHTML = `<option value="all">Todos os analistas</option>${analysts.map(item => `<option value="${escapeHTML(item.key)}">${escapeHTML(item.name)}</option>`).join("")}`;
@@ -1635,7 +1647,7 @@
             }
         });
 
-        document.getElementById("instructorFilter").addEventListener("change", event => { state.filters.instructor = event.target.value; renderAll(); });
+        document.getElementById("instructorFilter").addEventListener("change", event => { state.filters.instructor = event.target.value; state.filters.classId = "all"; renderAll(); });
         document.getElementById("analystFilter").addEventListener("change", event => { state.filters.analyst = event.target.value; state.filters.classId = "all"; renderAll(); });
         document.getElementById("previewInstructor").addEventListener("change", event => {
             state.previewInstructor = event.target.value;
