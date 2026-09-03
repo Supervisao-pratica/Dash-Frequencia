@@ -434,6 +434,23 @@
         return state.data.classes.find(item => item.id === classId);
     }
 
+    async function ensureClassStudents(classId) {
+        const classItem = getClass(classId);
+        if (!classItem || classItem.studentsLoaded) return classItem;
+        if (typeof window.SENAC_CENTRAL_LOAD_CLASS_STUDENTS !== "function") return classItem;
+        showToast(`Carregando estudantes da turma ${classId}...`);
+        const source = await window.SENAC_CENTRAL_LOAD_CLASS_STUDENTS(classId);
+        classItem.students = source.map((student, index) => ({
+            id: String(student.id ?? `${classId}-${index + 1}`), name: String(student.name || `Aluno ${index + 1}`),
+            email: String(student.studentEmail || ""), orion: String(student.orionCode || student.orion || ""),
+            needsRecovery: Boolean(student.needs_recuperacao), needsCouncil: Boolean(student.needs_conselho),
+            isProcessDropout: Boolean(student.is_process_dropout), isDropout: Boolean(student.is_dropout),
+            dropoutReason: String(student.dropout_reason || ""), documentStatus: String(student.dropoutDocumentStatus || "")
+        }));
+        classItem.studentsLoaded = true;
+        return classItem;
+    }
+
     function getStudent(recovery) {
         const classItem = getClass(recovery.classId);
         const expectedName = normalize(recovery.studentName || recovery.studentKey || "");
@@ -1381,11 +1398,12 @@
         document.body.style.overflow = "";
     }
 
-    function populateRecoveryClassOptions(selectedClassId) {
+    async function populateRecoveryClassOptions(selectedClassId) {
         const classSelect = document.getElementById("recoveryClass");
         const availableClasses = state.profileMode === "instructor" ? state.data.classes.filter(classItem => instructorNamesForClass(classItem).includes(state.previewInstructor)) : state.data.classes;
         classSelect.innerHTML = availableClasses.map(classItem => `<option value="${classItem.id}">${classItem.id} · ${escapeHTML(instructorLabel(classItem))}</option>`).join("");
         classSelect.value = selectedClassId || state.filters.classId !== "all" ? (selectedClassId || state.filters.classId) : availableClasses[0].id;
+        await ensureClassStudents(classSelect.value);
         updateRecoveryDependentOptions();
     }
 
@@ -1401,11 +1419,11 @@
         updateMessagePreview();
     }
 
-    function openRecoveryModal(recoveryId) {
+    async function openRecoveryModal(recoveryId) {
         const recovery = recoveryId ? state.data.recoveries.find(item => item.id === recoveryId) : null;
         document.getElementById("recoveryModalTitle").textContent = recovery ? `Editar Recuperação ${recovery.number}` : "Nova recuperação";
         document.getElementById("recoveryId").value = recovery?.id || "";
-        populateRecoveryClassOptions(recovery?.classId);
+        await populateRecoveryClassOptions(recovery?.classId);
         if (recovery) {
             updateRecoveryDependentOptions(recovery.studentId, recovery.uc);
             document.getElementById("recoveryReason").value = recovery.reason;
@@ -1688,7 +1706,7 @@
         document.querySelectorAll("[data-monitoring-filter]").forEach(button => button.addEventListener("click", () => { state.monitoringFilter = button.dataset.monitoringFilter; renderMonitoring(); refreshIcons(); }));
 
         ["recoveryStudent", "recoveryUc", "recoveryReason", "recoveryStart", "recoveryEnd", "recoveryNotes"].forEach(id => document.getElementById(id).addEventListener("input", updateMessagePreview));
-        document.getElementById("recoveryClass").addEventListener("change", () => updateRecoveryDependentOptions());
+        document.getElementById("recoveryClass").addEventListener("change", async () => { await ensureClassStudents(document.getElementById("recoveryClass").value); updateRecoveryDependentOptions(); });
 
         document.getElementById("recoveryForm").addEventListener("submit", event => {
             event.preventDefault();

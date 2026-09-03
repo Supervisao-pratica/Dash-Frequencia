@@ -91,7 +91,9 @@
         const rawClass = String(summary.turma || summary.turmaKey || "");
         const id = (rawClass.match(/\d{9}/) || [summary.turmaKey || keyOf(rawClass)])[0];
         const instructors = [...new Set([...(summary.instructors || []), summary.tutor1, summary.tutor2].map(canonicalInstructor).filter(Boolean))];
-        const studentSources = Array.isArray(studentsSource) ? studentsSource : [];
+        const overview = summary.analystOverview || {};
+        const hasCompleteStudents = Array.isArray(studentsSource) && studentsSource.length > 0;
+        const studentSources = hasCompleteStudents ? studentsSource : (Array.isArray(overview.attentionStudents) ? overview.attentionStudents : []);
         const students = studentSources.map((student, index) => ({
             id: String(student.id ?? `${id}-${index + 1}`),
             name: String(student.name || `Aluno ${index + 1}`),
@@ -148,11 +150,12 @@
             start: override?.start || ucs[0]?.start || isoOffset(-30),
             end: override?.end || ucs.at(-1)?.end || isoOffset(180),
             currentUc,
-            studentsCount: students.length || Number(summary.studentCount || 0),
-            frequency: frequencies.length ? Number((frequencies.reduce((sum, value) => sum + value, 0) / frequencies.length).toFixed(1)) : 0,
-            dropouts: studentSources.filter(student => student.is_dropout).length,
+            studentsCount: Number(summary.studentCount || students.length),
+            frequency: frequencies.length ? Number((frequencies.reduce((sum, value) => sum + value, 0) / frequencies.length).toFixed(1)) : Number(overview.averageFrequency || 0),
+            dropouts: Number(overview.dropoutCount ?? studentSources.filter(student => student.is_dropout).length),
             status: "active",
             students,
+            studentsLoaded: hasCompleteStudents,
             ucs,
             monitoring,
             responsibleAnalyst: String(responsibleAnalyst || summary.responsibleAnalyst || ""),
@@ -205,10 +208,9 @@
                 return { docs: [] };
             }
         };
-        const [profiles, classes, students, histories, recoveries, sharedNotes, ownNotes, ownEvaluations, overrides, instructorNotes, activityHistory] = await Promise.all([
+        const [profiles, classes, histories, recoveries, sharedNotes, ownNotes, ownEvaluations, overrides, instructorNotes, activityHistory] = await Promise.all([
             safeGet("perfis dos analistas", db.collection("analyst_profiles")),
             safeGet("turmas sincronizadas", db.collection("saved_classes"), true),
-            safeGet("alunos das turmas", db.collection("saved_class_students"), true),
             safeGet("histórico do dashboard", db.collection("dashboard_history").orderBy("capturedAt", "desc").limit(300)),
             safeGet("recuperações", db.collection("analyst_recoveries")),
             safeGet("anotações compartilhadas", db.collection("analyst_shared_notes").where("visibleToInstructor", "==", true)),
@@ -222,7 +224,6 @@
         const profileMap = new Map(profiles.docs.map(doc => [String(doc.data().analystKey || ""), doc.data()]));
         const analystNames = ANALYST_SEEDS.map(item => String(profileMap.get(item.key)?.fullName || (item.key === seed.key ? currentName : item.fallbackName)));
         const analystNameByKey = new Map(ANALYST_SEEDS.map((item, index) => [item.key, analystNames[index]]));
-        const studentGroups = groupStudents(students.docs);
         const latestHistories = latestHistoryByClass(histories.docs);
         const overrideMap = new Map(overrides.docs.map(doc => [doc.id, doc.data()]));
         configureInstructorAliases(classes.docs.map(doc => ({ turmaKey: doc.id, ...doc.data() })));
@@ -232,7 +233,7 @@
         const classData = classes.docs.map(doc => ({ doc, summary: { turmaKey: doc.id, ...doc.data() } }))
             // Quando disponível, a lista da varredura é a fonte única das turmas ativas.
             .filter(item => validClassSummary(item.summary) && (!hasNetworkInventory || activeClassIds.has(String(item.doc.id)))).map(({ doc, summary }) => {
-            return buildClass(summary, studentGroups.get(doc.id) || [], latestHistories.get(doc.id), overrideMap.get(doc.id), analystNameByKey.get(String(summary.responsibleAnalystKey || "")) || summary.responsibleAnalyst);
+            return buildClass(summary, [], latestHistories.get(doc.id), overrideMap.get(doc.id), analystNameByKey.get(String(summary.responsibleAnalystKey || "")) || summary.responsibleAnalyst);
         }).sort((a, b) => b.id.localeCompare(a.id));
 
         const recordedRecoveries = recoveries.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -314,6 +315,10 @@
         window.SENAC_ANALYST_OPTIONS = ANALYST_SEEDS.map((item, index) => ({ key: item.key, name: analystNames[index] || item.fallbackName }));
         window.SENAC_CENTRAL_SYNC_WARNINGS = syncWarnings;
         window.SENAC_CENTRAL_INITIAL_DATA = { version: 2, classes: classData, recoveries: recoveryData, analystNotes: noteData, activityHistory: activityHistoryData };
+        window.SENAC_CENTRAL_LOAD_CLASS_STUDENTS = async classId => {
+            const snapshot = await db.collection("saved_class_students").where("turmaKey", "==", String(classId)).get();
+            return snapshot.docs.map(doc => doc.data()?.data).filter(Boolean);
+        };
         installPersistence(db, user, window.SENAC_CENTRAL_INITIAL_DATA);
         let receivedInitialInventorySnapshot = false;
         let classRefreshTimer = null;
@@ -332,7 +337,7 @@
         document.getElementById("analystProfileName").textContent = currentName;
         document.getElementById("profileAvatar").textContent = currentName.split(/\s+/).map(part => part[0]).slice(0, 2).join("").toUpperCase();
         const script = document.createElement("script");
-        script.src = `./analista.js?v=2.6.2`;
+        script.src = `./analista.js?v=2.6.3`;
         script.onload = () => loading?.remove();
         script.onerror = () => { if (loading) loading.innerHTML = "Não foi possível carregar a Central do Analista."; };
         document.body.appendChild(script);

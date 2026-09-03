@@ -3755,6 +3755,30 @@
             };
         };
 
+        const buildAnalystOverview = (data) => {
+            const students = Array.isArray(data?.students) ? data.students : [];
+            const active = students.filter(student => !student.is_dropout && !student.is_process_dropout);
+            const frequencies = active.map(student => Number(student.averageFreq)).filter(Number.isFinite);
+            const compactStudent = student => ({
+                id: String(student.id || ""), name: String(student.name || "Aluno"),
+                orionCode: String(student.orionCode || student.orion || ""),
+                needs_recuperacao: Boolean(student.needs_recuperacao),
+                needs_conselho: Boolean(student.needs_conselho),
+                is_process_dropout: Boolean(student.is_process_dropout),
+                is_dropout: Boolean(student.is_dropout),
+                dropout_reason: String(student.dropout_reason || ""),
+                dropoutDocumentStatus: String(student.dropoutDocumentStatus || "")
+            });
+            return {
+                activeStudents: active.length,
+                averageFrequency: frequencies.length ? Number((frequencies.reduce((sum, value) => sum + value, 0) / frequencies.length).toFixed(1)) : 0,
+                attentionStudents: students.filter(student => student.needs_recuperacao || student.needs_conselho || student.is_dropout || student.is_process_dropout).map(compactStudent),
+                recoveryCount: students.filter(student => student.needs_recuperacao).length,
+                processDropoutCount: students.filter(student => student.is_process_dropout && !student.is_dropout).length,
+                dropoutCount: students.filter(student => student.is_dropout).length
+            };
+        };
+
         const makeSavedClassSummary = (data, source = {}) => ({
             turmaKey: getSavedClassKey(data.turma),
             turma: String(data.turma || "Turma não identificada"),
@@ -3764,6 +3788,7 @@
             instructors: Array.isArray(data.instructors) ? data.instructors.map(String) : [],
             ucs: Array.isArray(data.ucs) ? data.ucs.map(String) : [],
             studentCount: Array.isArray(data.students) ? data.students.length : 0,
+            analystOverview: buildAnalystOverview(data),
             updatedAt: new Date().toISOString(),
             updatedBy: getCurrentAuthenticatedEmail(),
             sourceFileName: String(source.name || ""),
@@ -3913,6 +3938,7 @@
                 const operations = [];
                 operations.push({ type: "set", ref: db.collection("saved_classes").doc(summary.turmaKey), data: cleanForStorage({
                     ...syncedSummary,
+                    analystOverview: buildAnalystOverview(data),
                     sheetInstructors: data.sheetInstructors || {},
                     courseDates: (data.courseDates || []).map(value => value instanceof Date ? value.toISOString() : String(value || "")),
                     attendanceWarnings: data.attendanceWarnings || []
@@ -5858,7 +5884,7 @@
                         const located = inventory.classes[index];
                         try {
                             const previous = byClass.get(getSavedClassKey(located.turma));
-                            if (previous && Number(previous.sourceLastModified || 0) >= Number(located.mtimeMs || 0) - 500) {
+                            if (previous && previous.analystOverview && Number(previous.sourceLastModified || 0) >= Number(located.mtimeMs || 0) - 500) {
                                 const analystChanged = String(previous.responsibleAnalystKey || "") !== String(located.responsibleAnalystKey || "") || String(previous.sourceFolderName || "") !== String(located.folderName || "");
                                 if (analystChanged) {
                                     await db.collection("saved_classes").doc(getSavedClassKey(located.turma)).set({
