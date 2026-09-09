@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="./analista.css?v=2.6.5">
+    <link rel="stylesheet" href="./analista.css?v=2.6.6">
     <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore-compat.js"></script>
@@ -230,7 +230,7 @@
         <section class="view" id="view-reports">
             <div class="page-heading">
                 <div><span class="eyebrow" id="reportsEyebrow">Gestão e qualidade</span><h2 id="reportsTitle">Relatório global do analista</h2><p id="reportsDescription">Comparativos por instrutor, turma, UC, motivo e resultado.</p></div>
-                <div class="button-row"><button class="secondary-button" id="copyReport"><i data-lucide="copy"></i> Copiar resumo</button><button class="primary-button" id="printReport"><i data-lucide="printer"></i> Imprimir / PDF</button></div>
+                <div class="button-row"><label class="report-date-filter">De<input id="reportDateFrom" type="date"></label><label class="report-date-filter">Até<input id="reportDateTo" type="date"></label><button class="secondary-button" id="copyReport"><i data-lucide="copy"></i> Copiar resumo</button><button class="primary-button" id="printReport"><i data-lucide="printer"></i> Imprimir / PDF</button></div>
             </div>
             <div class="metric-grid compact" id="reportMetrics"></div>
             <section class="mediation-section analyst-only">
@@ -287,6 +287,7 @@
                 <div class="form-grid">
                     <label>Instrutor acompanhado<select id="analystNoteInstructor" required></select></label>
                     <label>Turma<select id="analystNoteClass" required></select></label>
+                    <label>Alcance da tratativa<select id="analystNoteScope"><option value="class">Turma toda</option><option value="instructor">Acompanhamento do instrutor</option></select></label>
                     <label>Data do registro<input id="analystNoteDate" type="date" required></label>
                     <label>Tipo<select id="analystNoteType"><option>Acompanhamento</option><option>Elogio</option><option>Orientação</option><option>Ponto de atenção</option><option>Plano de ação</option><option>Avaliação</option></select></label>
                     <label class="span-2">Dimensão da cadeia<select id="analystNoteDimension"><option value="action">1. Ação do instrutor</option><option value="interaction">2. Interação com o jovem</option><option value="engagement">3. Engajamento</option><option value="learning">4. Aprendizagem</option><option value="permanence">5. Permanência</option></select></label>
@@ -301,6 +302,7 @@
                     <label class="span-2">Descrição e evidências<textarea id="analystNoteText" rows="5" required placeholder="Registre o que foi feito, a resposta obtida e o efeito observado. Não conclua engajamento ou aprendizagem apenas pelo envio de mensagem."></textarea></label>
                     <label>Data para revisão<input id="analystNoteReminder" type="date"></label>
                     <label>Avaliação interna opcional (%)<input id="analystNoteScore" type="number" min="0" max="100" step="1" placeholder="Oculta para o instrutor"></label>
+                    <label class="span-2"><input id="analystNoteOutlook" type="checkbox"> Abrir lembrete no Outlook após salvar</label>
                 </div>
                 <div class="diagnostic-bubble" id="analystDiagnosticPreview"></div>
                 <footer><span class="confidential-note"><i data-lucide="shield-check"></i> O texto será compartilhado com o instrutor; a porcentagem permanece privada.</span><button type="button" class="ghost-button" data-close-modal="analystNotebookModal">Cancelar</button><button class="primary-button" type="submit"><i data-lucide="save"></i> Salvar acompanhamento</button></footer>
@@ -370,6 +372,6 @@
     </div>
 
     <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
-    <script src="./analista-bootstrap.js?v=2.6.5"></script>
+    <script src="./analista-bootstrap.js?v=2.6.6"></script>
 </body>
 </html>

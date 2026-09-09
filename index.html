@@ -101,19 +101,10 @@
             if (cleanHex.length === 8) cleanHex = cleanHex.substring(2); 
             if (cleanHex.length !== 6) return false;
 
-            const knownOranges = ['ED7D31', 'F4B084', 'C65911', '833C0C', 'FFC000', 'FFA500', 'FF9900', 'FF6600', 'E26B0A', 'F8CBAD'];
-            if (knownOranges.includes(cleanHex)) return true;
-
-            const r = parseInt(cleanHex.substring(0, 2), 16);
-            const g = parseInt(cleanHex.substring(2, 4), 16);
-            const b = parseInt(cleanHex.substring(4, 6), 16);
-
-            if (r < 130) return false; 
-            if (b > 150 && b > r * 0.8) return false; 
-            const greenRatio = g / r;
-            if (greenRatio < 0.20) return false; 
-            if (greenRatio > 0.85) return false; 
-            return true;
+            // Somente tons declarados pela chamada como laranja. Não usamos
+            // aproximação por matiz, pois amarelos, beges e outras cores de
+            // status não podem encaminhar indevidamente o aluno à evasão.
+            return ['ED7D31', 'F4B084', 'C65911', '833C0C', 'FFC000', 'FFA500', 'FF9900', 'FF6600', 'E26B0A', 'F8CBAD'].includes(cleanHex);
         };
 
         const getCellColorHex = (color) => {
@@ -126,22 +117,9 @@
             let cleanHex = String(color || "").replace(/^#/, "").toUpperCase();
             if (cleanHex.length === 8) cleanHex = cleanHex.substring(2);
             if (cleanHex.length !== 6) return false;
-            const red = parseInt(cleanHex.substring(0, 2), 16) / 255;
-            const green = parseInt(cleanHex.substring(2, 4), 16) / 255;
-            const blue = parseInt(cleanHex.substring(4, 6), 16) / 255;
-            const max = Math.max(red, green, blue);
-            const min = Math.min(red, green, blue);
-            const delta = max - min;
             const normalizedHex = cleanHex;
             const knownOrangeFills = ["ED7D31", "F4B084", "C65911", "833C0C", "FFC000", "FFA500", "FF9900", "FF6600", "E26B0A", "F8CBAD"];
-            if (knownOrangeFills.includes(normalizedHex)) return true;
-            if (delta === 0 || max < 0.35 || delta / max < 0.35) return false;
-            let hue = 0;
-            if (max === red) hue = 60 * (((green - blue) / delta) % 6);
-            else if (max === green) hue = 60 * ((blue - red) / delta + 2);
-            else hue = 60 * ((red - green) / delta + 4);
-            if (hue < 0) hue += 360;
-            return hue >= 15 && hue <= 55;
+            return knownOrangeFills.includes(normalizedHex);
         };
 
         const isOrangeFillCell = (cell) => {
@@ -3759,6 +3737,8 @@
             const students = Array.isArray(data?.students) ? data.students : [];
             const active = students.filter(student => !student.is_dropout && !student.is_process_dropout);
             const frequencies = active.map(student => Number(student.averageFreq)).filter(Number.isFinite);
+            const redNaByStudent = data?.naAlerts?.students || {};
+            const redNaTotal = Object.values(redNaByStudent).reduce((sum, item) => sum + (Array.isArray(item?.entries) ? item.entries.length : 0), 0);
             const compactStudent = student => ({
                 id: String(student.id || ""), name: String(student.name || "Aluno"),
                 orionCode: String(student.orionCode || student.orion || ""),
@@ -3774,6 +3754,8 @@
                 averageFrequency: frequencies.length ? Number((frequencies.reduce((sum, value) => sum + value, 0) / frequencies.length).toFixed(1)) : 0,
                 attentionStudents: students.filter(student => student.needs_recuperacao || student.needs_conselho || student.is_dropout || student.is_process_dropout).map(compactStudent),
                 recoveryCount: students.filter(student => student.needs_recuperacao).length,
+                redNaTotal,
+                redNaStudents: Object.values(redNaByStudent).filter(item => Array.isArray(item?.entries) && item.entries.length > 0).length,
                 processDropoutCount: students.filter(student => student.is_process_dropout && !student.is_dropout).length,
                 dropoutCount: students.filter(student => student.is_dropout).length
             };

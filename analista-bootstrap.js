@@ -152,6 +152,8 @@
             currentUc,
             studentsCount: Number(summary.studentCount || students.length),
             frequency: frequencies.length ? Number((frequencies.reduce((sum, value) => sum + value, 0) / frequencies.length).toFixed(1)) : Number(overview.averageFrequency || 0),
+            redNaTotal: Number(overview.redNaTotal || 0),
+            redNaStudents: Number(overview.redNaStudents || 0),
             dropouts: Number(overview.dropoutCount ?? studentSources.filter(student => student.is_dropout).length),
             status: "active",
             students,
@@ -268,6 +270,7 @@
                 periodStart: String(note.periodStart || note.date || "").slice(0, 10),
                 periodEnd: String(note.periodEnd || "").slice(0, 10),
                 status: String(note.trackingStatus || "em_acompanhamento"),
+                scope: String(note.scope || "class"),
                 dimension: String(note.dimension || "action"),
                 contactAttempt: String(note.contactAttempt || "not_applicable"),
                 studentResponse: String(note.studentResponse || "unknown"),
@@ -341,7 +344,7 @@
         document.getElementById("analystProfileName").textContent = currentName;
         document.getElementById("profileAvatar").textContent = currentName.split(/\s+/).map(part => part[0]).slice(0, 2).join("").toUpperCase();
         const script = document.createElement("script");
-        script.src = `./analista.js?v=2.6.5`;
+        script.src = `./analista.js?v=2.6.6`;
         script.onload = () => loading?.remove();
         script.onerror = () => { if (loading) loading.innerHTML = "Não foi possível carregar a Central do Analista."; };
         document.body.appendChild(script);
@@ -425,6 +428,7 @@
                         engagementEffect: String(note.engagementEffect || "unknown"),
                         learningEvidence: String(note.learningEvidence || "unknown"),
                         permanenceRisk: String(note.permanenceRisk || "none"),
+                        scope: String(note.scope || "class"),
                         updatedAt
                     };
                     const sharedPayload = { ...privatePayload };

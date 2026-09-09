@@ -64,7 +64,7 @@
         activityHistoryFilter: "all",
         workflowFilter: "all",
         monitoringFilter: "all",
-        filters: { instructor: "all", analyst: "all", classId: "all", uc: "all", search: "" },
+        filters: { instructor: "all", analyst: "all", classId: "all", uc: "all", search: "", reportFrom: "", reportTo: "" },
         draggedWorkflowCard: null,
         classDraft: null
     };
@@ -577,7 +577,8 @@
             const student = getStudent(recovery);
             const ucOk = state.filters.uc === "all" || recovery.uc === state.filters.uc;
             const searchOk = matchesSearch([recovery.classId, recovery.uc, recovery.reason, student?.name, student?.orion]);
-            return allowedClasses.has(recovery.classId) && ucOk && searchOk;
+            const periodOk = isWithinReportPeriod(recovery.start || recovery.end);
+            return allowedClasses.has(recovery.classId) && ucOk && searchOk && periodOk;
         });
     }
 
@@ -868,7 +869,7 @@
             const classOk = !classId || classId === "GERAL" || allowedClasses.has(classId);
             const categoryOk = state.activityHistoryFilter === "all" || item.category === state.activityHistoryFilter;
             const searchOk = matchesSearch([item.turmaKey, item.actorName, item.summary, item.detail, historyCategoryMeta(item.category).label]);
-            return classOk && categoryOk && searchOk;
+            return classOk && categoryOk && searchOk && isWithinReportPeriod(item.occurredAt || item.date);
         }).sort((a, b) => String(b.occurredAt || "").localeCompare(String(a.occurredAt || ""))).slice(0, 300);
         body.innerHTML = rows.length ? rows.map(item => {
             const meta = historyCategoryMeta(item.category);
@@ -1132,6 +1133,22 @@
         };
     }
 
+    function isWithinReportPeriod(value) {
+        const date = String(value || "").slice(0, 10);
+        if (!date) return !state.filters.reportFrom && !state.filters.reportTo;
+        return (!state.filters.reportFrom || date >= state.filters.reportFrom) && (!state.filters.reportTo || date <= state.filters.reportTo);
+    }
+
+    function callActivityTotals() {
+        const allowed = new Set(filteredClasses().map(item => item.id));
+        const events = (state.data.activityHistory || []).filter(item => allowed.has(String(item.turmaKey || "")) && String(item.category || "") === "frequency" && isWithinReportPeriod(item.occurredAt || item.date));
+        const today = isoOffset(0);
+        const week = isoOffset(-6);
+        const month = isoOffset(-29);
+        const countSince = start => events.filter(item => String(item.occurredAt || item.date || "").slice(0, 10) >= start).length;
+        return { today: events.filter(item => String(item.occurredAt || item.date || "").slice(0, 10) === today).length, week: countSince(week), month: countSince(month) };
+    }
+
     function statusCell(title, detail, progress, tone, icon) {
         return `<div class="status-cell" style="--status-tone:${tone}"><strong><i data-lucide="${icon}"></i>${escapeHTML(title)}</strong><p>${detail}</p>${progress === null ? "" : `<div class="mini-progress"><i style="--progress:${Math.max(0, Math.min(100, progress))}%"></i></div>`}</div>`;
     }
@@ -1234,12 +1251,14 @@
     }
 
     function renderMonitoringReports(rows, totals) {
+        const calls = callActivityTotals();
         document.getElementById("monitoringReportCharts").innerHTML = [
             { label: "Chamadas abertas/incompletas", value: totals.openCalls, tone: "#c62828" },
+            { label: "Atualizações da chamada", value: `${calls.today} / ${calls.week} / ${calls.month}`, detail: "hoje / 7 dias / 30 dias", tone: "#004a8d" },
             { label: "Pendências no Diário", value: totals.practicePending, tone: "#f58220" },
             { label: "Correções pendentes", value: totals.correctionPending, tone: "#6d3cb4" },
             { label: "Órion não concluído", value: totals.orionPending, tone: "#004a8d" }
-        ].map(item => `<article class="report-monitoring-card" style="--tone:${item.tone}"><span>${item.label}</span><strong>${item.value}</strong></article>`).join("");
+        ].map(item => `<article class="report-monitoring-card" style="--tone:${item.tone}"><span>${item.label}</span><strong>${item.value}</strong>${item.detail ? `<small>${item.detail}</small>` : ""}</article>`).join("");
         document.getElementById("monitoringReportTable").innerHTML = rows.length ? rows.map(item => monitoringTableRow(item, true)).join("") : `<tr><td colspan="7" class="empty-state">Sem indicadores para os filtros escolhidos.</td></tr>`;
     }
 
@@ -1248,9 +1267,14 @@
         const rows = filteredMonitoringRows();
         const activeRows = rows.filter(item => monitoringTiming(item.classItem, item.record) !== "future");
         const totals = monitoringTotals(rows);
+        const classes = filteredClasses();
+        const redNaTotal = classes.reduce((sum, item) => sum + Number(item.redNaTotal || 0), 0);
+        const activeStudents = classes.reduce((sum, item) => sum + Number(item.studentsCount || 0) - Number(item.dropouts || 0), 0);
+        const redNaRate = activeStudents ? (redNaTotal / activeStudents * 100).toFixed(1) : "0.0";
         document.getElementById("monitoringMetrics").innerHTML = [
             metricCard("UCs acompanhadas", totals.rows, `<b>${new Set(activeRows.map(item => item.classItem.id)).size}</b> turma(s)`, "clipboard-check", "#004a8d"),
             metricCard("Chamadas abertas", totals.openCalls, `<b>${totals.attendancePending}</b> registros pendentes`, "calendar-clock", "#c62828"),
+            metricCard("Faltas NA em vermelho", redNaTotal, `<b>${redNaRate}%</b> por aluno ativo`, "triangle-alert", "#c62828"),
             metricCard("Diário da Prática", totals.practicePending, `NC, em branco ou requer avaliação`, "notebook-pen", "#f58220"),
             metricCard("Correções pendentes", totals.correctionPending, `Último resumo de atividades`, "list-checks", "#6d3cb4"),
             metricCard("Recuperações abertas", totals.recoveryOpen, `Geral e por UC`, "book-open-check", "#d17b08"),
@@ -1260,7 +1284,7 @@
         const alerts = activeRows.filter(item => monitoringAttentionReasons(item.classItem, item.record).length > 0);
         document.getElementById("monitoringNavCount").textContent = alerts.length;
         document.getElementById("monitoringAlertBadge").textContent = `${alerts.length} alerta${alerts.length === 1 ? "" : "s"}`;
-        document.getElementById("monitoringAlertList").innerHTML = alerts.length ? alerts.map(item => `<article class="monitoring-alert-item"><i data-lucide="triangle-alert"></i><div><strong>${item.classItem.id} · ${item.record.uc}</strong><p>${escapeHTML(monitoringAttentionReasons(item.classItem, item.record).join("; "))}</p></div><time>${formatDate(item.record.alertCreatedAt)}</time></article>`).join("") : `<div class="empty-state">Nenhum ponto de atenção para os filtros escolhidos.</div>`;
+        document.getElementById("monitoringAlertList").innerHTML = alerts.length ? alerts.map(item => `<button type="button" class="monitoring-alert-item" data-open-situation data-class-id="${item.classItem.id}" data-uc="${item.record.uc}"><i data-lucide="triangle-alert"></i><div><strong>${item.classItem.id} · ${item.record.uc}</strong><p>${escapeHTML(monitoringAttentionReasons(item.classItem, item.record).join("; "))}</p></div><time>Abrir situação</time></button>`).join("") : `<div class="empty-state">Nenhum ponto de atenção para os filtros escolhidos.</div>`;
 
         renderMonitoringCharts(rows);
         const routineRows = rows.filter(item => item.record.uc === item.classItem.currentUc || item.record.uc === "PI");
@@ -1357,6 +1381,8 @@
         document.getElementById("analystNoteText").value = "";
         document.getElementById("analystNoteReminder").value = "";
         document.getElementById("analystNoteScore").value = "";
+        document.getElementById("analystNoteScope").value = "class";
+        document.getElementById("analystNoteOutlook").checked = false;
         updateAnalystNotebookGuidance();
         openModal("analystNotebookModal");
     }
@@ -1389,8 +1415,16 @@
             reminderDate,
             periodStart: date,
             periodEnd: reminderDate || date,
-            status: document.getElementById("analystNoteStatus").value
+            status: document.getElementById("analystNoteStatus").value,
+            scope: document.getElementById("analystNoteScope").value
         };
+    }
+
+    function openAnalystNoteOutlook(note) {
+        if (!note.reminderDate) return;
+        const subject = `Tratativa ${note.classId === "GERAL" ? "do instrutor" : `da turma ${note.classId}`} - ${note.subject}`;
+        const body = `Tratativa: ${note.subject}\nInstrutor: ${note.instructor}\nAlcance: ${note.scope === "class" ? "Turma toda" : "Acompanhamento do instrutor"}\nRevisar em: ${formatDate(note.reminderDate)}\n\n${note.notes}`;
+        window.open(`mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`, "_blank", "noopener");
     }
 
     function closeModal(id) {
@@ -1690,20 +1724,37 @@
         document.getElementById("analystNotebookForm")?.addEventListener("submit", event => {
             event.preventDefault();
             const note = getAnalystNotebookForm();
+            const openOutlook = document.getElementById("analystNoteOutlook").checked;
             state.data.analystNotes.push(note);
             saveData("Acompanhamento salvo e sincronizado com o perfil do instrutor.");
+            if (openOutlook && note.reminderDate) openAnalystNoteOutlook(note);
             closeModal("analystNotebookModal");
             renderAll();
         });
         document.getElementById("classFilter").addEventListener("change", event => { state.filters.classId = event.target.value; renderAll(); });
         document.getElementById("ucFilter").addEventListener("change", event => { state.filters.uc = event.target.value; renderAll(); });
         document.getElementById("globalSearch").addEventListener("input", event => { state.filters.search = event.target.value; renderAll(); });
+        ["reportDateFrom", "reportDateTo"].forEach(id => document.getElementById(id)?.addEventListener("change", event => {
+            state.filters[id === "reportDateFrom" ? "reportFrom" : "reportTo"] = event.target.value;
+            renderMonitoring();
+            renderReports();
+            refreshIcons();
+        }));
         document.getElementById("clearFilters").addEventListener("click", () => { state.filters = { instructor: state.profileMode === "instructor" ? state.previewInstructor : "all", analyst: "all", classId: "all", uc: "all", search: "" }; document.getElementById("globalSearch").value = ""; renderAll(); });
 
         document.querySelectorAll("[data-recovery-filter]").forEach(button => button.addEventListener("click", () => { state.recoveryFilter = button.dataset.recoveryFilter; renderRecoverySegments(); renderRecoveriesTable(); refreshIcons(); }));
         document.getElementById("activityHistoryFilter")?.addEventListener("change", event => { state.activityHistoryFilter = event.target.value; renderActivityHistory(); refreshIcons(); });
         document.querySelectorAll("[data-workflow-filter]").forEach(button => button.addEventListener("click", () => { state.workflowFilter = button.dataset.workflowFilter; renderKanban(); refreshIcons(); }));
         document.querySelectorAll("[data-monitoring-filter]").forEach(button => button.addEventListener("click", () => { state.monitoringFilter = button.dataset.monitoringFilter; renderMonitoring(); refreshIcons(); }));
+        document.getElementById("monitoringAlertList")?.addEventListener("click", event => {
+            const button = event.target.closest("[data-open-situation]");
+            if (!button) return;
+            state.filters.classId = button.dataset.classId;
+            state.filters.uc = button.dataset.uc;
+            openView("recoveries");
+            renderAll();
+            showToast(`Situação da ${button.dataset.uc} aberta para tratamento.`);
+        });
 
         ["recoveryStudent", "recoveryUc", "recoveryReason", "recoveryStart", "recoveryEnd", "recoveryNotes"].forEach(id => document.getElementById(id).addEventListener("input", updateMessagePreview));
         document.getElementById("recoveryClass").addEventListener("change", async () => { await ensureClassStudents(document.getElementById("recoveryClass").value); updateRecoveryDependentOptions(); });
