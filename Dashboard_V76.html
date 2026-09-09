@@ -5915,15 +5915,13 @@
                         }
                         setNetworkScan(current => ({ ...current, scanned: index + 1, total: inventory.classes.length, synchronized, skipped, failed, message: `Sincronizando ${index + 1}/${inventory.classes.length}: ${synchronized} atualizadas, ${skipped} sem alteração, ${failed} com falha.` }));
                     }
-                    // Um único documento informa a conclusão da varredura. Isso evita que a Central
-                    // recarregue para cada turma e reduz drasticamente leituras no Firebase.
-                    await db.collection("saved_classes").doc("_network_inventory").set({
-                        activeClassIds: [...activeNetworkKeys].sort(),
-                        scannedAt: new Date().toISOString(),
-                        source: "rede_2025_2026",
-                        found: inventory.found,
-                        updatedBy: getCurrentAuthenticatedEmail()
-                    }, { merge: true });
+                    // Registra a conclusão em uma coleção já autorizada pelas regras atuais.
+                    // Assim a Central atualiza uma única vez, ao fim da varredura.
+                    await persistActivityHistoryEvent({
+                        turma: "GERAL", category: "frequency", action: "network_scan", entityId: "network_inventory",
+                        summary: `Varredura da rede concluída: ${inventory.found} turmas ativas identificadas.`,
+                        after: { activeClassIds: [...activeNetworkKeys].sort(), scannedAt: new Date().toISOString(), found: inventory.found }
+                    });
                     await refreshSavedClasses({ announce: false });
                     const summary = `Varredura concluída: ${inventory.found} turmas ativas localizadas, ${synchronized} atualizadas, ${skipped} já estavam atuais e ${failed} apresentaram falha.${inventory.inactive ? ` ${inventory.inactive} pastas encerradas foram ignoradas.` : ""}`;
                     setNetworkScan(current => ({ ...current, running: false, scanned: inventory.classes.length, total: inventory.classes.length, found: inventory.found, synchronized, skipped, failed, message: summary, failures }));

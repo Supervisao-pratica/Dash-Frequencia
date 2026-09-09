@@ -227,12 +227,16 @@
         const latestHistories = latestHistoryByClass(histories.docs);
         const overrideMap = new Map(overrides.docs.map(doc => [doc.id, doc.data()]));
         configureInstructorAliases(classes.docs.map(doc => ({ turmaKey: doc.id, ...doc.data() })));
-        const inventory = classes.docs.find(doc => doc.id === "_network_inventory")?.data() || {};
+        const inventory = activityHistory.docs.map(doc => doc.data() || {})
+            .filter(item => item.entityId === "network_inventory" && Array.isArray(item.after?.activeClassIds))
+            .sort((a, b) => String(b.occurredAt || "").localeCompare(String(a.occurredAt || "")))[0]?.after || {};
         const activeClassIds = new Set(Array.isArray(inventory.activeClassIds) ? inventory.activeClassIds.map(String) : []);
         const hasNetworkInventory = activeClassIds.size > 0;
         const classData = classes.docs.map(doc => ({ doc, summary: { turmaKey: doc.id, ...doc.data() } }))
             // Quando disponível, a lista da varredura é a fonte única das turmas ativas.
-            .filter(item => validClassSummary(item.summary) && (!hasNetworkInventory || activeClassIds.has(String(item.doc.id)))).map(({ doc, summary }) => {
+            .filter(item => validClassSummary(item.summary) && (hasNetworkInventory
+                ? activeClassIds.has(String(item.doc.id))
+                : item.summary.networkActive === true)).map(({ doc, summary }) => {
             return buildClass(summary, [], latestHistories.get(doc.id), overrideMap.get(doc.id), analystNameByKey.get(String(summary.responsibleAnalystKey || "")) || summary.responsibleAnalyst);
         }).sort((a, b) => b.id.localeCompare(a.id));
 
@@ -322,7 +326,7 @@
         installPersistence(db, user, window.SENAC_CENTRAL_INITIAL_DATA);
         let receivedInitialInventorySnapshot = false;
         let classRefreshTimer = null;
-        const networkInventoryQuery = db.collection("saved_classes").doc("_network_inventory");
+        const networkInventoryQuery = db.collection("activity_history").where("entityId", "==", "network_inventory");
         if (typeof networkInventoryQuery.onSnapshot === "function") {
             networkInventoryQuery.onSnapshot(() => {
                 if (!receivedInitialInventorySnapshot) {
@@ -337,7 +341,7 @@
         document.getElementById("analystProfileName").textContent = currentName;
         document.getElementById("profileAvatar").textContent = currentName.split(/\s+/).map(part => part[0]).slice(0, 2).join("").toUpperCase();
         const script = document.createElement("script");
-        script.src = `./analista.js?v=2.6.3`;
+        script.src = `./analista.js?v=2.6.5`;
         script.onload = () => loading?.remove();
         script.onerror = () => { if (loading) loading.innerHTML = "Não foi possível carregar a Central do Analista."; };
         document.body.appendChild(script);
