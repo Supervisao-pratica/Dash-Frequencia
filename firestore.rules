@@ -276,6 +276,30 @@ service cloud.firestore {
         && request.resource.data.after is map;
     }
 
+    match /team_tasks/{taskId} {
+      allow read: if isSenacUser()
+        && request.auth.token.email in resource.data.memberEmails;
+
+      allow create: if isSenacUser()
+        && request.resource.data.creatorEmail == request.auth.token.email
+        && request.auth.token.email in request.resource.data.memberEmails
+        && request.resource.data.title is string
+        && request.resource.data.description is string
+        && request.resource.data.memberEmails is list
+        && request.resource.data.steps is list
+        && request.resource.data.status in ['planned', 'working', 'waiting', 'done'];
+
+      allow update: if isSenacUser()
+        && request.auth.token.email in resource.data.memberEmails
+        && request.resource.data.creatorEmail == resource.data.creatorEmail
+        && request.resource.data.memberEmails == resource.data.memberEmails
+        && request.resource.data.status in ['planned', 'working', 'waiting', 'done']
+        && request.resource.data.steps is list;
+
+      allow delete: if isSenacUser()
+        && resource.data.creatorEmail == request.auth.token.email;
+    }
+
     match /saved_classes/{turmaKey} {
       allow read, delete: if isSenacUser();
 

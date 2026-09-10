@@ -1026,6 +1026,8 @@
 
     function renderReports() {
         const recoveries = filteredRecoveries();
+        const teamTasks = Array.isArray(window.SENAC_TEAM_TASKS) ? window.SENAC_TEAM_TASKS : [];
+        const openTeamTasks = teamTasks.filter(item => item.status !== "done").length;
         const closed = recoveries.filter(item => item.status === "closed");
         const developed = closed.filter(item => item.outcome === "developed").length;
         const effectiveness = closed.length ? Math.round(developed / closed.length * 100) : 0;
@@ -1034,7 +1036,8 @@
             metricCard("Aberturas", recoveries.length, `No conjunto filtrado`, "folder-plus", "#004a8d"),
             metricCard("Concluídas", closed.length, `<b>${effectiveness}%</b> com desenvolvimento`, "circle-check-big", "#078847"),
             metricCard("Tempo médio", `${averageDays} dias`, `Entre abertura e prazo`, "timer", "#6d3cb4"),
-            metricCard("Reincidências", recoveries.filter(item => item.number > 1 || item.outcome === "reopened").length, `Recuperação 2 ou superior`, "refresh-ccw", "#c62828")
+            metricCard("Reincidências", recoveries.filter(item => item.number > 1 || item.outcome === "reopened").length, `Recuperação 2 ou superior`, "refresh-ccw", "#c62828"),
+            metricCard("Tarefas compartilhadas", openTeamTasks, `<b>${teamTasks.length - openTeamTasks}</b> concluída(s)`, "list-todo", "#1976b8")
         ].join("");
 
         const ucCounts = [...new Set(recoveries.map(item => item.uc))].map(uc => ({ uc, count: recoveries.filter(item => item.uc === uc).length })).sort((a, b) => Number(a.uc.replace(/\D/g, "")) - Number(b.uc.replace(/\D/g, "")));
@@ -1828,6 +1831,7 @@
         document.getElementById("printMonitoringReport").addEventListener("click", () => { openView("reports"); setTimeout(() => window.print(), 150); });
         document.getElementById("copyReport").addEventListener("click", () => copyText(reportSummary(), "Resumo global copiado."));
         document.getElementById("printReport").addEventListener("click", () => window.print());
+        window.addEventListener("senac-team-tasks-updated", () => { renderReports(); refreshIcons(); });
 
         document.getElementById("resetDemo").addEventListener("click", () => window.location.reload());
 

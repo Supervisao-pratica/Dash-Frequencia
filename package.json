@@ -1,6 +1,6 @@
 {
   "name": "dashboard-senac",
-  "version": "1.1.20",
+  "version": "1.1.21",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
@@ -12,7 +12,7 @@
   "license": "ISC",
   "description": "Dashboard",
   "devDependencies": {
-    "electron": "43.1.0",
+    "electron": "^43.1.0",
     "electron-builder": "^26.0.12",
     "electron-packager": "^17.1.2"
   },
@@ -31,6 +31,8 @@
       "analista-bootstrap.js",
       "senac-inho.js",
       "senac-inho.css",
+      "team-tasks.js",
+      "team-tasks.css",
       "assets/senac-inho.png",
       "firebase-config.js",
       "frequency-locator.js",
