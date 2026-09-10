@@ -1751,8 +1751,17 @@
             if (!button) return;
             state.filters.classId = button.dataset.classId;
             state.filters.uc = button.dataset.uc;
+            const classFilter = document.getElementById("classFilter");
+            const ucFilter = document.getElementById("ucFilter");
+            if (classFilter) classFilter.value = state.filters.classId;
+            if (ucFilter) ucFilter.value = state.filters.uc;
             openView("recoveries");
-            renderAll();
+            // Abrir uma situação não precisa reconstruir todos os gráficos,
+            // tabelas e listas da Central. Atualizamos apenas a aba destino.
+            renderRecoverySegments();
+            renderRecoveriesTable();
+            renderDropoutTracking();
+            refreshIcons();
             showToast(`Situação da ${button.dataset.uc} aberta para tratamento.`);
         });
 

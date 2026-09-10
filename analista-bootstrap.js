@@ -327,24 +327,19 @@
             return snapshot.docs.map(doc => doc.data()?.data).filter(Boolean);
         };
         installPersistence(db, user, window.SENAC_CENTRAL_INITIAL_DATA);
-        let receivedInitialInventorySnapshot = false;
-        let classRefreshTimer = null;
         const networkInventoryQuery = db.collection("activity_history").where("entityId", "==", "network_inventory");
         if (typeof networkInventoryQuery.onSnapshot === "function") {
             networkInventoryQuery.onSnapshot(() => {
-                if (!receivedInitialInventorySnapshot) {
-                    receivedInitialInventorySnapshot = true;
-                    return;
-                }
-                clearTimeout(classRefreshTimer);
-                classRefreshTimer = setTimeout(() => window.location.reload(), 4000);
+                // A varredura pode atualizar o Firebase enquanto a Central está
+                // em uso. Nunca interrompemos a pessoa com um reload completo;
+                // os dados novos entram na próxima abertura/atualização manual.
             }, error => console.warn("Não foi possível acompanhar a conclusão da varredura em tempo real.", error));
         }
 
         document.getElementById("analystProfileName").textContent = currentName;
         document.getElementById("profileAvatar").textContent = currentName.split(/\s+/).map(part => part[0]).slice(0, 2).join("").toUpperCase();
         const script = document.createElement("script");
-        script.src = `./analista.js?v=2.6.6`;
+        script.src = `./analista.js?v=2.6.7`;
         script.onload = () => loading?.remove();
         script.onerror = () => { if (loading) loading.innerHTML = "Não foi possível carregar a Central do Analista."; };
         document.body.appendChild(script);
