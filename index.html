@@ -86,7 +86,7 @@
             .print-cell { border: 1px solid #000 !important; color: #000 !important; font-weight: bold; }
         }
     </style>
-    <link rel="stylesheet" href="./team-tasks.css?v=1.0.0">
+    <link rel="stylesheet" href="./team-tasks.css?v=1.1.0">
 </head>
 <body class="text-slate-900">
     
@@ -5315,6 +5315,16 @@
             const activeInstructorNames = useMemo(() => currentAnalystName ? [] : filterInstructorNamesForCurrentUser(detectedInstructorNames), [detectedInstructorNames, currentAnalystName]);
             const notebookInstructorNames = useMemo(() => currentAnalystName ? detectedInstructorNames : activeInstructorNames, [currentAnalystName, detectedInstructorNames, activeInstructorNames]);
 
+            useEffect(() => {
+                const classes = (savedClasses || []).map(item => ({
+                    id: String(item.turma || item.turmaKey || "").match(/\d{9}/)?.[0] || "",
+                    course: String(item.course || ""),
+                    instructors: [...new Set([...(item.instructors || []), item.tutor1, item.tutor2].map(canonicalizeInstructorName).filter(isValidInstructorName))]
+                })).filter(item => item.id);
+                if (data?.turma && !classes.some(item => item.id === String(data.turma))) classes.unshift({ id: String(data.turma), course: String(data.course || ""), instructors: detectedInstructorNames });
+                window.SENAC_TASK_CONTEXT = { profile: currentAnalystName ? "analyst" : "instructor", classes, currentClass: String(data?.turma || ""), currentInstructors: detectedInstructorNames };
+            }, [savedClasses, data?.turma, data?.course, detectedInstructorNames, currentAnalystName]);
+
             const refreshSavedClasses = async ({ announce = false } = {}) => {
                 setSavedClassesLoading(true);
                 try {
@@ -6847,6 +6857,6 @@
         root.render(<><DashboardErrorBoundary><AuthGate /></DashboardErrorBoundary><DesktopAppOffer /></>);
     </script>
     <script src="./senac-inho.js?v=1.6.5"></script>
-    <script src="./team-tasks.js?v=1.0.0"></script>
+    <script src="./team-tasks.js?v=1.1.0"></script>
 </body>
 </html>

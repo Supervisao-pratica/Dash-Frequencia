@@ -12,7 +12,9 @@
     let currentUser = null;
     let db = null;
     let tasks = [];
+    let analysts = [];
     let firstSnapshot = true;
+    const STEP_PRESETS = ["Entrar em contato", "Registrar orientação", "Aguardar retorno", "Verificar evidências", "Atualizar o caderno", "Registrar conclusão"];
 
     const esc = value => String(value ?? "").replace(/[&<>'"]/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[char]));
     const keyOf = value => String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().replace(/[^A-Z0-9]+/g, "_").replace(/^_|_$/g, "") || "NAO_IDENTIFICADO";
@@ -34,6 +36,28 @@
         return { turma: turmaText };
     }
 
+    function availableClasses() {
+        const central = Array.isArray(window.SENAC_CENTRAL_INITIAL_DATA?.classes) ? window.SENAC_CENTRAL_INITIAL_DATA.classes : [];
+        const contextual = Array.isArray(window.SENAC_TASK_CONTEXT?.classes) ? window.SENAC_TASK_CONTEXT.classes : [];
+        const values = [...central, ...contextual].map(item => ({ id: String(item.id || item.turma || item.turmaKey || "").match(/\d{9}/)?.[0] || "", course: String(item.course || ""), instructors: [...new Set([...(item.instructors || []), item.instructor, item.tutor1, item.tutor2].filter(Boolean).map(String))] })).filter(item => item.id);
+        return [...new Map(values.map(item => [item.id, item])).values()].sort((a, b) => b.id.localeCompare(a.id));
+    }
+
+    function fillClassAndPeopleOptions(form) {
+        const classes = availableClasses();
+        const currentClass = window.SENAC_TASK_CONTEXT?.currentClass || pageContext().turma;
+        form.elements.turma.innerHTML = `<option value="">Geral, sem turma específica</option>${classes.map(item => `<option value="${item.id}">${item.id}${item.course ? ` · ${esc(item.course)}` : ""}</option>`).join("")}`;
+        form.elements.turma.value = classes.some(item => item.id === currentClass) ? currentClass : "";
+        updateInstructorOptions(form);
+        form.elements.analyst.innerHTML = `<option value="">Selecione, se necessário</option>${analysts.map(item => `<option value="${esc(item.email)}" ${item.email ? "" : "disabled"}>${esc(item.name)}${item.email ? ` · ${esc(item.email)}` : " · acesso ainda não identificado"}</option>`).join("")}`;
+    }
+
+    function updateInstructorOptions(form) {
+        const classItem = availableClasses().find(item => item.id === form.elements.turma.value);
+        const instructors = classItem?.instructors || window.SENAC_TASK_CONTEXT?.currentInstructors || [];
+        form.elements.instructor.innerHTML = `<option value="">Sem caderno relacionado</option>${instructors.map(name => `<option value="${esc(name)}">${esc(name)}</option>`).join("")}`;
+    }
+
     function buildUI() {
         const launcher = document.createElement("button");
         launcher.type = "button";
@@ -46,12 +70,13 @@
             <header class="senac-task-header"><div><h2>Tarefas e demandas</h2><p>Organize responsáveis, etapas, prazos e tratativas compartilhadas.</p></div><button type="button" class="senac-task-close" aria-label="Fechar">×</button></header>
             <div class="senac-task-tools"><button type="button" class="senac-task-button primary" data-new-task>Iniciar tarefa</button><button type="button" class="senac-task-button" data-task-report>Copiar resumo</button></div>
             <form class="senac-task-form" id="senacTaskForm">
-                <label>Título<input name="title" required maxlength="120"></label><label>Turma<input name="turma" inputmode="numeric" maxlength="9"></label>
+                <label>Título<input name="title" required maxlength="120"></label><label>Turma<select name="turma"></select></label>
                 <label class="wide">Descrição<textarea name="description" required rows="3"></textarea></label>
-                <label class="wide">Responsáveis por e-mail<input name="members" required placeholder="nome@pr.senac.br; outro@pr.senac.br"></label>
+                <label>Analista responsável<select name="analyst"></select></label><label>E-mails adicionais<input name="members" placeholder="outro@pr.senac.br"></label>
                 <label>Data de início<input name="startDate" type="date" required></label><label>Prazo<input name="dueDate" type="date" required></label>
-                <label class="wide">Etapas, uma por linha<textarea name="steps" required rows="4" placeholder="Entrar em contato\nAguardar retorno\nRegistrar conclusão"></textarea></label>
-                <label class="wide">Caderno do instrutor relacionado (opcional)<input name="instructor" placeholder="Nome do instrutor"></label>
+                <div class="senac-task-presets">${STEP_PRESETS.map((step, index) => `<label><input type="checkbox" name="presetStep" value="${esc(step)}" ${[0,2,5].includes(index) ? "checked" : ""}> ${esc(step)}</label>`).join("")}</div>
+                <label class="wide">Outras etapas, uma por linha<textarea name="steps" rows="3" placeholder="Digite somente as etapas adicionais"></textarea></label><p class="senac-task-helper">As etapas marcadas acima serão incluídas. Você pode desmarcar ou acrescentar novas etapas.</p>
+                <label class="wide">Caderno do instrutor relacionado (opcional)<select name="instructor"></select></label>
                 <div class="senac-task-form-actions"><button type="button" class="senac-task-button" data-cancel-task>Cancelar</button><button class="senac-task-button primary" type="submit">Criar e sinalizar</button></div>
             </form><div class="senac-task-board" id="senacTaskBoard"></div></section>`;
         document.body.append(launcher, backdrop);
@@ -62,11 +87,12 @@
         backdrop.querySelector("[data-new-task]").addEventListener("click", () => {
             form.classList.add("open");
             form.reset();
-            form.elements.turma.value = pageContext().turma;
+            fillClassAndPeopleOptions(form);
             form.elements.startDate.value = today();
-            form.elements.members.value = currentUser?.email || "";
+            [...form.elements.presetStep].forEach((input, index) => { input.checked = [0,2,5].includes(index); });
             form.elements.title.focus();
         });
+        form.elements.turma.addEventListener("change", () => updateInstructorOptions(form));
         backdrop.querySelector("[data-cancel-task]").addEventListener("click", () => form.classList.remove("open"));
         backdrop.querySelector("[data-task-report]").addEventListener("click", copySummary);
         form.addEventListener("submit", createTask);
@@ -100,8 +126,11 @@
     async function createTask(event) {
         event.preventDefault();
         const form = event.currentTarget;
-        const memberEmails = [...new Set([currentUser.email, ...String(form.elements.members.value).split(/[;,\s]+/)].map(value => value.trim().toLowerCase()).filter(value => /^[^@\s]+@[^@\s]+$/.test(value)))];
-        const steps = String(form.elements.steps.value).split(/\r?\n/).map(value => value.trim()).filter(Boolean).map(title => ({ title, done: false }));
+        const analystEmail = String(form.elements.analyst.value || "").trim();
+        const memberEmails = [...new Set([currentUser.email, analystEmail, ...String(form.elements.members.value).split(/[;,\s]+/)].map(value => value.trim().toLowerCase()).filter(value => /^[^@\s]+@[^@\s]+$/.test(value)))];
+        const presetSteps = [...form.elements.presetStep].filter(input => input.checked).map(input => input.value);
+        const customSteps = String(form.elements.steps.value).split(/\r?\n/).map(value => value.trim()).filter(Boolean);
+        const steps = [...new Set([...presetSteps, ...customSteps])].map(title => ({ title, done: false }));
         if (!steps.length) return toast("Informe pelo menos uma etapa.");
         const ref = db.collection("team_tasks").doc();
         const task = { id: ref.id, title: form.elements.title.value.trim(), description: form.elements.description.value.trim(), turma: form.elements.turma.value.trim(), instructor: form.elements.instructor.value.trim(), creatorEmail: currentUser.email, creatorName: currentUser.displayName || currentUser.email, memberEmails, steps, status: "planned", startDate: form.elements.startDate.value, dueDate: form.elements.dueDate.value, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
@@ -157,9 +186,20 @@
         toast("Resumo das tarefas copiado.");
     }
 
-    function start(user) {
+    async function start(user) {
         currentUser = user;
         db = firebase.firestore();
+        const fallbackAnalysts = (window.SENAC_ANALYST_OPTIONS || [
+            { name: "Michel Farias" }, { name: "Mariana Mello" }, { name: "Bruna Cunha" }, { name: "Bianca Aresta" }, { name: "Juliana Severo" }
+        ]).map(item => ({ name: item.name || String(item), email: item.email || "" }));
+        try {
+            const profiles = await db.collection("analyst_profiles").get();
+            const saved = profiles.docs.map(doc => doc.data() || {}).map(item => ({ name: String(item.fullName || item.analystKey || "Analista"), email: String(item.email || "").toLowerCase() }));
+            analysts = [...new Map([...fallbackAnalysts, ...saved].map(item => [keyOf(item.name), item])).values()].sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
+        } catch (error) {
+            analysts = fallbackAnalysts;
+            console.warn("Não foi possível atualizar a lista de analistas.", error);
+        }
         buildUI();
         db.collection("team_tasks").where("memberEmails", "array-contains", user.email.toLowerCase()).limit(200).onSnapshot(snapshot => {
             const previousIds = new Set(tasks.map(task => task.id));
