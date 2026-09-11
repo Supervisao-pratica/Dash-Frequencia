@@ -86,7 +86,7 @@
             .print-cell { border: 1px solid #000 !important; color: #000 !important; font-weight: bold; }
         }
     </style>
-    <link rel="stylesheet" href="./team-tasks.css?v=1.1.0">
+    <link rel="stylesheet" href="./team-tasks.css?v=1.2.0">
 </head>
 <body class="text-slate-900">
     
@@ -5323,6 +5323,13 @@
                 })).filter(item => item.id);
                 if (data?.turma && !classes.some(item => item.id === String(data.turma))) classes.unshift({ id: String(data.turma), course: String(data.course || ""), instructors: detectedInstructorNames });
                 window.SENAC_TASK_CONTEXT = { profile: currentAnalystName ? "analyst" : "instructor", classes, currentClass: String(data?.turma || ""), currentInstructors: detectedInstructorNames };
+                window.SENAC_TASK_LOAD_STUDENTS = async classId => {
+                    if (String(data?.turma || "") === String(classId)) return data.students || [];
+                    const summary = (savedClasses || []).find(item => String(item.turma || item.turmaKey || "").includes(String(classId)));
+                    if (!summary) return [];
+                    const loaded = await loadSavedClassData(summary);
+                    return loaded?.data?.students || [];
+                };
             }, [savedClasses, data?.turma, data?.course, detectedInstructorNames, currentAnalystName]);
 
             const refreshSavedClasses = async ({ announce = false } = {}) => {
@@ -6653,6 +6660,7 @@
                             </div>
                         </div>
                     </header>
+                    <div data-task-launcher-slot="" className="senac-task-entry" aria-label="Acesso às tarefas e demandas"></div>
 
                     <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-6">
                         <DashboardCharts stats={stats} context={selectedUC} />
@@ -6857,6 +6865,6 @@
         root.render(<><DashboardErrorBoundary><AuthGate /></DashboardErrorBoundary><DesktopAppOffer /></>);
     </script>
     <script src="./senac-inho.js?v=1.6.5"></script>
-    <script src="./team-tasks.js?v=1.1.0"></script>
+    <script src="./team-tasks.js?v=1.2.0"></script>
 </body>
 </html>
