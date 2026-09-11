@@ -292,9 +292,10 @@ service cloud.firestore {
       allow update: if isSenacUser()
         && request.auth.token.email in resource.data.memberEmails
         && request.resource.data.creatorEmail == resource.data.creatorEmail
-        && request.resource.data.memberEmails == resource.data.memberEmails
         && request.resource.data.status in ['planned', 'working', 'waiting', 'done']
-        && request.resource.data.steps is list;
+        && request.resource.data.steps is list
+        && (request.auth.token.email == resource.data.creatorEmail
+          || request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'steps', 'updatedAt']));
 
       allow delete: if isSenacUser()
         && resource.data.creatorEmail == request.auth.token.email;
