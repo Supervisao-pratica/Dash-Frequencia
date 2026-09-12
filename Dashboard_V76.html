@@ -105,7 +105,7 @@
             // Somente tons declarados pela chamada como laranja. Não usamos
             // aproximação por matiz, pois amarelos, beges e outras cores de
             // status não podem encaminhar indevidamente o aluno à evasão.
-            return ['ED7D31', 'F4B084', 'C65911', '833C0C', 'FFC000', 'FFA500', 'FF9900', 'FF6600', 'E26B0A', 'F8CBAD'].includes(cleanHex);
+            return ['ED7D31', 'FFA500', 'FF9900', 'FF6600', 'E26B0A', 'F5821F', 'F58220'].includes(cleanHex);
         };
 
         const getCellColorHex = (color) => {
@@ -133,7 +133,7 @@
 
         const isOrangeFontCell = (cell) => {
             const color = cell && cell.s && cell.s.font ? getCellColorHex(cell.s.font.color) : "";
-            return isOrangeFont(color) || isOrangeColorValue(color);
+            return isOrangeFont(color);
         };
 
         const isOrangeRowFill = (sheet, rowIndex, nameColIdx) => {
@@ -152,32 +152,26 @@
             }
         };
 
-        // A situação cadastral depende somente da célula do nome (e, na aba
-        // pedagógica, de uma linha inteira claramente marcada). Cores nas
-        // colunas de atividades não devem alterar a situação do aluno.
+        // Apenas a fonte laranja do nome altera a situação por cor.
+        // Preenchimentos e cores de atividades não classificam o aluno.
         const applyOrangeStudentSituation = ({ student, cell, row, sheetName, isPedagogicalSheet, sheet, rowIndex, nameColIdx }) => {
             if (!student) return;
             const nameHasOrangeFont = isOrangeFontCell(cell);
-            const nameHasOrangeFill = isOrangeFillCell(cell);
             const dropoutKeyword = Boolean(hasDropoutKeywordInRow(row));
-            const pedagogicalRowFill = Boolean(isPedagogicalSheet && isOrangeRowFill(sheet, rowIndex, nameColIdx));
 
-            if (nameHasOrangeFill || dropoutKeyword || pedagogicalRowFill) {
+            if (dropoutKeyword) {
                 student.is_dropout = true;
                 student.is_process_dropout = false;
                 student.status = "Evadido/Desligado";
-                student.dropout_reason = dropoutKeyword
-                    ? `Situação evadido, desistente ou desligado identificada na aba ${sheetName}`
-                    : nameHasOrangeFill
-                        ? `Celula do nome preenchida em laranja na aba ${sheetName}`
-                        : `Linha pedagógica identificada em laranja na aba ${sheetName}`;
+                const col = row.findIndex(value => hasAnyKeyword(normalizeText(value), STUDENT_DROPOUT_KEYWORDS));
+                student.dropout_reason = `Aba ${sheetName}, célula ${XLSX.utils.encode_cell({ r: rowIndex, c: col })}: "${row[col]}"`;
                 return;
             }
 
             if (nameHasOrangeFont && !student.is_dropout) {
                 student.is_process_dropout = true;
                 student.status = "Em Processo de Desligamento";
-                student.dropout_reason = `Nome com fonte laranja na aba ${sheetName}`;
+                student.dropout_reason = `Nome com fonte laranja (#${getCellColorHex(cell.s.font.color)}) — aba ${sheetName}, célula ${XLSX.utils.encode_cell({ r: rowIndex, c: nameColIdx })}`;
             }
         };
 
@@ -2593,7 +2587,7 @@
             const headerValues = [];
             const dateValues = [];
             const start = Math.max(0, Number(headerRowIdx || 0) - 4);
-            const end = Math.min(rawData.length, Number(headerRowIdx || 0) + 3);
+            const end = Math.min(rawData.length, Number(headerRowIdx || 0) + 1);
             const ignoredHeader = /^(N|N[º°]?|NUMERO|NOME|ALUNO|APRENDIZ|APRENDIZES|SOBRENOME|UC\s*\d+)$/i;
 
             for (let rowIdx = start; rowIdx < end; rowIdx++) {
@@ -2638,7 +2632,8 @@
                 date: metadata.date || "",
                 column: metadata.column || "",
                 header: metadata.header || "",
-                kind: metadata.kind || "observation"
+                kind: metadata.kind || "observation",
+                fromObservationField: metadata.fromObservationField === true
             });
         };
 
@@ -2756,7 +2751,7 @@
         ];
 
         const STUDENT_PROCESS_KEYWORDS = [
-            "EM PROCESSO", "PROCESSO DE DESLIGAMENTO", "AGUARDANDO DESLIGAMENTO",
+            "EM PROCESSO DE DESLIGAMENTO", "PROCESSO DE DESLIGAMENTO", "AGUARDANDO DESLIGAMENTO",
             "PENDENTE DESLIGAMENTO", "DESLIGAMENTO EM ANDAMENTO"
         ];
 
@@ -2792,17 +2787,22 @@
             return Boolean(value && value !== "0" && value !== "-" && value !== "NAO" && !value.includes("SEM CONTRA"));
         };
 
-        const classifyStudentSituation = (row, situationColIdx) => {
+        const classifyStudentSituation = (row, situationColIdx, sheetName = "", rowIndex = 0) => {
             const situationText = situationColIdx !== -1 ? normalizeText(row[situationColIdx]) : "";
             const fullText = rowToSearchText(row);
             const searchText = `${situationText} | ${fullText}`;
             const rawSituation = situationColIdx !== -1 && row[situationColIdx] ? String(row[situationColIdx]).trim() : "";
 
-            if (hasAnyKeyword(searchText, STUDENT_PROCESS_KEYWORDS)) {
-                return { type: "process", reason: rawSituation || findMatchingRawCell(row, STUDENT_PROCESS_KEYWORDS) || "Em Processo de Desligamento" };
+            const reasonFor = keywords => {
+                const col = row.findIndex(value => hasAnyKeyword(normalizeText(value), keywords));
+                const sourceCol = col >= 0 ? col : situationColIdx;
+                return `Aba ${sheetName}, célula ${XLSX.utils.encode_cell({ r: rowIndex, c: sourceCol })}: "${row[sourceCol]}"`;
+            };
+            if (hasAnyKeyword(searchText, STUDENT_PROCESS_KEYWORDS) || situationText === "EM PROCESSO") {
+                return { type: "process", reason: reasonFor(STUDENT_PROCESS_KEYWORDS) };
             }
             if (hasAnyKeyword(searchText, STUDENT_DROPOUT_KEYWORDS)) {
-                return { type: "dropout", reason: rawSituation || findMatchingRawCell(row, STUDENT_DROPOUT_KEYWORDS) || "Evadido/Desligado" };
+                return { type: "dropout", reason: reasonFor(STUDENT_DROPOUT_KEYWORDS) };
             }
             return { type: "active", reason: "" };
         };
@@ -3323,6 +3323,66 @@
             if (!file || !file.content) return "";
             if (typeof file.content === "string") return file.content;
             try { return new TextDecoder("utf-8").decode(file.content); } catch (error) { return ""; }
+        };
+
+
+        // Localiza o campo pelo rótulo, inclusive quando muda de coluna ou é mesclado.
+        const findObservationColumns = (sheet, rows, headerRow) => {
+            const columns = new Map();
+            for (let r = 0; r <= headerRow; r++) {
+                (rows[r] || []).forEach((value, c) => {
+                    const label = normalizeText(value);
+                    if (!/^OBSERVACOES(?:\s*\(|\s*:|\s*$)/.test(label)) return;
+                    const merge = (sheet["!merges"] || []).find(m => m.s.r === r && m.s.c === c);
+                    for (let col = c; col <= (merge ? merge.e.c : c); col++) columns.set(col, String(value).trim());
+                });
+            }
+            return columns;
+        };
+
+        // SheetJS pode expor o preenchimento sem a fonte. Recupera a fonte do XLSX original.
+        const restoreWorkbookFontColors = workbook => {
+            const xml = path => {
+                const text = getWorkbookFileText(workbook, path);
+                return text ? new DOMParser().parseFromString(text, "application/xml") : null;
+            };
+            const nodes = (doc, name) => doc ? [...doc.getElementsByTagNameNS("*", name)] : [];
+            const styles = xml("xl/styles.xml");
+            if (!styles) return;
+            const fontList = nodes(styles, "fonts")[0];
+            const fonts = fontList ? [...fontList.children] : [];
+            const xfs = nodes(styles, "cellXfs")[0];
+            const formats = xfs ? [...xfs.children] : [];
+            const scheme = nodes(xml("xl/theme/theme1.xml"), "clrScheme")[0];
+            const theme = scheme ? [...scheme.children].map(n => n.firstElementChild?.getAttribute("val") || n.firstElementChild?.getAttribute("lastClr") || "") : [];
+            // OOXML usa lt1, dk1, lt2, dk2 nos índices de tema.
+            if (theme.length >= 4) { [theme[0], theme[1]] = [theme[1], theme[0]]; [theme[2], theme[3]] = [theme[3], theme[2]]; }
+            const indexed = nodes(styles, "indexedColors")[0];
+            const palette = indexed ? [...indexed.children].map(n => n.getAttribute("rgb")) : [];
+            const colorOf = font => {
+                const color = nodes(font, "color")[0];
+                if (!color || color.hasAttribute("auto")) return "";
+                let rgb = color.getAttribute("rgb") || (color.hasAttribute("theme") ? theme[Number(color.getAttribute("theme"))] : palette[Number(color.getAttribute("indexed"))]) || "";
+                rgb = rgb.slice(-6).toUpperCase();
+                if (!/^[0-9A-F]{6}$/.test(rgb)) return "";
+                const tint = Number(color.getAttribute("tint") || 0);
+                // Tons clareados/escurecidos não são o laranja padrão solicitado.
+                return tint === 0 ? rgb : "";
+            };
+            const colors = formats.map(xf => colorOf(fonts[Number(xf.getAttribute("fontId") || 0)]));
+            const relationships = nodes(xml("xl/_rels/workbook.xml.rels"), "Relationship");
+            const sheetNodes = nodes(xml("xl/workbook.xml"), "sheet");
+            workbook.SheetNames.forEach((name, index) => {
+                const id = sheetNodes[index]?.getAttribute("r:id");
+                const target = relationships.find(r => r.getAttribute("Id") === id)?.getAttribute("Target");
+                const path = target ? (target.startsWith("/") ? target.slice(1) : "xl/" + target.replace(/^\.\//, "")) : "xl/worksheets/sheet" + (index + 1) + ".xml";
+                nodes(xml(path), "c").forEach(node => {
+                    const cell = workbook.Sheets[name][node.getAttribute("r")];
+                    if (!cell) return;
+                    const rgb = colors[Number(node.getAttribute("s") || 0)] || "";
+                    cell.s = { ...(cell.s || {}), font: { color: { rgb } } };
+                });
+            });
         };
 
         const getRedNAConditionalRanges = (workbook) => {
@@ -3907,8 +3967,39 @@
             }
         };
 
+        // A chamada renova frequência/situação; não apaga os contatos nem o
+        // histórico já importado do campo Observações.
+        const mergeRetainedStudentData = (data, previous, contacts = {}) => {
+            const oldStudents = new Map((previous && String(previous.turma) === String(data.turma) ? previous.students || [] : []).map(student => [normalizeName(student.name), student]));
+            return { ...data, students: (data.students || []).map(student => {
+                const key = normalizeName(student.name);
+                const old = oldStudents.get(key);
+                const contact = contacts[key];
+                const retainedContact = normalizeStudentContact(old || {}, student.name);
+                const importedContact = normalizeStudentContact(student, student.name);
+                Object.entries(importedContact).forEach(([field, value]) => { if (value) retainedContact[field] = value; });
+                if (contact) Object.assign(retainedContact, normalizeStudentContact(contact, student.name));
+                const observations = [...(student.all_observations || [])];
+                const observationKey = item => JSON.stringify([item.sheet, item.column, item.header, item.date, item.text]);
+                const keys = new Set(observations.map(observationKey));
+                (old && old.all_observations || []).filter(item => item.fromObservationField === true).forEach(item => {
+                    const id = observationKey(item);
+                    if (!keys.has(id)) { observations.push(item); keys.add(id); }
+                });
+                return { ...student, ...retainedContact, all_observations: observations };
+            }) };
+        };
+
+        const retainSavedStudentData = async data => {
+            let previous = null;
+            try { previous = JSON.parse(localStorage.getItem(`${SAVED_CLASS_DATA_PREFIX}${getSavedClassKey(data.turma)}`) || "null"); } catch (error) {}
+            const loaded = await loadStudentContacts(data.turma);
+            return mergeRetainedStudentData(data, previous, loaded.contacts);
+        };
+
         const persistSavedClass = async (data, source = {}) => {
             if (!data || !getValidTurmaNumber(data.turma) || !Array.isArray(data.students)) return { source: "local", summary: null };
+            data.students = (await retainSavedStudentData(data)).students;
             const summary = { ...makeSavedClassSummary(data, source), cloudSynced: false };
             if (!source.skipUserAccess) await markSavedClassAccess(summary.turmaKey);
             writeSavedClassLocal(summary, data);
@@ -3961,7 +4052,7 @@
                             .sort((a, b) => Number(a.id || 0) - Number(b.id || 0) || String(a.name || "").localeCompare(String(b.name || ""), "pt-BR"));
                         const naStudents = {};
                         studentSnapshot.docs.map(doc => doc.data()).filter(item => item && item.naAlert).forEach(item => { naStudents[item.studentKey] = item.naAlert; });
-                        const data = normalizeSavedClassData({
+                        let data = normalizeSavedClassData({
                             course: meta.course,
                             turma: meta.turma,
                             tutor1: meta.tutor1,
@@ -3974,6 +4065,7 @@
                             naAlerts: { students: naStudents, totalStudents: Object.keys(naStudents).length },
                             students
                         });
+                        data = await retainSavedStudentData(data);
                         writeSavedClassLocal({ turmaKey, ...meta, cloudSynced: true }, data);
                         return { data, source: "cloud", updatedAt: meta.updatedAt || "", sourceLastModified: Number(meta.sourceLastModified || 0) };
                     }
@@ -3983,7 +4075,7 @@
             }
             try {
                 const local = JSON.parse(localStorage.getItem(`${SAVED_CLASS_DATA_PREFIX}${turmaKey}`) || "null");
-                if (local) return { data: normalizeSavedClassData(local), source: "local", updatedAt: summary.updatedAt || "", sourceLastModified: Number(summary.sourceLastModified || 0) };
+                if (local) return { data: await retainSavedStudentData(normalizeSavedClassData(local)), source: "local", updatedAt: summary.updatedAt || "", sourceLastModified: Number(summary.sourceLastModified || 0) };
             } catch (error) {}
             throw new Error("Os dados desta turma não estão disponíveis neste dispositivo e não puderam ser carregados do Firebase.");
         };
@@ -4193,6 +4285,7 @@
                 if (!XLSX) throw new Error("A biblioteca de Excel ainda não carregou.");
                 
                 const workbook = XLSX.read(arrayBuffer, { type: 'array', cellComments: true, sheetStubs: true, cellDates: true, cellNF: true, cellText: true, cellStyles: true, bookFiles: true });
+                restoreWorkbookFontColors(workbook);
                 
                 let tutor1 = "Não Identificado"; let tutor2 = "Não Identificado"; let course = "Curso não identificado"; let turma = "Turma não identificada";
                 const sheetNames = workbook.SheetNames;
@@ -4380,9 +4473,10 @@
                     if (manualProcessOverrides.includes(normalizeName(name))) {
                         studentRec.is_process_dropout = true;
                         studentRec.status = "Em Processo de Desligamento";
+                        studentRec.dropout_reason = "Marcação manual no sistema: Em Processo de Desligamento.";
                     }
 
-                    const situation = classifyStudentSituation(row, situationColIdx);
+                    const situation = classifyStudentSituation(row, situationColIdx, pedSheetName, i);
                     if (situation.type === "dropout") {
                          studentRec.is_dropout = true;
                          studentRec.status = "Evadido/Desligado";
@@ -4502,6 +4596,7 @@
 
                     const headerRow = rawData[sheetHeaderRow];
                     const nextRow1 = rawData[sheetHeaderRow + 1] || [];
+                    const observationColumns = findObservationColumns(sheet, rawData, sheetHeaderRow);
                     const criticalCols = [];
                     const ignoredSheetColumns = new Set();
                     const isUCSheet = sheetName.toUpperCase().includes("UC") || sheetName.toUpperCase().includes("MOD") || sheetName.toUpperCase().includes("MÓD");
@@ -4555,13 +4650,14 @@
                                 const valStr = String(cellVal || "").trim();
                                 if(valStr.length < 2 || valStr === "0" || valStr === "-") return;
                                 if (/^[\d.,\s%-]+$/.test(valStr)) return;
-                                const observationContext = getObservationContext(rawData, sheetHeaderRow, idx, sheetName);
+                                if (!observationColumns.has(idx)) return;
+                                const observationContext = { ...getObservationContext(rawData, sheetHeaderRow, idx, sheetName), header: observationColumns.get(idx), date: "", fromObservationField: true };
                                 const isCritical = criticalCols.find(cc => cc.idx === idx);
                                 if (isCritical) {
                                     if (isCritical.type === 'force_conselho') { student.conselho_text = valStr; addStudentObservation(student, valStr, { ...observationContext, source: "[Conselho]", kind: "pedagogical" }); }
                                     else if (isCritical.type === 'force_obs') { addStudentObservation(student, valStr, { ...observationContext, source: `[${isCritical.name}]`, kind: "observation" }); }
                                     else { let sourceLabel = sheetName; if(isCritical.name.includes("ORION") || isCritical.name.includes("ÓRION")) sourceLabel = "Órion/Recuperação"; addStudentObservation(student, valStr, { ...observationContext, source: sourceLabel, kind: "observation" }); }
-                                } else { if(isInterestingText(valStr, student.name)) addStudentObservation(student, valStr, { ...observationContext, kind: "observation" }); }
+                                } else { addStudentObservation(student, valStr, { ...observationContext, kind: "observation" }); }
                             });
                             if (sheet['!ref']) {
                                 row.forEach((_, colIdx) => {
@@ -4609,6 +4705,7 @@
             const grouped = new Map();
             data.students.forEach(student => {
                 (student.all_observations || []).forEach(observation => {
+                    if (observation.fromObservationField !== true) return;
                     const responsibleValue = data.sheetInstructors && (data.sheetInstructors[observation.sheet] || data.sheetInstructors[observation.uc]);
                     const responsibleInstructors = Array.isArray(responsibleValue)
                         ? responsibleValue.map(canonicalizeInstructorName).filter(isValidInstructorName)
@@ -5604,7 +5701,7 @@
                             const record = records[normalizeName(student.name)];
                             if (!record || record.status !== "com_documentacao" || student.is_dropout) return student;
                             changed = true;
-                            return { ...student, is_dropout: true, is_process_dropout: false, status: "Evadido/Desligado", dropout_reason: "Documentação de desligamento confirmada" };
+                            return { ...student, is_dropout: true, is_process_dropout: false, status: "Evadido/Desligado", dropout_reason: `Documentação de desligamento confirmada (${record.source === "rede" ? "rede" : "confirmação manual no sistema"})${record.folderName ? " — Pasta: " + record.folderName : ""}` };
                         });
                         return changed ? { ...previous, students } : previous;
                     });
@@ -5692,6 +5789,7 @@
 
             const applyProcessedFrequency = async (processed, source = {}, file = null, trigger = "frequência") => {
                 if (!processed) return;
+                processed = mergeRetainedStudentData(processed, data, readStudentContactsLocal(processed.turma));
                 setData(processed);
                 setActivityTracking(null);
                 setReportSelection([]);
@@ -5714,6 +5812,7 @@
                     if (isElectronDesktop()) setFrequencySourceRevision(value => value + 1);
                 }
                 const saved = await persistSavedClass(processed, source);
+                setData({ ...processed });
                 setActiveClassUpdatedAt(saved.summary && saved.summary.updatedAt || new Date().toISOString());
                 const observationMessage = observationSync.created > 0 ? ` ${observationSync.created} observação(ões) enviada(s) aos cadernos responsáveis.` : "";
                 setClassSyncMessage((saved.source === "cloud" ? `Turma ${processed.turma} salva e sincronizada.` : `Turma ${processed.turma} salva somente neste dispositivo.`) + observationMessage);
@@ -6158,6 +6257,7 @@
                     const current = student.is_process_dropout;
                     const newValue = !current;
                     student.is_process_dropout = newValue;
+                    student.dropout_reason = newValue ? "Marcação manual no sistema: Em Processo de Desligamento." : "";
                     if(newValue) { student.status = "Em Processo de Desligamento"; } else { if (student.needs_recuperacao) student.status = "Não Desenvolveu"; else if (student.needs_conselho) student.status = "Conselho de Classe"; else student.status = "Desenvolveu"; }
                     const newData = { ...data, students: data.students.map(item => item.id === studentId ? student : item) };
                     setData(newData);
@@ -6200,8 +6300,8 @@
                     is_process_dropout: false,
                     status: "Evadido/Desligado",
                     dropout_reason: detection.source === "rede"
-                        ? "Documentação localizada na rede"
-                        : "Documentação de desligamento confirmada"
+                        ? `Documentação localizada na rede${detection.folderName ? " — Pasta: " + detection.folderName : ""}`
+                        : "Documentação de desligamento confirmada manualmente no sistema"
                 };
                 const updatedData = { ...data, students: data.students.map(item => item.id === student.id ? updatedStudent : item) };
                 setData(updatedData);
@@ -6292,7 +6392,8 @@
                         ...data,
                         students: data.students.map(student => {
                             if (!detectedByName.has(normalizeName(student.name))) return student;
-                            return { ...student, is_dropout: true, is_process_dropout: false, status: "Evadido/Desligado", dropout_reason: "Documentação localizada na rede" };
+                            const detection = detectedByName.get(normalizeName(student.name));
+                            return { ...student, is_dropout: true, is_process_dropout: false, status: "Evadido/Desligado", dropout_reason: `Documentação localizada na rede${detection.folderName ? " — Pasta: " + detection.folderName : ""}` };
                         })
                     };
                     setData(updatedData);
@@ -6474,6 +6575,7 @@
 
                                     <StudentRecoveryManager data={data} student={selectedStudentForModal} records={classRecoveries} storageSource={recoveryStorageSource} onSaved={handleRecoverySaved} />
 
+                                    {(selectedStudentForModal.is_process_dropout || selectedStudentForModal.is_dropout) && <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950"><strong>Por que está nesta aba?</strong><p className="mt-1 whitespace-pre-wrap break-words">{selectedStudentForModal.dropout_reason || "Origem não registrada nesta versão antiga. Atualize a chamada para identificar a origem."}</p></div>}
                                     {(selectedStudentForModal.is_process_dropout || selectedDropoutDocument) && (
                                         <div className="mb-6 overflow-hidden rounded-xl border border-purple-200 bg-purple-50">
                                             <div className="flex flex-wrap items-center justify-between gap-2 border-b border-purple-200 bg-purple-100 px-4 py-2">
@@ -6847,6 +6949,7 @@
                                                     <span className="text-red-600">Abrir para justificar</span>
                                                 </div>
                                             )}
+                                            {(isProcess || isDropout) && <div className="mt-2 border-t border-amber-100 pt-2 text-xs text-amber-900 whitespace-pre-wrap break-words"><strong>Origem da situação: </strong>{student.dropout_reason || "Atualize a chamada para identificar a origem."}</div>}
                                             {studentNotebookNotes.length > 0 && <div className="mt-2 pt-2 border-t border-orange-100 flex items-center justify-between gap-2 text-[10px] font-bold"><span className="bg-orange-100 text-orange-700 px-2 py-1 rounded">Caderno: {studentNotebookNotes.length} registro(s)</span><span className="text-orange-700">Abrir quadro</span></div>}
                                             {(isProcess || dropoutDocumentRecord) && <div className="mt-2 flex items-center justify-between gap-2 border-t border-purple-100 pt-2 text-[10px] font-bold"><span className={`rounded border px-2 py-1 ${dropoutDocumentMeta.className}`}>{dropoutDocumentMeta.label}</span><span className="text-purple-700">Acompanhar documentos</span></div>}
                                             <div className="flex items-center gap-2 text-[11px] text-gray-500 mt-3 pt-2 border-t border-gray-50"><IconCalendar className="w-3 h-3 text-gray-400" /><span>Contra Turno: <span className={`font-semibold ${student.contra_turno_desc !== "Sem Contra Turno" ? 'text-senac-blue' : 'text-gray-400'}`}>{student.contra_turno_desc}</span></span></div>
