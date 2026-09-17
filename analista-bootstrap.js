@@ -281,6 +281,7 @@
         });
         const instructorNoteData = instructorNotes.docs.map(doc => {
             const note = doc.data() || {};
+            if (note.dismissed === true) return null;
             if (!String(note.responsibleAnalyst || "").trim()) return null;
             return {
                 id: `instructor-${doc.id}`,
